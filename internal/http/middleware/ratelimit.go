@@ -26,6 +26,16 @@ type RateLimitConfig struct {
 	Burst    int
 }
 
+// RateLimiter is the limiter behavior the auth middleware depends on. Both the
+// in-memory IPRateLimiter and the Redis-backed RedisRateLimiter satisfy it, so
+// a deployment can choose per-instance or shared rate limiting.
+type RateLimiter interface {
+	// Allow reports whether a request from remoteAddr may proceed.
+	Allow(remoteAddr string) bool
+	// RetryAfterSeconds returns the Retry-After value for a limited request.
+	RetryAfterSeconds() int
+}
+
 type rateLimitClient struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
@@ -114,7 +124,7 @@ func (l *IPRateLimiter) pruneLocked(now time.Time) {
 }
 
 // AuthRateLimit returns a Huma operation middleware for auth-sensitive routes.
-func AuthRateLimit(limiter *IPRateLimiter) func(ctx huma.Context, next func(huma.Context)) {
+func AuthRateLimit(limiter RateLimiter) func(ctx huma.Context, next func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
 		if limiter == nil || limiter.Allow(ctx.RemoteAddr()) {
 			next(ctx)

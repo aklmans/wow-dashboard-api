@@ -176,7 +176,7 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 | `POST` | `/api/auth/resend-verification` | Re-send the email-verification link for the bearer-token user |
 | `GET` | `/api/auth/me` | Return `{ "user": ... }` — including the caller's `roles`, effective `permissions`, and `emailVerified` — for `Authorization: Bearer <accessToken>` |
 
-`sign-up` and `sign-in` are protected by an in-memory, per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header.
+`sign-up` and `sign-in` are protected by a per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header. The limiter is in-memory and per-instance by default; set `REDIS_URL` (e.g. `redis://localhost:6379/0`) to share the limit across instances via a Redis fixed-window counter. The Redis limiter fails open — if Redis is unreachable, requests are allowed rather than blocked.
 
 Sign-in additionally enforces a per-account lockout: after 10 consecutive failed attempts an account is locked for 15 minutes (self-healing — the lock simply expires). A locked account returns the same generic invalid-credentials error so the lock state cannot be probed; a successful sign-in clears the counter.
 

@@ -17,5 +17,19 @@ services:
     volumes:
       - wow-dashboard-api-postgres-data:/var/lib/postgresql/data
 
+  # Optional: shared store for distributed auth rate limiting. Set
+  # REDIS_URL=redis://localhost:6379/0 to use it; without REDIS_URL the API
+  # falls back to the per-instance in-memory limiter.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 3s
+
 volumes:
   wow-dashboard-api-postgres-data:

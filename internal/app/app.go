@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/redis/go-redis/v9"
 
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/token"
@@ -144,12 +146,34 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	projectsSvc := projectservice.NewService(projectsrepo.NewProjectStore(queries),
 		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)))
 	systemEventsSvc := systemeventsservice.NewService(systemeventsrepo.NewEventStore(queries))
-	authRateLimiter := httpmiddleware.NewIPRateLimiter(httpmiddleware.RateLimitConfig{
+	rateLimitConfig := httpmiddleware.RateLimitConfig{
 		Enabled:  cfg.AuthRateLimitEnabled,
 		Requests: cfg.AuthRateLimitRequests,
 		Window:   cfg.AuthRateLimitWindow(),
 		Burst:    cfg.AuthRateLimitBurst,
-	})
+	}
+	var authRateLimiter httpmiddleware.RateLimiter
+	if cfg.RedisURL != "" {
+		redisOpts, err := redis.ParseURL(cfg.RedisURL)
+		if err != nil {
+			return fmt.Errorf("parse REDIS_URL: %w", err)
+		}
+		redisClient := redis.NewClient(redisOpts)
+		defer func() {
+			if err := redisClient.Close(); err != nil {
+				logger.Error("Redis client close failed", "error", err)
+			}
+		}()
+		pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+		if err := redisClient.Ping(pingCtx).Err(); err != nil {
+			logger.Warn("Redis ping failed; the rate limiter will fail open until Redis recovers", "error", err)
+		}
+		cancelPing()
+		authRateLimiter = httpmiddleware.NewRedisRateLimiter(redisClient, rateLimitConfig)
+		logger.Info("Auth rate limiting backed by Redis")
+	} else {
+		authRateLimiter = httpmiddleware.NewIPRateLimiter(rateLimitConfig)
+	}
 
 	// Wire application routes
 	RegisterRoutes(api, Dependencies{
