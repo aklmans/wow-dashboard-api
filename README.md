@@ -173,6 +173,8 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 
 `sign-up` and `sign-in` are protected by an in-memory, per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header.
 
+Sign-in additionally enforces a per-account lockout: after 10 consecutive failed attempts an account is locked for 15 minutes (self-healing — the lock simply expires). A locked account returns the same generic invalid-credentials error so the lock state cannot be probed; a successful sign-in clears the counter.
+
 Auth sign-up/sign-in success and failure events are written to the `system_events` table using stable event types:
 
 | Event Type | Description |

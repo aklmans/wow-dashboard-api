@@ -18,6 +18,7 @@ const (
 	AuditReasonEmailAlreadyExists = "email_already_exists"
 	AuditReasonInvalidCredentials = "invalid_credentials"
 	AuditReasonUserDisabled       = "user_disabled"
+	AuditReasonAccountLocked      = "account_locked"
 	AuditReasonInternalError      = "internal_error"
 )
 

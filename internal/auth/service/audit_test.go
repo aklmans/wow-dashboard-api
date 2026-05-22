@@ -284,6 +284,14 @@ func (f *fakeUserStore) GetUserPermissions(ctx context.Context, userID uuid.UUID
 	return f.permissions, nil
 }
 
+func (f *fakeUserStore) RegisterLoginFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockUntil time.Time, now time.Time) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeUserStore) ClearLoginFailures(ctx context.Context, userID uuid.UUID, now time.Time) error {
+	return nil
+}
+
 type fakeTokenManager struct {
 	issuedToken string
 	issueErr    error

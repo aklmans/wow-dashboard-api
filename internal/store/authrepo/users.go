@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/aklmans/wow-dashboard-api/internal/auth/domain"
 	"github.com/aklmans/wow-dashboard-api/internal/store/query"
@@ -118,4 +119,32 @@ func (s *UserStore) GetUserPermissions(ctx context.Context, userID uuid.UUID) ([
 		return nil, mapStoreError(err)
 	}
 	return perms, nil
+}
+
+// RegisterLoginFailure records a failed sign-in for the user. When the running
+// failure count reaches maxAttempts the counter resets and the account is
+// locked until lockUntil. It reports whether the account is now locked.
+func (s *UserStore) RegisterLoginFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockUntil time.Time, now time.Time) (bool, error) {
+	locked, err := s.queries.RegisterLoginFailure(ctx, query.RegisterLoginFailureParams{
+		ID:          pgUUID(userID),
+		MaxAttempts: int32(maxAttempts),
+		LockedUntil: pgTimestamp(lockUntil),
+		UpdatedAt:   pgTimestamp(now),
+	})
+	if err != nil {
+		return false, mapStoreError(err)
+	}
+	return locked.Valid && locked.Time.After(now), nil
+}
+
+// ClearLoginFailures resets a user's failure counter and lock after a
+// successful sign-in.
+func (s *UserStore) ClearLoginFailures(ctx context.Context, userID uuid.UUID, now time.Time) error {
+	if err := s.queries.ClearLoginFailures(ctx, query.ClearLoginFailuresParams{
+		ID:        pgUUID(userID),
+		UpdatedAt: pgTimestamp(now),
+	}); err != nil {
+		return mapStoreError(err)
+	}
+	return nil
 }

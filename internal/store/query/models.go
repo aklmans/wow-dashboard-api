@@ -61,13 +61,15 @@ type SystemEvent struct {
 }
 
 type User struct {
-	ID           pgtype.UUID
-	Email        string
-	DisplayName  string
-	PasswordHash string
-	Status       string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+	ID               pgtype.UUID
+	Email            string
+	DisplayName      string
+	PasswordHash     string
+	Status           string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	FailedLoginCount int32
+	LockedUntil      pgtype.Timestamptz
 }
 
 type UserRole struct {

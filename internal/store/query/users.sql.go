@@ -11,6 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearLoginFailures = `-- name: ClearLoginFailures :exec
+UPDATE users
+SET failed_login_count = 0, locked_until = NULL, updated_at = $1
+WHERE id = $2
+`
+
+type ClearLoginFailuresParams struct {
+	UpdatedAt pgtype.Timestamptz
+	ID        pgtype.UUID
+}
+
+// Clears the failure counter and any lock after a successful sign-in.
+func (q *Queries) ClearLoginFailures(ctx context.Context, arg ClearLoginFailuresParams) error {
+	_, err := q.db.Exec(ctx, clearLoginFailures, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, display_name, password_hash, status, created_at, updated_at)
 VALUES ($1, lower($2), $3, $4, $5, $6, $7)
@@ -88,7 +105,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 }
 
 const getUserByEmailForAuth = `-- name: GetUserByEmailForAuth :one
-SELECT id, email, display_name, password_hash, status, created_at, updated_at
+SELECT id, email, display_name, password_hash, status, created_at, updated_at,
+       failed_login_count, locked_until
 FROM users
 WHERE email = lower($1)
 `
@@ -104,6 +122,8 @@ func (q *Queries) GetUserByEmailForAuth(ctx context.Context, email string) (User
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
 	)
 	return i, err
 }
@@ -183,6 +203,42 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 		return nil, err
 	}
 	return items, nil
+}
+
+const registerLoginFailure = `-- name: RegisterLoginFailure :one
+UPDATE users
+SET failed_login_count = CASE
+        WHEN failed_login_count + 1 >= $1::int THEN 0
+        ELSE failed_login_count + 1
+    END,
+    locked_until = CASE
+        WHEN failed_login_count + 1 >= $1::int THEN $2::timestamptz
+        ELSE locked_until
+    END,
+    updated_at = $3
+WHERE id = $4
+RETURNING locked_until
+`
+
+type RegisterLoginFailureParams struct {
+	MaxAttempts int32
+	LockedUntil pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	ID          pgtype.UUID
+}
+
+// Records a failed sign-in. On reaching @max_attempts the counter resets and
+// the account is locked until @locked_until; returns the resulting lock time.
+func (q *Queries) RegisterLoginFailure(ctx context.Context, arg RegisterLoginFailureParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, registerLoginFailure,
+		arg.MaxAttempts,
+		arg.LockedUntil,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var locked_until pgtype.Timestamptz
+	err := row.Scan(&locked_until)
+	return locked_until, err
 }
 
 const updateUserStatus = `-- name: UpdateUserStatus :one

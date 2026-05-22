@@ -128,6 +128,29 @@ func TestUserStoreIntegration(t *testing.T) {
 	if err != nil || len(perms) != 1 || perms[0] != "*" {
 		t.Fatalf("GetUserPermissions = %v, %v; want [*]", perms, err)
 	}
+
+	// Login lockout: failures below the threshold do not lock; reaching it
+	// does; a successful sign-in clears the state.
+	lockUntil := now.Add(15 * time.Minute)
+	for i := 1; i <= 2; i++ {
+		locked, err := repo.RegisterLoginFailure(ctx, userID, 3, lockUntil, now)
+		if err != nil {
+			t.Fatalf("RegisterLoginFailure #%d failed: %v", i, err)
+		}
+		if locked {
+			t.Fatalf("RegisterLoginFailure #%d reported locked before the threshold", i)
+		}
+	}
+	locked, err := repo.RegisterLoginFailure(ctx, userID, 3, lockUntil, now)
+	if err != nil {
+		t.Fatalf("RegisterLoginFailure at threshold failed: %v", err)
+	}
+	if !locked {
+		t.Fatal("RegisterLoginFailure at the threshold should report the account locked")
+	}
+	if err := repo.ClearLoginFailures(ctx, userID, now); err != nil {
+		t.Fatalf("ClearLoginFailures failed: %v", err)
+	}
 }
 
 func newAuthRepoTestQueries(t *testing.T, ctx context.Context, database string) *query.Queries {

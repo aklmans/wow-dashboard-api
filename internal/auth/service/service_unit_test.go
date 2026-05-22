@@ -237,6 +237,9 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 		if !errors.Is(err, service.ErrInvalidCredentials) {
 			t.Fatalf("SignIn error = %v, want ErrInvalidCredentials", err)
 		}
+		if store.registerFailureCalls != 1 {
+			t.Fatalf("registerFailureCalls = %d, want 1 after a wrong password", store.registerFailureCalls)
+		}
 	})
 
 	t.Run("disabled user returns generic invalid credentials", func(t *testing.T) {
@@ -253,6 +256,43 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 		})
 		if !errors.Is(err, service.ErrInvalidCredentials) {
 			t.Fatalf("SignIn error = %v, want ErrInvalidCredentials", err)
+		}
+	})
+
+	t.Run("locked account is rejected without registering a new failure", func(t *testing.T) {
+		authUser := testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password")
+		lockedUntil := time.Now().Add(10 * time.Minute)
+		authUser.LockedUntil = &lockedUntil
+		store := &unitUserStore{authUser: authUser}
+		authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"})
+
+		// Even the correct password is rejected while the account is locked.
+		_, err := authSvc.SignIn(context.Background(), service.SignInInput{
+			Email:    "demo@example.com",
+			Password: "correct-password",
+		})
+		if !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Fatalf("SignIn error = %v, want ErrInvalidCredentials", err)
+		}
+		if store.registerFailureCalls != 0 {
+			t.Fatalf("registerFailureCalls = %d, want 0 for an already-locked account", store.registerFailureCalls)
+		}
+	})
+
+	t.Run("successful sign-in clears accumulated failures", func(t *testing.T) {
+		authUser := testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password")
+		authUser.FailedLoginCount = 3
+		store := &unitUserStore{authUser: authUser}
+		authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"})
+
+		if _, err := authSvc.SignIn(context.Background(), service.SignInInput{
+			Email:    "demo@example.com",
+			Password: "correct-password",
+		}); err != nil {
+			t.Fatalf("SignIn returned error: %v", err)
+		}
+		if store.clearFailuresCalls != 1 {
+			t.Fatalf("clearFailuresCalls = %d, want 1", store.clearFailuresCalls)
 		}
 	})
 }
@@ -499,6 +539,10 @@ type unitUserStore struct {
 	roles           []string
 	permissions     []string
 	addedRoles      []uuid.UUID
+
+	registerFailureCalls int
+	registerLockedResult bool
+	clearFailuresCalls   int
 }
 
 func (s *unitUserStore) CreateUser(ctx context.Context, input domain.CreateUserInput) (domain.User, error) {
@@ -548,6 +592,16 @@ func (s *unitUserStore) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]s
 
 func (s *unitUserStore) GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error) {
 	return s.permissions, nil
+}
+
+func (s *unitUserStore) RegisterLoginFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockUntil time.Time, now time.Time) (bool, error) {
+	s.registerFailureCalls++
+	return s.registerLockedResult, nil
+}
+
+func (s *unitUserStore) ClearLoginFailures(ctx context.Context, userID uuid.UUID, now time.Time) error {
+	s.clearFailuresCalls++
+	return nil
 }
 
 type unitRefreshTokenStore struct {

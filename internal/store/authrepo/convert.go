@@ -116,7 +116,9 @@ func authUserFromRow(row query.User) (domain.AuthUser, error) {
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
 		},
-		PasswordHash: row.PasswordHash,
+		PasswordHash:     row.PasswordHash,
+		FailedLoginCount: int(row.FailedLoginCount),
+		LockedUntil:      nullableDomainTimestamp(row.LockedUntil),
 	}, nil
 }
 

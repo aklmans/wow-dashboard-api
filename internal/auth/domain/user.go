@@ -27,6 +27,10 @@ type User struct {
 type AuthUser struct {
 	User
 	PasswordHash string
+	// FailedLoginCount is the running count of consecutive failed sign-ins.
+	FailedLoginCount int
+	// LockedUntil, when set and in the future, means sign-in is locked.
+	LockedUntil *time.Time
 }
 
 type CreateUserInput struct {

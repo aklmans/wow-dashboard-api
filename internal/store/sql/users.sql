@@ -24,7 +24,8 @@ FROM users
 WHERE email = lower(@email);
 
 -- name: GetUserByEmailForAuth :one
-SELECT id, email, display_name, password_hash, status, created_at, updated_at
+SELECT id, email, display_name, password_hash, status, created_at, updated_at,
+       failed_login_count, locked_until
 FROM users
 WHERE email = lower(@email);
 
@@ -39,3 +40,25 @@ UPDATE users
 SET status = @status, updated_at = @updated_at
 WHERE id = @id
 RETURNING id, email, display_name, status, created_at, updated_at;
+
+-- name: RegisterLoginFailure :one
+-- Records a failed sign-in. On reaching @max_attempts the counter resets and
+-- the account is locked until @locked_until; returns the resulting lock time.
+UPDATE users
+SET failed_login_count = CASE
+        WHEN failed_login_count + 1 >= @max_attempts::int THEN 0
+        ELSE failed_login_count + 1
+    END,
+    locked_until = CASE
+        WHEN failed_login_count + 1 >= @max_attempts::int THEN @locked_until::timestamptz
+        ELSE locked_until
+    END,
+    updated_at = @updated_at
+WHERE id = @id
+RETURNING locked_until;
+
+-- name: ClearLoginFailures :exec
+-- Clears the failure counter and any lock after a successful sign-in.
+UPDATE users
+SET failed_login_count = 0, locked_until = NULL, updated_at = @updated_at
+WHERE id = @id;

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/mail"
 	"strings"
 	"time"
@@ -37,6 +38,12 @@ const (
 	// input size, so an unbounded password is a CPU/memory DoS vector; the cap
 	// is enforced on both sign-up and sign-in before any hashing work.
 	maxPasswordLength = 4096
+	// maxFailedLoginAttempts is the number of consecutive failed sign-ins that
+	// locks an account. It is per-account, complementing the per-IP limiter.
+	maxFailedLoginAttempts = 10
+	// accountLockoutWindow is how long an account stays locked after reaching
+	// the failure threshold. The lock is self-healing — it simply expires.
+	accountLockoutWindow = 15 * time.Minute
 )
 
 // defaultRoleName is the role assigned to every newly registered user.
@@ -86,6 +93,8 @@ type UserStore interface {
 	AddUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error
 	GetUserRoles(ctx context.Context, userID uuid.UUID) ([]string, error)
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
+	RegisterLoginFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockUntil time.Time, now time.Time) (bool, error)
+	ClearLoginFailures(ctx context.Context, userID uuid.UUID, now time.Time) error
 }
 
 // RefreshTokenStore defines the persistence port for opaque refresh tokens.
@@ -351,6 +360,7 @@ func (s *Service) signUpWithUnitOfWork(ctx context.Context, input domain.CreateU
 func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, error) {
 	// Normalize email
 	email := strings.ToLower(strings.TrimSpace(input.Email))
+	now := s.now().UTC().Truncate(time.Microsecond)
 
 	// Reject over-long passwords before any store lookup or hashing work so an
 	// oversized input cannot drive an Argon2id CPU/memory DoS.
@@ -374,6 +384,15 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 
 	userIDStr := user.ID.String()
 
+	// A locked account is rejected with the same generic error as bad
+	// credentials so the lock state cannot be probed; the dummy verify keeps
+	// the response time comparable to a genuine verification.
+	if user.LockedUntil != nil && user.LockedUntil.After(now) {
+		_ = dummyVerify(input.Password)
+		s.recordSignInFailed(ctx, AuditMetadata{Email: email, UserID: userIDStr, Reason: AuditReasonAccountLocked})
+		return nil, ErrInvalidCredentials
+	}
+
 	// Verify hashed password
 	match, err := password.Verify(input.Password, user.PasswordHash)
 	if err != nil {
@@ -385,10 +404,19 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		return nil, fmt.Errorf("auth: failed to verify password: %w", err)
 	}
 	if !match {
+		// Count the failure; the store locks the account once the threshold is
+		// reached. A failure-counter error must not change the (already
+		// failed) sign-in outcome, so it only influences the audit reason.
+		reason := AuditReasonInvalidCredentials
+		if locked, ferr := s.store.RegisterLoginFailure(ctx, user.ID, maxFailedLoginAttempts, now.Add(accountLockoutWindow), now); ferr != nil {
+			slog.ErrorContext(ctx, "failed to record login failure", "error", ferr)
+		} else if locked {
+			reason = AuditReasonAccountLocked
+		}
 		s.recordSignInFailed(ctx, AuditMetadata{
 			Email:  email,
 			UserID: userIDStr,
-			Reason: AuditReasonInvalidCredentials,
+			Reason: reason,
 		})
 		return nil, ErrInvalidCredentials
 	}
@@ -404,6 +432,14 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 			Reason: AuditReasonUserDisabled,
 		})
 		return nil, ErrInvalidCredentials
+	}
+
+	// The credentials are valid: clear any accumulated failure state. This is
+	// best-effort — a clear failure does not invalidate a successful sign-in.
+	if user.FailedLoginCount > 0 || user.LockedUntil != nil {
+		if cerr := s.store.ClearLoginFailures(ctx, user.ID, now); cerr != nil {
+			slog.ErrorContext(ctx, "failed to clear login failures", "error", cerr)
+		}
 	}
 
 	session, err := s.issueSession(ctx, user.User, uuid.Nil)
