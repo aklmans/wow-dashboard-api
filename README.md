@@ -169,7 +169,7 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 | `POST` | `/api/auth/sign-in` | Authenticate credentials, return `{ "user": ..., "accessToken": ... }`, and set the HttpOnly refresh cookie |
 | `POST` | `/api/auth/refresh` | Rotate the refresh cookie and return `{ "user": ..., "accessToken": ... }` |
 | `POST` | `/api/auth/sign-out` | Revoke the current refresh token when present and clear the refresh cookie |
-| `GET` | `/api/auth/me` | Return `{ "user": ... }` for `Authorization: Bearer <accessToken>` |
+| `GET` | `/api/auth/me` | Return `{ "user": ... }` — including the caller's `roles` and effective `permissions` — for `Authorization: Bearer <accessToken>` |
 
 `sign-up` and `sign-in` are protected by an in-memory, per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header.
 
@@ -186,12 +186,30 @@ Audit metadata is a safe JSON object with fields such as `masked_email` (the ema
 
 Local auth endpoint testing requires a PostgreSQL database and `DATABASE_URL` with migrations applied. `cmd/openapi` uses a stub service, so `make openapi` does not require a database connection.
 
-Basic user roles are persisted on the `users` table:
+## Authorization & RBAC
+
+Beyond authentication, access is governed by **role-based access control**. Every user holds one or more **roles**; each role grants a set of **permissions**; a user's effective permissions are the union across all of their roles.
+
+Permissions are a fixed, code-defined catalog (`internal/auth/rbac`) — a permission only carries meaning where a handler enforces it, so the catalog, not the database, is the single source of truth. Each is a `resource:action` string:
+
+| Permission | Grants |
+|------------|--------|
+| `users:read` | List and view users |
+| `users:manage` | Change a user's status or role assignments |
+| `roles:read` | List roles and the assignable-permission catalog |
+| `roles:manage` | Create, update, and delete roles |
+| `system_events:read` | Read the system audit log |
+
+Roles are **dynamic and database-backed** (`roles`, `role_permissions`, and `user_roles` tables): an admin composes custom roles from the catalog through the [Roles endpoints](#roles-endpoints). Two **system roles** are built in and immutable through the API:
 
 | Role | Description |
 |------|-------------|
-| `user` | Default role for normal sign-ups |
-| `admin` | Local demo seed user role |
+| `admin` | Holds the reserved `*` wildcard, which grants every permission — including ones added in future releases |
+| `user` | Default role assigned to new sign-ups; grants no administrative permissions |
+
+Each handler gates itself with a `requirePermission` check; a caller missing the required permission receives `403 forbidden`. `GET /api/auth/me` returns the caller's `roles` and resolved `permissions` so a frontend can render menus and gate actions — but the server always re-checks independently and never trusts the client. Roles and permissions are resolved fresh on every request, so a change takes effect on the user's next call.
+
+RBAC governs **functional** access — which features and menus a user can reach. It is orthogonal to **project sharing** (see [Projects endpoints](#projects-endpoints)), which governs instance-level access to individual projects through `viewer`/`editor` membership. The two mechanisms are independent and composable.
 
 ## Users Endpoints
 
