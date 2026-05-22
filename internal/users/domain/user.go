@@ -52,3 +52,13 @@ type ListUsersResult struct {
 	PageSize int
 	Total    int
 }
+
+// UpdateUserInput is the normalized input for an admin user update. Role and
+// Status are pointers so a nil field leaves the corresponding column
+// unchanged; at least one is non-nil by the time it reaches the store.
+type UpdateUserInput struct {
+	ID        uuid.UUID
+	Role      *UserRole
+	Status    *UserStatus
+	UpdatedAt time.Time
+}

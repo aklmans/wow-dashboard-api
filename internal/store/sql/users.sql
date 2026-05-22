@@ -35,8 +35,10 @@ FROM users
 ORDER BY created_at DESC
 LIMIT @limit_val OFFSET @offset_val;
 
--- name: UpdateUserStatus :one
+-- name: UpdateUser :one
 UPDATE users
-SET status = @status, updated_at = @updated_at
+SET role = COALESCE(sqlc.narg('role'), role),
+    status = COALESCE(sqlc.narg('status'), status),
+    updated_at = @updated_at
 WHERE id = @id
 RETURNING id, email, display_name, status, role, created_at, updated_at;

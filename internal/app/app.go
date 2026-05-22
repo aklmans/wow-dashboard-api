@@ -115,7 +115,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		authservice.WithRefreshTokenStore(refreshTokenStore, cfg.RefreshTokenTTL()),
 		authservice.WithUnitOfWork(unitOfWork),
 		authservice.WithAuditRecorder(auditRecorder))
-	usersSvc := userservice.NewService(usersrepo.NewUserStore(queries))
+	usersSvc := userservice.NewService(usersrepo.NewUserStore(queries),
+		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)))
 	projectsSvc := projectservice.NewService(projectsrepo.NewProjectStore(queries),
 		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)))
 	systemEventsSvc := systemeventsservice.NewService(systemeventsrepo.NewEventStore(queries))

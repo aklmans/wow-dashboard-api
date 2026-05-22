@@ -154,6 +154,7 @@ Event types currently emitted:
 | `projects.project.created` | Project creation succeeded. |
 | `projects.project.updated` | Project update succeeded. |
 | `projects.project.archived` | Project archive succeeded. |
+| `users.user.updated` | An admin changed another user's role or status. |
 
 When adding an `event_type`, update this table and add tests that prove the
 event is emitted only under the intended conditions with safe metadata. Before

@@ -207,20 +207,23 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 	return items, nil
 }
 
-const updateUserStatus = `-- name: UpdateUserStatus :one
+const updateUser = `-- name: UpdateUser :one
 UPDATE users
-SET status = $1, updated_at = $2
-WHERE id = $3
+SET role = COALESCE($1, role),
+    status = COALESCE($2, status),
+    updated_at = $3
+WHERE id = $4
 RETURNING id, email, display_name, status, role, created_at, updated_at
 `
 
-type UpdateUserStatusParams struct {
-	Status    string
+type UpdateUserParams struct {
+	Role      pgtype.Text
+	Status    pgtype.Text
 	UpdatedAt pgtype.Timestamptz
 	ID        pgtype.UUID
 }
 
-type UpdateUserStatusRow struct {
+type UpdateUserRow struct {
 	ID          pgtype.UUID
 	Email       string
 	DisplayName string
@@ -230,9 +233,14 @@ type UpdateUserStatusRow struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
-func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (UpdateUserStatusRow, error) {
-	row := q.db.QueryRow(ctx, updateUserStatus, arg.Status, arg.UpdatedAt, arg.ID)
-	var i UpdateUserStatusRow
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateUserRow, error) {
+	row := q.db.QueryRow(ctx, updateUser,
+		arg.Role,
+		arg.Status,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	var i UpdateUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,

@@ -333,50 +333,59 @@ func TestUsersIntegration(t *testing.T) {
 	})
 
 	// --- UpdateUserStatus (public projection) ---
-	t.Run("UpdateUserStatus", func(t *testing.T) {
-		// Get alice's ID
+	t.Run("UpdateUser", func(t *testing.T) {
 		alice, err := queries.GetUserByEmail(ctx, "alice@example.com")
 		if err != nil {
 			t.Fatalf("GetUserByEmail failed: %v", err)
 		}
 
-		// Disable the user — UpdateUserStatusRow is public, no PasswordHash.
-		updated, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
+		// Status-only update: role is omitted (NULL) so COALESCE keeps it.
+		updated, err := queries.UpdateUser(ctx, query.UpdateUserParams{
 			ID:        alice.ID,
-			Status:    "disabled",
+			Status:    pgtype.Text{String: "disabled", Valid: true},
 			UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 		})
 		if err != nil {
-			t.Fatalf("UpdateUserStatus failed: %v", err)
+			t.Fatalf("UpdateUser (disable) failed: %v", err)
 		}
-
 		if updated.Status != "disabled" {
 			t.Errorf("expected status 'disabled', got %q", updated.Status)
 		}
 		if updated.Role != "admin" {
-			t.Errorf("expected role 'admin', got %q", updated.Role)
+			t.Errorf("expected role to stay 'admin' on a status-only update, got %q", updated.Role)
 		}
-
-		// Verify updated_at was refreshed
 		if !updated.UpdatedAt.Time.After(alice.UpdatedAt.Time) {
-			t.Error("expected updated_at to be refreshed after status update")
+			t.Error("expected updated_at to be refreshed after the update")
 		}
 
-		// Re-enable the user
-		reEnabled, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
+		// Role-only update: status is omitted (NULL) so COALESCE keeps it.
+		demoted, err := queries.UpdateUser(ctx, query.UpdateUserParams{
 			ID:        alice.ID,
-			Status:    "active",
+			Role:      pgtype.Text{String: "user", Valid: true},
 			UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 		})
 		if err != nil {
-			t.Fatalf("UpdateUserStatus (re-enable) failed: %v", err)
+			t.Fatalf("UpdateUser (demote) failed: %v", err)
+		}
+		if demoted.Role != "user" {
+			t.Errorf("expected role 'user', got %q", demoted.Role)
+		}
+		if demoted.Status != "disabled" {
+			t.Errorf("expected status to stay 'disabled' on a role-only update, got %q", demoted.Status)
 		}
 
-		if reEnabled.Status != "active" {
-			t.Errorf("expected status 'active', got %q", reEnabled.Status)
+		// Restore alice to an active admin for any later subtests.
+		restored, err := queries.UpdateUser(ctx, query.UpdateUserParams{
+			ID:        alice.ID,
+			Role:      pgtype.Text{String: "admin", Valid: true},
+			Status:    pgtype.Text{String: "active", Valid: true},
+			UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("UpdateUser (restore) failed: %v", err)
 		}
-		if reEnabled.Role != "admin" {
-			t.Errorf("expected role 'admin', got %q", reEnabled.Role)
+		if restored.Role != "admin" || restored.Status != "active" {
+			t.Errorf("restore = role %q status %q, want admin/active", restored.Role, restored.Status)
 		}
 	})
 

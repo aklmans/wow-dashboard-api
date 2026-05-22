@@ -95,6 +95,10 @@ func (openAPIUsersService) GetUser(context.Context, string) (domain.User, error)
 	return domain.User{}, nil
 }
 
+func (openAPIUsersService) UpdateUser(context.Context, userservice.UpdateUserInput) (domain.User, error) {
+	return domain.User{}, nil
+}
+
 type openAPIProjectsService struct{}
 
 func (openAPIProjectsService) ListProjects(context.Context, projectservice.ListProjectsInput) (projectsdomain.ListProjectsResult, error) {

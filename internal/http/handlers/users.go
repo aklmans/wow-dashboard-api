@@ -21,6 +21,7 @@ type UsersAuthenticator interface {
 type UsersService interface {
 	ListUsers(ctx context.Context, input userservice.ListUsersInput) (domain.ListUsersResult, error)
 	GetUser(ctx context.Context, id string) (domain.User, error)
+	UpdateUser(ctx context.Context, input userservice.UpdateUserInput) (domain.User, error)
 }
 
 type listUsersInput struct {
@@ -56,6 +57,15 @@ type usersListItem struct {
 type getUserInput struct {
 	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
 	ID            string `path:"id" format:"uuid" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User UUID"`
+}
+
+type updateUserInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
+	ID            string `path:"id" format:"uuid" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User UUID"`
+	Body          struct {
+		Role   *string `json:"role,omitempty" enum:"user,admin" example:"admin" doc:"New role; omit to leave unchanged"`
+		Status *string `json:"status,omitempty" enum:"active,disabled" example:"active" doc:"New status; omit to leave unchanged"`
+	}
 }
 
 type userDetailResponse struct {
@@ -149,6 +159,51 @@ func RegisterUsers(api huma.API, authSvc UsersAuthenticator, usersSvc UsersServi
 
 		return userDetailResponseFromDomain(user), nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "patch-user",
+		Method:      http.MethodPatch,
+		Path:        "/api/users/{id}",
+		Summary:     "Update user role or status",
+		Description: "Updates a user's role and/or status. Admin role required. An admin cannot change their own role or status.",
+		Tags:        []string{"Users"},
+		Responses: apiErrorResponses(api,
+			http.StatusBadRequest,
+			http.StatusUnauthorized,
+			http.StatusForbidden,
+			http.StatusNotFound,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *updateUserInput) (*userDetailResponse, error) {
+		rawAccessToken, ok := parseBearerToken(input.Authorization)
+		if !ok {
+			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+		}
+
+		currentUser, err := authSvc.CurrentUser(ctx, rawAccessToken)
+		if err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		if currentUser == nil {
+			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+		}
+		if err := requireAdmin(ctx, currentUser); err != nil {
+			return nil, err
+		}
+
+		user, err := usersSvc.UpdateUser(ctx, userservice.UpdateUserInput{
+			ActorUserID:  currentUser.ID,
+			TargetUserID: input.ID,
+			Role:         input.Body.Role,
+			Status:       input.Body.Status,
+		})
+		if err != nil {
+			return nil, mapUsersError(ctx, err)
+		}
+
+		return userDetailResponseFromDomain(user), nil
+	})
 }
 
 func listUsersResponseFromDomain(result domain.ListUsersResult) *usersListResponse {
@@ -175,8 +230,10 @@ func listUsersResponseFromDomain(result domain.ListUsersResult) *usersListRespon
 
 func mapUsersError(ctx context.Context, err error) huma.StatusError {
 	switch {
+	case errors.Is(err, userservice.ErrSelfModification):
+		return apierror.Forbidden("Administrators cannot change their own role or status.").ForContext(ctx)
 	case errors.Is(err, userservice.ErrInvalidInput):
-		return apierror.ValidationFailed("Invalid users query.").ForContext(ctx)
+		return apierror.ValidationFailed("Invalid users request.").ForContext(ctx)
 	case errors.Is(err, userservice.ErrNotFound):
 		return apierror.NotFound("User not found.").ForContext(ctx)
 	default:

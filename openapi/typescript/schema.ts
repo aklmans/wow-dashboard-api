@@ -213,7 +213,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update user role or status
+         * @description Updates a user's role and/or status. Admin role required. An admin cannot change their own role or status.
+         */
+        patch: operations["patch-user"];
         trace?: never;
     };
     "/healthz": {
@@ -599,6 +603,26 @@ export interface components {
              * @example active
              */
             status?: string;
+        };
+        UpdateUserInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UpdateUserInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description New role; omit to leave unchanged
+             * @example admin
+             * @enum {string}
+             */
+            role?: "user" | "admin";
+            /**
+             * @description New status; omit to leave unchanged
+             * @example active
+             * @enum {string}
+             */
+            status?: "active" | "disabled";
         };
         UserDetailBody: {
             /**
@@ -1116,6 +1140,42 @@ export interface operations {
                     "application/json": components["schemas"]["UserDetailBody"];
                 };
             };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "patch-user": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description User UUID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDetailBody"];
+                };
+            };
+            400: components["responses"]["APIError"];
             401: components["responses"]["APIError"];
             403: components["responses"]["APIError"];
             404: components["responses"]["APIError"];

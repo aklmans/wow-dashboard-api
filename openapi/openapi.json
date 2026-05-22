@@ -689,6 +689,43 @@
         },
         "type": "object"
       },
+      "UpdateUserInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdateUserInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "role": {
+            "description": "New role; omit to leave unchanged",
+            "enum": [
+              "user",
+              "admin"
+            ],
+            "examples": [
+              "admin"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "New status; omit to leave unchanged",
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "examples": [
+              "active"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "UserDetailBody": {
         "additionalProperties": false,
         "properties": {
@@ -1698,6 +1735,82 @@
           }
         },
         "summary": "Get user by id",
+        "tags": [
+          "Users"
+        ]
+      },
+      "patch": {
+        "description": "Updates a user's role and/or status. Admin role required. An admin cannot change their own role or status.",
+        "operationId": "patch-user",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "User UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "User UUID",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDetailBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "404": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update user role or status",
         "tags": [
           "Users"
         ]

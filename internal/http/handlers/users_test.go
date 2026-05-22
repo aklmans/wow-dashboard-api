@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -115,7 +116,7 @@ func TestUsersHandler(t *testing.T) {
 		router.ServeHTTP(rec, req)
 
 		assertAPIError(t, rec, http.StatusUnprocessableEntity, apierror.CodeValidationFailed,
-			"Invalid users query.")
+			"Invalid users request.")
 	})
 
 	t.Run("page size over maximum is rejected at the schema edge", func(t *testing.T) {
@@ -407,12 +408,15 @@ func (f *fakeUsersAuthService) CurrentUser(ctx context.Context, rawAccessToken s
 }
 
 type fakeUsersService struct {
-	input     userservice.ListUsersInput
-	result    domain.ListUsersResult
-	err       error
-	getID     string
-	getResult domain.User
-	getErr    error
+	input        userservice.ListUsersInput
+	result       domain.ListUsersResult
+	err          error
+	getID        string
+	getResult    domain.User
+	getErr       error
+	updateInput  userservice.UpdateUserInput
+	updateResult domain.User
+	updateErr    error
 }
 
 func (f *fakeUsersService) ListUsers(ctx context.Context, input userservice.ListUsersInput) (domain.ListUsersResult, error) {
@@ -429,6 +433,96 @@ func (f *fakeUsersService) GetUser(ctx context.Context, id string) (domain.User,
 		return domain.User{}, f.getErr
 	}
 	return f.getResult, nil
+}
+
+func (f *fakeUsersService) UpdateUser(ctx context.Context, input userservice.UpdateUserInput) (domain.User, error) {
+	f.updateInput = input
+	if f.updateErr != nil {
+		return domain.User{}, f.updateErr
+	}
+	return f.updateResult, nil
+}
+
+func TestUsersUpdateHandler(t *testing.T) {
+	adminUser := &authservice.PublicUser{ID: uuid.New().String(), Status: "active", Role: "admin"}
+	targetID := uuid.New()
+
+	patch := func(t *testing.T, authSvc *fakeUsersAuthService, usersSvc *fakeUsersService, id string, body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		router := newUsersTestRouter(authSvc, usersSvc)
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal body: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPatch, "/api/users/"+id, bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer access-token")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("admin updates role and status", func(t *testing.T) {
+		usersSvc := &fakeUsersService{updateResult: domain.User{
+			ID: targetID, Email: "demo@minimals.cc", DisplayName: "Demo User",
+			Status: domain.UserStatusDisabled, Role: domain.UserRoleAdmin,
+		}}
+		rec := patch(t, &fakeUsersAuthService{currentUser: adminUser}, usersSvc, targetID.String(),
+			map[string]any{"role": "admin", "status": "disabled"})
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if usersSvc.updateInput.TargetUserID != targetID.String() {
+			t.Fatalf("target id = %q, want %q", usersSvc.updateInput.TargetUserID, targetID)
+		}
+		if usersSvc.updateInput.ActorUserID != adminUser.ID {
+			t.Fatalf("actor id = %q, want %q", usersSvc.updateInput.ActorUserID, adminUser.ID)
+		}
+		if usersSvc.updateInput.Role == nil || *usersSvc.updateInput.Role != "admin" {
+			t.Fatalf("role = %v, want admin", usersSvc.updateInput.Role)
+		}
+		if usersSvc.updateInput.Status == nil || *usersSvc.updateInput.Status != "disabled" {
+			t.Fatalf("status = %v, want disabled", usersSvc.updateInput.Status)
+		}
+	})
+
+	t.Run("missing authorization returns 401", func(t *testing.T) {
+		router := newUsersTestRouter(&fakeUsersAuthService{}, &fakeUsersService{})
+		req := httptest.NewRequest(http.MethodPatch, "/api/users/"+targetID.String(), bytes.NewReader([]byte(`{"role":"admin"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized,
+			"Authorization token missing or invalid.")
+	})
+
+	t.Run("non-admin returns 403", func(t *testing.T) {
+		rec := patch(t, &fakeUsersAuthService{currentUser: &authservice.PublicUser{ID: uuid.New().String(), Status: "active", Role: "user"}},
+			&fakeUsersService{}, targetID.String(), map[string]any{"role": "admin"})
+		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden, "Admin role required.")
+	})
+
+	t.Run("self modification returns 403", func(t *testing.T) {
+		usersSvc := &fakeUsersService{updateErr: userservice.ErrSelfModification}
+		rec := patch(t, &fakeUsersAuthService{currentUser: adminUser}, usersSvc, adminUser.ID,
+			map[string]any{"role": "user"})
+		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden,
+			"Administrators cannot change their own role or status.")
+	})
+
+	t.Run("missing user returns 404", func(t *testing.T) {
+		usersSvc := &fakeUsersService{updateErr: userservice.ErrNotFound}
+		rec := patch(t, &fakeUsersAuthService{currentUser: adminUser}, usersSvc, targetID.String(),
+			map[string]any{"status": "disabled"})
+		assertAPIError(t, rec, http.StatusNotFound, apierror.CodeNotFound, "User not found.")
+	})
+
+	t.Run("invalid role rejected at the schema edge", func(t *testing.T) {
+		rec := patch(t, &fakeUsersAuthService{currentUser: adminUser}, &fakeUsersService{}, targetID.String(),
+			map[string]any{"role": "owner"})
+		assertAPIError(t, rec, http.StatusUnprocessableEntity, apierror.CodeValidationFailed, "Invalid request.")
+	})
 }
 
 func newUsersTestRouter(authSvc handlers.UsersAuthenticator, usersSvc handlers.UsersService) chi.Router {

@@ -201,8 +201,11 @@ User management read endpoints live under `/api/users` and require `Authorizatio
 |--------|------|-------------|
 | `GET` | `/api/users` | Return paginated users as `{ "users": [...], "page": 1, "pageSize": 20, "total": 1 }` |
 | `GET` | `/api/users/{id}` | Return a single user as `{ "user": { ... } }`. `404` when no user has the given id; `422` when `{id}` is not a valid UUID |
+| `PATCH` | `/api/users/{id}` | Update a user's `role` and/or `status`. Returns `200` with `{ "user": { ... } }`; `404` when no user has the given id; `422` for invalid bodies; `403` when an admin targets their own account |
 
 `GET /api/users` supports `page` (default `1`), `pageSize` (default `20`, max `100`), `search` (matches `email` or `display_name`), `role` (`admin` or `user`), and `status` (`active` or `disabled`). Responses never include `password_hash`.
+
+`PATCH /api/users/{id}` accepts a partial body with any subset of `role` (`user` or `admin`) and `status` (`active` or `disabled`); at least one field must be provided. An administrator **cannot change their own role or status** — this guarantees the system always retains at least one admin and prevents accidental self-lockout; hand over admin by promoting another user first. Disabling a user takes effect immediately on refresh and within the access-token TTL on bearer requests. A successful update writes a `users.user.updated` system event.
 
 ## Projects Endpoints
 

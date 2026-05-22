@@ -67,6 +67,34 @@ func (s *UserStore) ListUsers(ctx context.Context, input domain.ListUsersInput) 
 	}, nil
 }
 
+// UpdateUser applies an admin role/status update to a user. Nil Role or
+// Status pointers leave the corresponding column unchanged. A missing user
+// surfaces as domain.ErrUserNotFound.
+func (s *UserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error) {
+	if s.queries == nil {
+		return domain.User{}, fmt.Errorf("usersrepo: queries is nil")
+	}
+
+	row, err := s.queries.UpdateUser(ctx, query.UpdateUserParams{
+		ID:        pgUUIDFromDomain(input.ID),
+		Role:      pgRolePtr(input.Role),
+		Status:    pgStatusPtr(input.Status),
+		UpdatedAt: pgTimestamp(input.UpdatedAt),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.User{}, domain.ErrUserNotFound
+		}
+		return domain.User{}, fmt.Errorf("usersrepo: update user: %w", err)
+	}
+
+	user, err := userFromUpdateRow(row)
+	if err != nil {
+		return domain.User{}, fmt.Errorf("usersrepo: convert user: %w", err)
+	}
+	return user, nil
+}
+
 func (s *UserStore) GetUserByID(ctx context.Context, id uuid.UUID) (domain.User, error) {
 	if s.queries == nil {
 		return domain.User{}, fmt.Errorf("usersrepo: queries is nil")

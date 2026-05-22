@@ -173,14 +173,18 @@ func TestServiceGetUserPropagatesNotFound(t *testing.T) {
 }
 
 type fakeUserStore struct {
-	called    bool
-	input     domain.ListUsersInput
-	result    domain.ListUsersResult
-	err       error
-	getCalled bool
-	getID     uuid.UUID
-	getResult domain.User
-	getErr    error
+	called       bool
+	input        domain.ListUsersInput
+	result       domain.ListUsersResult
+	err          error
+	getCalled    bool
+	getID        uuid.UUID
+	getResult    domain.User
+	getErr       error
+	updateCalled bool
+	updateInput  domain.UpdateUserInput
+	updateResult domain.User
+	updateErr    error
 }
 
 func (f *fakeUserStore) ListUsers(ctx context.Context, input domain.ListUsersInput) (domain.ListUsersResult, error) {
@@ -199,4 +203,152 @@ func (f *fakeUserStore) GetUserByID(ctx context.Context, id uuid.UUID) (domain.U
 		return domain.User{}, f.getErr
 	}
 	return f.getResult, nil
+}
+
+func (f *fakeUserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error) {
+	f.updateCalled = true
+	f.updateInput = input
+	if f.updateErr != nil {
+		return domain.User{}, f.updateErr
+	}
+	return f.updateResult, nil
+}
+
+type fakeUserAuditRecorder struct {
+	events []service.AuditEvent
+	err    error
+}
+
+func (f *fakeUserAuditRecorder) RecordUserEvent(ctx context.Context, event service.AuditEvent) error {
+	f.events = append(f.events, event)
+	return f.err
+}
+
+func strptr(s string) *string { return &s }
+
+func TestServiceUpdateUserChangesRoleAndStatus(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID, Role: domain.UserRoleAdmin, Status: domain.UserStatusActive}}
+	audit := &fakeUserAuditRecorder{}
+	svc := service.NewService(store, service.WithAuditRecorder(audit))
+
+	user, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  actorID.String(),
+		TargetUserID: targetID.String(),
+		Role:         strptr("ADMIN"),
+		Status:       strptr("active"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	if store.updateInput.ID != targetID {
+		t.Fatalf("store update ID = %s, want %s", store.updateInput.ID, targetID)
+	}
+	if store.updateInput.Role == nil || *store.updateInput.Role != domain.UserRoleAdmin {
+		t.Fatalf("store update role = %v, want admin (normalized)", store.updateInput.Role)
+	}
+	if store.updateInput.Status == nil || *store.updateInput.Status != domain.UserStatusActive {
+		t.Fatalf("store update status = %v, want active", store.updateInput.Status)
+	}
+	if store.updateInput.UpdatedAt.IsZero() {
+		t.Fatal("store update UpdatedAt was not set")
+	}
+	if user.ID != targetID {
+		t.Fatalf("returned user id = %s, want %s", user.ID, targetID)
+	}
+
+	if len(audit.events) != 1 {
+		t.Fatalf("recorded %d audit events, want 1", len(audit.events))
+	}
+	ev := audit.events[0]
+	if ev.EventType != service.EventUserUpdated {
+		t.Fatalf("audit event type = %q, want %q", ev.EventType, service.EventUserUpdated)
+	}
+	if ev.Metadata.TargetUserID != targetID.String() || ev.Metadata.ActorUserID != actorID.String() {
+		t.Fatalf("audit ids = %s/%s, want target/actor %s/%s", ev.Metadata.TargetUserID, ev.Metadata.ActorUserID, targetID, actorID)
+	}
+	if len(ev.Metadata.ChangedFields) != 2 {
+		t.Fatalf("audit changed_fields = %v, want role and status", ev.Metadata.ChangedFields)
+	}
+}
+
+func TestServiceUpdateUserStatusOnlyLeavesRoleUnchanged(t *testing.T) {
+	store := &fakeUserStore{updateResult: domain.User{ID: uuid.New()}}
+	svc := service.NewService(store)
+
+	_, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  uuid.New().String(),
+		TargetUserID: uuid.New().String(),
+		Status:       strptr("disabled"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	if store.updateInput.Role != nil {
+		t.Fatalf("store update role = %v, want nil (unchanged)", store.updateInput.Role)
+	}
+	if store.updateInput.Status == nil || *store.updateInput.Status != domain.UserStatusDisabled {
+		t.Fatalf("store update status = %v, want disabled", store.updateInput.Status)
+	}
+}
+
+func TestServiceUpdateUserRejectsSelfModification(t *testing.T) {
+	id := uuid.New()
+	store := &fakeUserStore{}
+	svc := service.NewService(store)
+
+	_, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  id.String(),
+		TargetUserID: id.String(),
+		Role:         strptr("user"),
+	})
+	if !errors.Is(err, service.ErrSelfModification) {
+		t.Fatalf("UpdateUser error = %v, want ErrSelfModification", err)
+	}
+	if store.updateCalled {
+		t.Fatal("store was called for a self modification")
+	}
+}
+
+func TestServiceUpdateUserRejectsInvalidInput(t *testing.T) {
+	actor := uuid.New().String()
+	target := uuid.New().String()
+	tests := []struct {
+		name  string
+		input service.UpdateUserInput
+	}{
+		{"no fields provided", service.UpdateUserInput{ActorUserID: actor, TargetUserID: target}},
+		{"invalid role", service.UpdateUserInput{ActorUserID: actor, TargetUserID: target, Role: strptr("owner")}},
+		{"empty role", service.UpdateUserInput{ActorUserID: actor, TargetUserID: target, Role: strptr("")}},
+		{"invalid status", service.UpdateUserInput{ActorUserID: actor, TargetUserID: target, Status: strptr("pending")}},
+		{"invalid target id", service.UpdateUserInput{ActorUserID: actor, TargetUserID: "not-a-uuid", Role: strptr("user")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeUserStore{}
+			svc := service.NewService(store)
+			_, err := svc.UpdateUser(context.Background(), tt.input)
+			if !errors.Is(err, service.ErrInvalidInput) {
+				t.Fatalf("UpdateUser error = %v, want ErrInvalidInput", err)
+			}
+			if store.updateCalled {
+				t.Fatal("store was called for invalid input")
+			}
+		})
+	}
+}
+
+func TestServiceUpdateUserPropagatesNotFound(t *testing.T) {
+	store := &fakeUserStore{updateErr: domain.ErrUserNotFound}
+	svc := service.NewService(store)
+
+	_, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  uuid.New().String(),
+		TargetUserID: uuid.New().String(),
+		Status:       strptr("disabled"),
+	})
+	if !errors.Is(err, service.ErrNotFound) {
+		t.Fatalf("UpdateUser error = %v, want service.ErrNotFound", err)
+	}
 }
