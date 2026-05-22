@@ -141,45 +141,23 @@ All audit metadata must be safe for long-term storage and admin viewing.
 - Do not store raw internal errors, SQL messages, stack traces, DSNs, or config
   values.
 
-## Recommended Event Taxonomy
+## Event Taxonomy
 
-Existing event types:
+Event types currently emitted:
 
-| Event Type | Status | Notes |
-|------------|--------|-------|
-| `auth.sign_up.succeeded` | Existing | Account registration succeeded. |
-| `auth.sign_up.failed` | Existing | Account registration failed; keep metadata minimal and safe. |
-| `auth.sign_in.succeeded` | Existing | Credential authentication succeeded. |
-| `auth.sign_in.failed` | Existing | Credential authentication failed. |
-| `projects.project.created` | Existing | Project creation succeeded. |
-| `projects.project.updated` | Existing | Project update succeeded. |
-| `projects.project.archived` | Existing | Project archive succeeded. |
+| Event Type | Notes |
+|------------|-------|
+| `auth.sign_up.succeeded` | Account registration succeeded. |
+| `auth.sign_up.failed` | Account registration failed; keep metadata minimal and safe. |
+| `auth.sign_in.succeeded` | Credential authentication succeeded. |
+| `auth.sign_in.failed` | Credential authentication failed. |
+| `projects.project.created` | Project creation succeeded. |
+| `projects.project.updated` | Project update succeeded. |
+| `projects.project.archived` | Project archive succeeded. |
 
-Future recommended event types:
-
-| Event Type | Status | Notes |
-|------------|--------|-------|
-| `auth.refresh.replay_detected` | Future | High-value refresh replay signal. |
-| `auth.permission.denied` | Future | Admin or role permission denied outside a resource-specific taxonomy. |
-| `projects.project.conflict` | Future | Low-frequency project mutation conflict such as duplicate owner-scoped name. |
-| `projects.project.permission_denied` | Future | Project role/admin authorization failure if such roles are introduced. |
-| `projects.project.suspicious_not_found_probe` | Future | Threshold-triggered owner-scoped `404` probing signal. |
-| `system.audit.read` | Future | Optional admin audit-read event if reading audit data itself becomes auditable. |
-
-When adding an `event_type`, update this taxonomy and add tests that prove the
-event is emitted only under the intended conditions with safe metadata.
-
-## Future Implementation Order
-
-1. Define a trusted request context policy for IP and User-Agent before storing
-   either in audit metadata.
-2. Add high-value auth failures first, such as refresh replay and permission
-   denied.
-3. Add project `409` conflict audit only after safe reason categories and
-   metadata are agreed.
-4. Add sampling, aggregation, or threshold-triggered audit for repeated probing
-   only after rate-limit and metrics behavior are clear.
-5. Avoid broad handler-level instrumentation that records every returned error.
+When adding an `event_type`, update this table and add tests that prove the
+event is emitted only under the intended conditions with safe metadata. Before
+storing `ip` or `user_agent`, define a trusted-source policy for those values.
 
 ## Agent Execution Rules
 

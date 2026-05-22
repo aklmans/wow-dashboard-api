@@ -1,261 +1,121 @@
-# Frontend Starter Integration Guide
+# Frontend Integration Guide
 
-This guide is for the next Agent wiring the wow-dashboard or Vite starter to this Go API. Do not modify the frontend repositories from this backend task. Use this document as the handoff contract for frontend work.
+How to wire the wow-dashboard or Vite starter frontend to this Go API. This
+covers the integration *mechanics*; the per-endpoint contract lives in the
+generated artifacts, not here.
 
-## Scope
+## Contract Source
 
-This backend currently exposes:
+The backend commits two frontend-facing contract artifacts — treat them as the
+single source of truth and do not hand-write duplicate request/response DTOs:
 
-| Area | Endpoint | Notes |
-|------|----------|-------|
-| Auth | `POST /api/auth/sign-up` | Returns `{ user, accessToken }` and sets the refresh cookie |
-| Auth | `POST /api/auth/sign-in` | Returns `{ user, accessToken }` and sets the refresh cookie |
-| Auth | `POST /api/auth/refresh` | Rotates the refresh cookie and returns a new `{ user, accessToken }` |
-| Auth | `POST /api/auth/sign-out` | Revokes the current refresh token and clears the refresh cookie |
-| Auth | `GET /api/auth/me` | Requires `Authorization: Bearer <accessToken>` |
-| Users | `GET /api/users` | Requires `Authorization: Bearer <accessToken>`. Admin role required; non-admin authenticated users receive `403`. |
+| File | Purpose |
+|------|---------|
+| `openapi/openapi.json` | OpenAPI 3.1 contract exported from the Huma route registry |
+| `openapi/typescript/schema.ts` | TypeScript types generated from `openapi/openapi.json` |
 
-All error responses use the stable API error envelope:
+Consume them one of two ways:
 
-```json
-{
-  "code": "unauthorized",
-  "message": "Authorization token missing or invalid.",
-  "request_id": "abc-123-def"
-}
-```
+1. Copy `openapi/typescript/schema.ts` into the frontend's API types directory.
+2. Generate an equivalent file in the frontend from `openapi/openapi.json` with
+   `openapi-typescript`.
 
-## Local Development Order
-
-Run the backend locally before starting frontend integration work:
+Every endpoint, request body, response body, and error shape is in those
+artifacts. When the backend API changes, regenerate and verify here:
 
 ```sh
-make compose-up
-make local-setup
-go run ./cmd/api
+make openapi && make openapi-types && make check
 ```
 
-`make local-setup` starts/waits for PostgreSQL, applies migrations, and seeds the demo user. `go run ./cmd/api` can be replaced with live reload:
+## Run the Backend Locally
 
 ```sh
-make dev
+make compose-up     # local PostgreSQL
+make local-setup    # migrate + seed the demo user
+make dev            # API with live reload on http://localhost:7272
+make smoke-auth     # (optional) verify the session flow
 ```
 
-In a second terminal, verify the backend session flow:
-
-```sh
-make smoke-auth
-```
-
-Configure the frontend starter to call this backend. For the Next starter, use:
+Point the frontend at the API. For the Next starter:
 
 ```sh
 NEXT_PUBLIC_SERVER_URL=http://localhost:7272
 ```
 
-If a Vite starter uses a different environment key, follow that starter's existing config convention. The value should still point to the Go API base URL, for example `http://localhost:7272`.
+A Vite starter uses its own env key; the value still points at the API base URL.
 
-Demo credentials after `make local-setup`:
+Demo credentials after `make local-setup` (seeded with `role = "admin"`):
 
 ```txt
 demo@minimals.cc
 @2Minimal
 ```
 
-## Contract Source
-
-The backend repository commits two frontend-facing contract artifacts:
-
-| File | Purpose |
-|------|---------|
-| `openapi/openapi.json` | OpenAPI 3.1 source contract exported from Huma route registration |
-| `openapi/typescript/schema.ts` | Generated TypeScript types from `openapi/openapi.json` |
-
-Frontend work should not hand-write duplicate DTOs for backend request or response bodies. Prefer one of these flows:
-
-1. Copy `openapi/typescript/schema.ts` into the frontend project's API types directory.
-2. Generate an equivalent file inside the frontend project from `openapi/openapi.json` using `openapi-typescript`.
-
-When this backend API changes, regenerate and verify the contract in this backend repo:
-
-```sh
-make openapi
-make openapi-types
-make check
-```
-
-Frontend code can import generated path/operation types from `schema.ts`. For example, derive request/response types for `POST /api/auth/sign-in`, `GET /api/auth/me`, and `GET /api/users` from the generated `paths` type instead of manually duplicating shapes.
-
 ## Auth Flow
 
-`POST /api/auth/sign-in` and `POST /api/auth/sign-up` return JSON:
+Sign-in and sign-up return `{ user, accessToken }` JSON and additionally set an
+`HttpOnly` refresh-token cookie. Browser JavaScript cannot — and should not —
+read that cookie; never store or inspect the refresh token in frontend state.
 
-```json
-{
-  "user": {
-    "id": "uuid",
-    "email": "demo@minimals.cc",
-    "displayName": "Demo User",
-    "role": "admin"
-  },
-  "accessToken": "jwt-access-token"
-}
-```
-
-On success, the backend also sets an HttpOnly refresh token cookie. Browser JavaScript cannot read this cookie, and that is intentional. Do not try to store or inspect the refresh token in frontend state.
-
-Frontend requests that depend on the refresh cookie must include credentials:
+Requests that rely on the refresh cookie must send credentials:
 
 ```ts
-fetch(`${baseURL}/api/auth/refresh`, {
-  method: 'POST',
-  credentials: 'include',
-});
+fetch(`${baseURL}/api/auth/refresh`, { method: 'POST', credentials: 'include' });
+// axios: axios.create({ baseURL, withCredentials: true })
 ```
 
-For axios:
+Access-token handling:
 
-```ts
-axios.create({
-  baseURL,
-  withCredentials: true,
-});
-```
+- Keep the access token in memory or the starter's existing auth context.
+  Avoid long-term `localStorage`; use it only as a temporary bridge if the
+  starter already depends on it.
+- Send protected requests with `Authorization: Bearer <accessToken>`.
+- On a `401`, call `POST /api/auth/refresh` with credentials. If it succeeds,
+  update the access token and retry the original request once. If it fails,
+  clear auth state and return the user to login.
+- On sign-out, call `POST /api/auth/sign-out` with credentials, then clear
+  frontend access-token/user state.
 
-Access token handling:
+Sign-up returns `201`; sign-in, refresh, and me return `200`.
 
-- Store the access token in memory or the starter's existing auth context for the first integration pass.
-- Avoid long-term `localStorage` storage for access tokens. It is acceptable only as a temporary bridge if the starter already depends on it; prefer a safer session strategy later.
-- Send `/api/auth/me` and `/api/users` with `Authorization: Bearer <accessToken>`.
-- On a `401`, call `POST /api/auth/refresh` with credentials included. If refresh succeeds, update frontend access token state and retry the original request once.
-- On refresh failure, clear frontend auth state and send the user back to login.
-- On sign-out, call `POST /api/auth/sign-out` with credentials included, then clear frontend access token/user state.
+## Authorization
 
-Do not log access tokens, refresh tokens, password values, or Set-Cookie headers in browser console output.
+- `/api/auth/*` and `/api/projects/*` work for any authenticated user.
+  Projects are owner-scoped — a user only ever sees their own rows.
+- `/api/users/*` and `/api/system-events` are **admin-only**: the user must be
+  active and carry `role = "admin"`. A non-admin authenticated user gets `403`
+  with `{ "code": "forbidden", "message": "Admin role required." }`.
+- New sign-ups default to `role = "user"` and are promoted in the database.
+  The seeded `demo@minimals.cc` user is already `admin`.
 
-## Users List
+## Errors
 
-Endpoint:
-
-```http
-GET /api/users?page=1&pageSize=20&search=&role=&status=
-Authorization: Bearer <accessToken>
-```
-
-Supported query parameters:
-
-| Query | Default | Notes |
-|-------|---------|-------|
-| `page` | `1` | Page number, 1-based |
-| `pageSize` | `20` | Maximum `100` |
-| `search` | empty | Matches `email` or `display_name` |
-| `role` | empty | Optional `admin` or `user` |
-| `status` | empty | Optional `active` or `disabled` |
-
-Response:
+All error responses use the stable envelope — `code`, `message`, `request_id`,
+and optional `details` (field-level validation errors):
 
 ```json
-{
-  "users": [
-    {
-      "id": "uuid",
-      "email": "demo@minimals.cc",
-      "displayName": "Demo User",
-      "status": "active",
-      "role": "admin",
-      "createdAt": "2026-05-21T00:00:00Z",
-      "updatedAt": "2026-05-21T00:00:00Z"
-    }
-  ],
-  "page": 1,
-  "pageSize": 20,
-  "total": 1
-}
+{ "code": "unauthorized", "message": "Authorization token missing or invalid.", "request_id": "abc-123" }
 ```
 
-`users` is always an array, never `null`. The endpoint does not expose `password_hash`.
+Never log access tokens, refresh tokens, passwords, or `Set-Cookie` values in
+the browser console.
 
-`GET /api/users` and `GET /api/users/{id}` are admin-only: the authenticated user must be active **and** carry `role = "admin"`. A non-admin authenticated user receives `403 forbidden` with the envelope:
+## CORS & Cookies
 
-```json
-{
-  "code": "forbidden",
-  "message": "Admin role required.",
-  "request_id": "abc-123-def"
-}
-```
-
-The seeded `demo@minimals.cc` user has `role = "admin"`, so local `make smoke-auth` and the starter login flow continue to work without changes. New users created through `POST /api/auth/sign-up` default to `role = "user"` and will receive `403` from the users endpoints until promoted in the database.
-
-## CORS And Cookie Notes
-
-- The frontend origin must be present in `CORS_ALLOWED_ORIGINS`.
-- Local defaults include common starter ports such as `http://localhost:3000` and `http://localhost:5173`.
+- The frontend origin must be listed in `CORS_ALLOWED_ORIGINS`. Local defaults
+  already include common starter ports (`3000`, `5173`, …).
 - The refresh cookie path is `/api/auth`.
-- Production requires `REFRESH_TOKEN_COOKIE_SECURE=true`.
-- If the frontend and API are deployed cross-site, confirm the HTTPS, SameSite, and cookie domain strategy before launch.
-- If using `SameSite=None`, browsers require `Secure`; that implies HTTPS.
-
-## Recommended Frontend Tasks
-
-Use this as the task list for the frontend Agent:
-
-1. Copy or generate API contract types.
-   - Source: `openapi/typescript/schema.ts` or `openapi/openapi.json`.
-   - Destination: the frontend project's existing API/client types directory.
-   - Do not hand-write duplicate DTOs.
-
-2. Update the HTTP client.
-   - Set `baseURL` from the starter's API URL config.
-   - Enable `credentials: 'include'` or axios `withCredentials: true`.
-   - Inject `Authorization: Bearer <accessToken>` for protected endpoints.
-   - Add one-shot `401 -> refresh -> retry` handling.
-
-3. Update the auth provider.
-   - Wire sign-in to `POST /api/auth/sign-in`.
-   - Wire sign-up to `POST /api/auth/sign-up`.
-   - Wire current user bootstrap to `GET /api/auth/me`.
-   - Wire session refresh to `POST /api/auth/refresh`.
-   - Wire sign-out to `POST /api/auth/sign-out`.
-
-4. Update the users list page or data hook.
-   - Call `GET /api/users`.
-   - Pass pagination, search, role, and status from UI state.
-   - Render `users`, `page`, `pageSize`, and `total`.
-   - Treat `users` as a non-null array.
-
-5. Browser acceptance.
-   - Log in with the seeded demo user.
-   - Refresh the browser and keep or restore the session through `/api/auth/refresh`.
-   - Load `/api/auth/me`.
-   - Render the real users list.
-   - Sign out and verify refresh no longer succeeds.
-
-6. Preserve starter behavior where required.
-   - If the starter still needs a mock fallback for template/demo mode, keep it behind existing feature flags or config.
-   - Do not let mock code silently shadow the real Go API path during integration testing.
+- Production requires `REFRESH_TOKEN_COOKIE_SECURE=true`. Credentialed CORS is
+  granted only to exact configured origins, never to wildcard-matched ones.
+- For a cross-site deployment, confirm the HTTPS / SameSite / cookie-domain
+  strategy before launch (`SameSite=None` requires `Secure`).
 
 ## Acceptance Checklist
 
 - Backend `make smoke-auth` passes.
-- Frontend login succeeds with:
-  ```txt
-  demo@minimals.cc
-  @2Minimal
-  ```
-- Browser Network shows `POST /api/auth/sign-in` returns `Set-Cookie`.
-- Browser JavaScript cannot read the refresh token cookie.
-- `POST /api/auth/refresh` sends the cookie and returns a new `accessToken`.
-- `GET /api/auth/me` succeeds with `Authorization: Bearer <accessToken>`.
-- `GET /api/users` renders real users from the Go API.
-- Sign-out clears frontend access token state and calls `POST /api/auth/sign-out`.
-- After sign-out, refresh fails or the user must log in again.
-- The refresh token is not visible in console logs, localStorage, sessionStorage, or API error messages.
-
-## Non-Goals
-
-- Do not modify the frontend repositories from this backend task.
-- Do not design complex RBAC for users list.
-- Do not introduce OAuth, Supabase, Auth0, or another auth provider.
-- Do not write production deployment manifests.
-- Do not change backend runtime code, OpenAPI JSON, or generated TypeScript types for this documentation-only task.
+- Frontend login succeeds with the seeded demo user.
+- `POST /api/auth/sign-in` returns `Set-Cookie`; browser JS cannot read it.
+- `POST /api/auth/refresh` sends the cookie and returns a fresh `accessToken`.
+- `GET /api/auth/me` succeeds with the bearer token.
+- After sign-out, refresh no longer succeeds.
+- No token is visible in console logs, storage, or error messages.

@@ -4,9 +4,12 @@ Go API service for the Minimal Starter dashboard projects. Provides stable, type
 
 **Stack:** Go 1.26 · chi · Huma v2 · PostgreSQL · sqlc · goose · JWT auth · Air
 
-For frontend starter handoff details, see [Frontend Starter Integration Guide](docs/frontend-integration.md).
-For audit event scope and failure-event rules, see [Audit Policy](docs/audit-policy.md).
-For pre-production gates and the API infrastructure pause criteria, see [Production Readiness Checklist](docs/production-readiness-checklist.md).
+Further documentation:
+
+- [Operations Guide](docs/operations.md) — deployment, configuration, migrations, and release gates.
+- [Frontend Integration Guide](docs/frontend-integration.md) — wiring a starter frontend to this API.
+- [Audit Policy](docs/audit-policy.md) — audit event scope and failure-event rules.
+- [CRUD Module Guide](docs/crud-module-guide.md) — adding a new CRUD business module.
 
 ## Prerequisites
 
@@ -63,7 +66,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `IDLE_TIMEOUT_SECONDS` | `60` | HTTP server idle timeout |
 | `HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown deadline for draining in-flight HTTP requests |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173,http://localhost:8082,http://localhost:8083,http://localhost:8084,http://localhost:8085` | Comma-separated allowed origins |
-| `DATABASE_URL` | `postgres://spec:spec@localhost:5432/wow_dashboard_api?sslmode=disable` | PostgreSQL database connection URL for local Compose (masks credentials in errors/logs) |
+| `DATABASE_URL` | `postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable` | PostgreSQL database connection URL for local Compose (masks credentials in errors/logs) |
 | `DB_MAX_CONNS` | `10` | Maximum number of open connections in the pool |
 | `DB_MIN_CONNS` | `1` | Minimum number of open connections in the pool |
 | `DB_MAX_CONN_LIFETIME_SECONDS` | `1800` | Maximum amount of time a connection may be reused |
@@ -84,25 +87,19 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 
 See [`.env.example`](.env.example) for a copy-pasteable template.
 
-### Production Hardening & Safety Rules
+### Production Hardening
 
-When `ENV=production`, the application applies strict safety checks at startup to prevent weak or insecure defaults:
-- **DATABASE_URL**: Must not be empty.
-- **JWT_ACCESS_SECRET**: Must be at least 32 characters, must not be the dev-default secret, and must not contain any common placeholder patterns (case-insensitive checks for `change-me`, `changeme`, `dev-only`, `example`, `secret`).
-- **JWT_ACCESS_TOKEN_TTL_SECONDS**: Must be between 60 and 3600 seconds inclusive (1 minute to 1 hour).
-- **CORS_ALLOWED_ORIGINS**: All origins must start with `https://`, and must not contain wildcard origins (`*`), empty entries, or loopback addresses/hosts (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, `::1`).
-- **REFRESH_TOKEN_COOKIE_SECURE**: Must be `true` (if left empty or unset in production, it automatically defaults to `true`). If explicitly set to `false`, the server will refuse to start.
-- **Cookie Name**: Must not contain spaces, semicolons, commas, equals, control characters, or non-ASCII characters.
+When `ENV=production`, the application applies strict startup validation: weak
+or insecure defaults — a placeholder/short `JWT_ACCESS_SECRET`, wildcard or
+loopback CORS origins, insecure refresh cookies, an empty `DATABASE_URL`, an
+invalid cookie name, an out-of-range token TTL, or non-positive timeouts/pool
+sizes — cause the process to refuse to start. See the
+[Operations Guide](docs/operations.md#configuration-checks) for the full rule list.
 
-Across all environments:
-- **All second-based timeouts**: Must be strictly `> 0`.
-- **Database Pool Sizes**: `DB_MAX_CONNS` must be `> 0`, `DB_MIN_CONNS` must be `>= 0`, and `DB_MIN_CONNS` must be less than or equal to `DB_MAX_CONNS`.
-- **REFRESH_TOKEN_COOKIE_SAMESITE**: If SameSite is set to `none`, `REFRESH_TOKEN_COOKIE_SECURE` must be `true` (to adhere to modern browser cookie standards).
-
-
-Production CORS must use exact origins owned by the deployment, for example `https://app.example.com`. Do not use public shared-hosting wildcards such as `*.vercel.app` or `*.netlify.app` for credentialed CORS; `ENV=production` rejects wildcard origins.
-
-The application does not trust client-supplied forwarding headers such as `X-Forwarded-For` or `X-Real-IP` by default. Auth rate limiting keys off the socket remote address seen by the Go server. When deploying behind a trusted reverse proxy, enforce abuse limits at the edge or add a reviewed trusted-proxy configuration before relying on forwarded client IPs.
+The application does not trust client-supplied forwarding headers
+(`X-Forwarded-For`, `X-Real-IP`) by default; auth rate limiting keys off the
+socket remote address. Behind a trusted reverse proxy, enforce abuse limits at
+the edge or add a reviewed trusted-proxy configuration first.
 
 ## Logging And Shutdown
 
@@ -260,43 +257,13 @@ List-style endpoints share a small set of conventions so the dashboard frontends
 - **Owner-scoped resources**: services that scope rows to the current user (e.g. `projects`) take the authenticated user's id from the auth layer, parse it as a UUID at the service boundary, and pass it to every store query so isolation is enforced in SQL — not at the handler edge.
 - **OpenAPI is the contract**: every endpoint is registered through Huma so that `openapi/openapi.json` and `openapi/typescript/schema.ts` (regenerated via `make openapi` / `make openapi-types`) stay the single source of truth for frontend types.
 
-## Local Starter Auth Flow
+## Smoke & Acceptance Tests
 
-Use this shortest path to connect the wow-dashboard starter to the Go API for local login and registration:
-
-1. Start local PostgreSQL:
-   ```sh
-   make compose-up
-   ```
-2. Apply migrations and seed the demo account:
-   ```sh
-   make local-setup
-   ```
-3. Start the API:
-   ```sh
-   make dev
-   ```
-4. Optionally verify the API auth flow:
-   ```sh
-   make smoke-auth
-   ```
-5. In your wow-dashboard starter's `.env.local`, point the starter at this API:
-   ```sh
-   NEXT_PUBLIC_SERVER_URL=http://localhost:7272
-   ```
-6. Start the starter and log in with:
-   ```txt
-   demo@minimals.cc
-   @2Minimal
-   ```
-
-`make seed` is idempotent: it creates the demo user when missing and updates the password hash, display name, status, and role when the account already exists.
-
-Default local database URL:
-
-```txt
-postgres://spec:spec@localhost:5432/wow_dashboard_api?sslmode=disable
-```
+Beyond `make check`, three black-box paths exercise the running API. The demo
+account seeded by `make local-setup` is `demo@minimals.cc` / `@2Minimal`
+(`make seed` is idempotent — it creates the user when missing and refreshes the
+hash, display name, status, and role otherwise). For connecting a starter
+frontend to the API, see the [Frontend Integration Guide](docs/frontend-integration.md).
 
 `make smoke-auth` expects the demo user to be seeded first; `make local-setup` handles migrations and seed data for the local Docker Compose database. The smoke checks cover `GET /healthz`, `GET /readyz`, `POST /api/auth/sign-in`, refresh cookie issuance, `GET /api/auth/me`, `POST /api/auth/refresh` with refresh cookie rotation, old refresh cookie rejection, `POST /api/auth/sign-out`, refresh cookie clearing, and refresh rejection after sign-out. It uses `BASE_URL` (or legacy `SMOKE_AUTH_BASE_URL`), `SMOKE_AUTH_EMAIL`, and `SMOKE_AUTH_PASSWORD` overrides when set.
 
@@ -349,7 +316,7 @@ All database schema changes must be written as Goose SQL migration files inside 
 - Roll back migrations: `DATABASE_URL=postgres://... make migrate-down`
 - Seed the local demo auth user after migrations: `DATABASE_URL=postgres://... make seed`
 
-For deployment preflight checks, production safety policy, and the `00007` project-name unique index runbook, see [`docs/deployment-migration-notes.md`](docs/deployment-migration-notes.md).
+For deployment preflight checks, production safety policy, and the `00007` project-name unique index runbook, see the [Operations Guide](docs/operations.md#database--migrations).
 
 ### Query Codegen
 All SQL queries live in `internal/store/sql/` and are compiled into Go code inside `internal/store/query/` via SQLC:
@@ -437,17 +404,11 @@ docker run -d \
 
 The Dockerfile uses a multi-stage build with `CGO_ENABLED=0` for a static binary and runs as a non-root user on `distroless/static-debian12:nonroot`. Port 7272 is exposed by default.
 
-### Required Production Environment Variables
+### Production Configuration
 
-When `ENV=production`, the application validates configuration at startup and will refuse to start with unsafe defaults. At minimum, set:
-
-| Variable | Notes |
-|----------|-------|
-| `ENV` | `production` |
-| `DATABASE_URL` | Required; must not be empty |
-| `JWT_ACCESS_SECRET` | At least 32 characters; must not contain placeholder substrings (`change-me`, `changeme`, `dev-only`, `example`, `secret`; case-insensitive) |
-| `CORS_ALLOWED_ORIGINS` | Exact `https://` origins only; no wildcards or loopback |
-| `REFRESH_TOKEN_COOKIE_SECURE` | Must be `true` (auto-defaults to `true` if unset in production) |
+`ENV=production` validates configuration at startup and refuses to start with
+unsafe defaults. See the [Operations Guide](docs/operations.md#configuration-checks)
+for the required variables and the full validation rule list.
 
 ### Health Checks in Containers
 
@@ -458,16 +419,11 @@ In Kubernetes or Docker Compose, configure `/healthz` as the liveness probe and 
 
 ### Database Migrations
 
-The production container does not include migration tooling. Run migrations as a separate step before deploying the API, for example:
-
-```sh
-export DATABASE_URL='postgres://...'
-go tool goose -dir migrations postgres "$DATABASE_URL" up
-```
-
-Or run migrations in an init container or CI job using a separate goose binary. Do not assume the API container will auto-migrate.
-
-Before running production or shared-database migrations, review the deployment migration notes in [`docs/deployment-migration-notes.md`](docs/deployment-migration-notes.md).
+The production container ships no migration tooling — run migrations as a
+separate step (CI job, init container, or operator action) before the API
+receives traffic; it never auto-migrates. See the
+[Operations Guide](docs/operations.md#database--migrations) for the runbook and
+the migration `00007` preflight.
 
 ## CI
 
