@@ -7,7 +7,7 @@ PORT=${PORT:-7272}
 BASE_URL="http://localhost:${PORT}"
 HEALTH_URL="${BASE_URL}/healthz"
 HEALTH_TIMEOUT_SECONDS=${SMOKE_LOCAL_HEALTH_TIMEOUT_SECONDS:-30}
-DB_URL=${SMOKE_LOCAL_DATABASE_URL:-${LOCAL_DATABASE_URL:-postgres://spec:spec@localhost:5432/wow_dashboard_api?sslmode=disable}}
+DB_URL=${SMOKE_LOCAL_DATABASE_URL:-${LOCAL_DATABASE_URL:-postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable}}
 API_LOG=${SMOKE_LOCAL_API_LOG:-tmp/smoke-local-api.log}
 API_PID=""
 API_LISTENER_PIDS=""

@@ -16,7 +16,7 @@
 
 .PHONY: fmt fmt-check test test-race test-integration vet openapi openapi-check openapi-types openapi-types-check sqlc sqlc-check migrate-up migrate-down seed compose-up compose-down wait-db local-setup local-reset smoke-auth postman-test smoke-local check dev docker-build docker-run
 
-LOCAL_DATABASE_URL ?= postgres://spec:spec@localhost:5432/wow_dashboard_api?sslmode=disable
+LOCAL_DATABASE_URL ?= postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable
 SMOKE_AUTH_BASE_URL ?= http://localhost:7272
 BASE_URL ?= $(SMOKE_AUTH_BASE_URL)
 SMOKE_AUTH_EMAIL ?= demo@minimals.cc
@@ -73,7 +73,7 @@ compose-down:
 wait-db:
 	@echo "==> Waiting for local PostgreSQL to accept connections…"
 	@for i in $$(seq 1 30); do \
-		if docker compose exec -T postgres pg_isready -U spec -d wow_dashboard_api >/dev/null 2>&1; then \
+		if docker compose exec -T postgres pg_isready -U wow_dashboard -d wow_dashboard_api >/dev/null 2>&1; then \
 			echo "==> PostgreSQL is ready."; \
 			exit 0; \
 		fi; \
