@@ -141,6 +141,13 @@
             ],
             "type": "string"
           },
+          "emailVerified": {
+            "description": "Whether the user has confirmed their email address",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "id": {
             "description": "User identifier",
             "examples": [
@@ -167,6 +174,7 @@
           "id",
           "email",
           "displayName",
+          "emailVerified",
           "roles",
           "permissions"
         ],
@@ -451,6 +459,32 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ForgotPasswordInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ForgotPasswordInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "email": {
+            "description": "Email address to send a reset link to",
+            "examples": [
+              "demo@minimals.cc"
+            ],
+            "format": "email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
         "type": "object"
       },
       "HealthResponseBody": {
@@ -819,6 +853,36 @@
         },
         "required": [
           "status"
+        ],
+        "type": "object"
+      },
+      "ResetPasswordInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ResetPasswordInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "newPassword": {
+            "description": "The new password (minimum 8 characters)",
+            "maxLength": 4096,
+            "minLength": 8,
+            "type": "string"
+          },
+          "token": {
+            "description": "The reset token from the email",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "newPassword"
         ],
         "type": "object"
       },
@@ -1398,6 +1462,29 @@
           "updatedAt"
         ],
         "type": "object"
+      },
+      "VerifyEmailInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/VerifyEmailInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "token": {
+            "description": "The verification token from the email",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
       }
     }
   },
@@ -1467,6 +1554,51 @@
           }
         },
         "summary": "Change password",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/forgot-password": {
+      "post": {
+        "description": "Emails a password-reset link if the address matches an active account. Always succeeds, so the response cannot be used to probe which emails are registered.",
+        "operationId": "post-auth-forgot-password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSuccessBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Request a password reset",
         "tags": [
           "Auth"
         ]
@@ -1561,6 +1693,103 @@
           }
         },
         "summary": "Refresh session",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/resend-verification": {
+      "post": {
+        "description": "Issues a fresh email-verification link for the signed-in user. A no-op when the email is already verified.",
+        "operationId": "post-auth-resend-verification",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSuccessBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Resend the email verification link",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/reset-password": {
+      "post": {
+        "description": "Sets a new password using a token from the forgot-password email, then revokes every session for the account.",
+        "operationId": "post-auth-reset-password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSuccessBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Reset a password with a token",
         "tags": [
           "Auth"
         ]
@@ -1715,6 +1944,54 @@
           }
         },
         "summary": "Sign up",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/verify-email": {
+      "post": {
+        "description": "Confirms an email address using a verification token from the sign-up email.",
+        "operationId": "post-auth-verify-email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSuccessBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Verify an email address",
         "tags": [
           "Auth"
         ]

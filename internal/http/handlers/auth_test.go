@@ -536,6 +536,19 @@ type fakeAuthService struct {
 	changePasswordNew     string
 	changePasswordErr     error
 
+	forgotPasswordEmail string
+	forgotPasswordErr   error
+
+	resetPasswordToken string
+	resetPasswordNew   string
+	resetPasswordErr   error
+
+	verifyEmailToken string
+	verifyEmailErr   error
+
+	resendVerificationToken string
+	resendVerificationErr   error
+
 	refreshToken   string
 	refreshSession *service.Session
 	refreshErr     error
@@ -573,6 +586,27 @@ func (f *fakeAuthService) ChangePassword(ctx context.Context, rawAccessToken str
 	f.changePasswordCurrent = currentPassword
 	f.changePasswordNew = newPassword
 	return f.changePasswordErr
+}
+
+func (f *fakeAuthService) ForgotPassword(ctx context.Context, email string) error {
+	f.forgotPasswordEmail = email
+	return f.forgotPasswordErr
+}
+
+func (f *fakeAuthService) ResetPassword(ctx context.Context, rawToken string, newPassword string) error {
+	f.resetPasswordToken = rawToken
+	f.resetPasswordNew = newPassword
+	return f.resetPasswordErr
+}
+
+func (f *fakeAuthService) VerifyEmail(ctx context.Context, rawToken string) error {
+	f.verifyEmailToken = rawToken
+	return f.verifyEmailErr
+}
+
+func (f *fakeAuthService) ResendVerification(ctx context.Context, rawAccessToken string) error {
+	f.resendVerificationToken = rawAccessToken
+	return f.resendVerificationErr
 }
 
 func (f *fakeAuthService) Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error) {
@@ -895,5 +929,77 @@ func TestChangePasswordHandler(t *testing.T) {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized, "Invalid email or password.")
+	})
+}
+
+func TestEmailAuthFlowHandlers(t *testing.T) {
+	post := func(t *testing.T, authSvc *fakeAuthService, path, requestBody, bearer string) *httptest.ResponseRecorder {
+		t.Helper()
+		router := newAuthTestRouter(authSvc)
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("forgot-password forwards the email and returns 200", func(t *testing.T) {
+		authSvc := &fakeAuthService{}
+		rec := post(t, authSvc, "/api/auth/forgot-password", `{"email":"demo@minimals.cc"}`, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if authSvc.forgotPasswordEmail != "demo@minimals.cc" {
+			t.Fatalf("forwarded email = %q", authSvc.forgotPasswordEmail)
+		}
+	})
+
+	t.Run("reset-password forwards the token and password", func(t *testing.T) {
+		authSvc := &fakeAuthService{}
+		rec := post(t, authSvc, "/api/auth/reset-password", `{"token":"tok","newPassword":"new-password-123"}`, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if authSvc.resetPasswordToken != "tok" || authSvc.resetPasswordNew != "new-password-123" {
+			t.Fatalf("forwarded = %q / %q", authSvc.resetPasswordToken, authSvc.resetPasswordNew)
+		}
+	})
+
+	t.Run("reset-password maps an invalid token to 401", func(t *testing.T) {
+		authSvc := &fakeAuthService{resetPasswordErr: service.ErrInvalidToken}
+		rec := post(t, authSvc, "/api/auth/reset-password", `{"token":"bad","newPassword":"new-password-123"}`, "")
+		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized,
+			"Authorization token missing or invalid.")
+	})
+
+	t.Run("verify-email forwards the token", func(t *testing.T) {
+		authSvc := &fakeAuthService{}
+		rec := post(t, authSvc, "/api/auth/verify-email", `{"token":"vtok"}`, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if authSvc.verifyEmailToken != "vtok" {
+			t.Fatalf("forwarded token = %q", authSvc.verifyEmailToken)
+		}
+	})
+
+	t.Run("resend-verification requires authorization", func(t *testing.T) {
+		rec := post(t, &fakeAuthService{}, "/api/auth/resend-verification", "", "")
+		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized,
+			"Authorization token missing or invalid.")
+	})
+
+	t.Run("resend-verification forwards the access token", func(t *testing.T) {
+		authSvc := &fakeAuthService{}
+		rec := post(t, authSvc, "/api/auth/resend-verification", "", "access-token")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if authSvc.resendVerificationToken != "access-token" {
+			t.Fatalf("forwarded token = %q", authSvc.resendVerificationToken)
+		}
 	})
 }

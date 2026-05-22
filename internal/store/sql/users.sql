@@ -14,7 +14,7 @@ SET display_name = EXCLUDED.display_name,
 RETURNING id, email, display_name, status, created_at, updated_at;
 
 -- name: GetUserByID :one
-SELECT id, email, display_name, status, created_at, updated_at
+SELECT id, email, display_name, status, created_at, updated_at, email_verified_at
 FROM users
 WHERE id = @id;
 
@@ -25,19 +25,24 @@ WHERE email = lower(@email);
 
 -- name: GetUserByEmailForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until
+       failed_login_count, locked_until, email_verified_at
 FROM users
 WHERE email = lower(@email);
 
 -- name: GetUserByIDForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until
+       failed_login_count, locked_until, email_verified_at
 FROM users
 WHERE id = @id;
 
 -- name: UpdateUserPassword :exec
 UPDATE users
 SET password_hash = @password_hash, updated_at = @updated_at
+WHERE id = @id;
+
+-- name: SetEmailVerified :exec
+UPDATE users
+SET email_verified_at = @verified_at, updated_at = @updated_at
 WHERE id = @id;
 
 -- name: ListUsers :many

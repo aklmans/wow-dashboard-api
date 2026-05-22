@@ -21,6 +21,10 @@ type AuthService interface {
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
 	ChangePassword(ctx context.Context, rawAccessToken string, currentPassword string, newPassword string) error
+	ForgotPassword(ctx context.Context, email string) error
+	ResetPassword(ctx context.Context, rawToken string, newPassword string) error
+	VerifyEmail(ctx context.Context, rawToken string) error
+	ResendVerification(ctx context.Context, rawAccessToken string) error
 }
 
 type authUser struct {
@@ -32,11 +36,12 @@ type authUser struct {
 // authMeUser extends the basic profile with the resolved roles and effective
 // permissions a frontend uses to render menus and gate actions.
 type authMeUser struct {
-	ID          string   `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
-	Email       string   `json:"email" example:"demo@minimals.cc" doc:"User email address"`
-	DisplayName string   `json:"displayName" example:"Demo User" doc:"User display name"`
-	Roles       []string `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
-	Permissions []string `json:"permissions" nullable:"false" doc:"Effective permission strings granted by the user's roles"`
+	ID            string   `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
+	Email         string   `json:"email" example:"demo@minimals.cc" doc:"User email address"`
+	DisplayName   string   `json:"displayName" example:"Demo User" doc:"User display name"`
+	EmailVerified bool     `json:"emailVerified" example:"true" doc:"Whether the user has confirmed their email address"`
+	Roles         []string `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
+	Permissions   []string `json:"permissions" nullable:"false" doc:"Effective permission strings granted by the user's roles"`
 }
 
 type authSessionBody struct {
@@ -92,6 +97,29 @@ type changePasswordInput struct {
 		CurrentPassword string `json:"currentPassword" minLength:"1" doc:"The user's current password"`
 		NewPassword     string `json:"newPassword" minLength:"8" maxLength:"4096" doc:"The new password (minimum 8 characters)"`
 	}
+}
+
+type forgotPasswordInput struct {
+	Body struct {
+		Email string `json:"email" format:"email" example:"demo@minimals.cc" doc:"Email address to send a reset link to"`
+	}
+}
+
+type resetPasswordInput struct {
+	Body struct {
+		Token       string `json:"token" minLength:"1" doc:"The reset token from the email"`
+		NewPassword string `json:"newPassword" minLength:"8" maxLength:"4096" doc:"The new password (minimum 8 characters)"`
+	}
+}
+
+type verifyEmailInput struct {
+	Body struct {
+		Token string `json:"token" minLength:"1" doc:"The verification token from the email"`
+	}
+}
+
+type resendVerificationInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
 }
 
 type refreshInput struct {
@@ -254,6 +282,84 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 	})
 
 	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-forgot-password",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/forgot-password",
+		Summary:     "Request a password reset",
+		Description: "Emails a password-reset link if the address matches an active account. Always succeeds, so the response cannot be used to probe which emails are registered.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *forgotPasswordInput) (*authSuccessResponse, error) {
+		if err := authSvc.ForgotPassword(ctx, input.Body.Email); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return &authSuccessResponse{Body: authSuccessBody{Success: true}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-reset-password",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/reset-password",
+		Summary:     "Reset a password with a token",
+		Description: "Sets a new password using a token from the forgot-password email, then revokes every session for the account.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *resetPasswordInput) (*authSuccessResponse, error) {
+		if err := authSvc.ResetPassword(ctx, input.Body.Token, input.Body.NewPassword); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return &authSuccessResponse{Body: authSuccessBody{Success: true}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-verify-email",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/verify-email",
+		Summary:     "Verify an email address",
+		Description: "Confirms an email address using a verification token from the sign-up email.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *verifyEmailInput) (*authSuccessResponse, error) {
+		if err := authSvc.VerifyEmail(ctx, input.Body.Token); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return &authSuccessResponse{Body: authSuccessBody{Success: true}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-resend-verification",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/resend-verification",
+		Summary:     "Resend the email verification link",
+		Description: "Issues a fresh email-verification link for the signed-in user. A no-op when the email is already verified.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *resendVerificationInput) (*authSuccessResponse, error) {
+		rawAccessToken, ok := parseBearerToken(input.Authorization)
+		if !ok {
+			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+		}
+		if err := authSvc.ResendVerification(ctx, rawAccessToken); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return &authSuccessResponse{Body: authSuccessBody{Success: true}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
 		OperationID: "get-auth-me",
 		Method:      http.MethodGet,
 		Path:        "/api/auth/me",
@@ -310,11 +416,12 @@ func meUserResponse(user service.PublicUser) authMeUser {
 		permissions = []string{}
 	}
 	return authMeUser{
-		ID:          user.ID,
-		Email:       user.Email,
-		DisplayName: user.DisplayName,
-		Roles:       roles,
-		Permissions: permissions,
+		ID:            user.ID,
+		Email:         user.Email,
+		DisplayName:   user.DisplayName,
+		EmailVerified: user.EmailVerified,
+		Roles:         roles,
+		Permissions:   permissions,
 	}
 }
 

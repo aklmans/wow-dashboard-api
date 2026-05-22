@@ -174,3 +174,15 @@ func (s *UserStore) UpdateUserPassword(ctx context.Context, userID uuid.UUID, pa
 	}
 	return nil
 }
+
+// SetEmailVerified marks a user's email address as verified.
+func (s *UserStore) SetEmailVerified(ctx context.Context, userID uuid.UUID, verifiedAt time.Time, now time.Time) error {
+	if err := s.queries.SetEmailVerified(ctx, query.SetEmailVerifiedParams{
+		ID:         pgUUID(userID),
+		VerifiedAt: pgTimestamp(verifiedAt),
+		UpdatedAt:  pgTimestamp(now),
+	}); err != nil {
+		return mapStoreError(err)
+	}
+	return nil
+}

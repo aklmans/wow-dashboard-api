@@ -106,7 +106,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 
 const getUserByEmailForAuth = `-- name: GetUserByEmailForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until
+       failed_login_count, locked_until, email_verified_at
 FROM users
 WHERE email = lower($1)
 `
@@ -124,23 +124,25 @@ func (q *Queries) GetUserByEmailForAuth(ctx context.Context, email string) (User
 		&i.UpdatedAt,
 		&i.FailedLoginCount,
 		&i.LockedUntil,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, display_name, status, created_at, updated_at
+SELECT id, email, display_name, status, created_at, updated_at, email_verified_at
 FROM users
 WHERE id = $1
 `
 
 type GetUserByIDRow struct {
-	ID          pgtype.UUID
-	Email       string
-	DisplayName string
-	Status      string
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
+	ID              pgtype.UUID
+	Email           string
+	DisplayName     string
+	Status          string
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+	EmailVerifiedAt pgtype.Timestamptz
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDRow, error) {
@@ -153,13 +155,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getUserByIDForAuth = `-- name: GetUserByIDForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until
+       failed_login_count, locked_until, email_verified_at
 FROM users
 WHERE id = $1
 `
@@ -177,6 +180,7 @@ func (q *Queries) GetUserByIDForAuth(ctx context.Context, id pgtype.UUID) (User,
 		&i.UpdatedAt,
 		&i.FailedLoginCount,
 		&i.LockedUntil,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
@@ -263,6 +267,23 @@ func (q *Queries) RegisterLoginFailure(ctx context.Context, arg RegisterLoginFai
 	var locked_until pgtype.Timestamptz
 	err := row.Scan(&locked_until)
 	return locked_until, err
+}
+
+const setEmailVerified = `-- name: SetEmailVerified :exec
+UPDATE users
+SET email_verified_at = $1, updated_at = $2
+WHERE id = $3
+`
+
+type SetEmailVerifiedParams struct {
+	VerifiedAt pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+	ID         pgtype.UUID
+}
+
+func (q *Queries) SetEmailVerified(ctx context.Context, arg SetEmailVerifiedParams) error {
+	_, err := q.db.Exec(ctx, setEmailVerified, arg.VerifiedAt, arg.UpdatedAt, arg.ID)
+	return err
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec

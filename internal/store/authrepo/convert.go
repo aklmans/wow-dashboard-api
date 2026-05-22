@@ -85,12 +85,13 @@ func userFromGetByIDRow(row query.GetUserByIDRow) (domain.User, error) {
 		return domain.User{}, err
 	}
 	return domain.User{
-		ID:          id,
-		Email:       row.Email,
-		DisplayName: row.DisplayName,
-		Status:      domain.UserStatus(row.Status),
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
+		ID:            id,
+		Email:         row.Email,
+		DisplayName:   row.DisplayName,
+		Status:        domain.UserStatus(row.Status),
+		EmailVerified: row.EmailVerifiedAt.Valid,
+		CreatedAt:     createdAt,
+		UpdatedAt:     updatedAt,
 	}, nil
 }
 
@@ -109,12 +110,13 @@ func authUserFromRow(row query.User) (domain.AuthUser, error) {
 	}
 	return domain.AuthUser{
 		User: domain.User{
-			ID:          id,
-			Email:       row.Email,
-			DisplayName: row.DisplayName,
-			Status:      domain.UserStatus(row.Status),
-			CreatedAt:   createdAt,
-			UpdatedAt:   updatedAt,
+			ID:            id,
+			Email:         row.Email,
+			DisplayName:   row.DisplayName,
+			Status:        domain.UserStatus(row.Status),
+			EmailVerified: row.EmailVerifiedAt.Valid,
+			CreatedAt:     createdAt,
+			UpdatedAt:     updatedAt,
 		},
 		PasswordHash:     row.PasswordHash,
 		FailedLoginCount: int(row.FailedLoginCount),

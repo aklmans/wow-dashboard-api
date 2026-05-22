@@ -303,6 +303,10 @@ func (f *fakeUserStore) UpdateUserPassword(ctx context.Context, userID uuid.UUID
 	return nil
 }
 
+func (f *fakeUserStore) SetEmailVerified(ctx context.Context, userID uuid.UUID, verifiedAt time.Time, updatedAt time.Time) error {
+	return nil
+}
+
 type fakeTokenManager struct {
 	issuedToken string
 	issueErr    error

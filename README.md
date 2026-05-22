@@ -170,13 +170,19 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 | `POST` | `/api/auth/refresh` | Rotate the refresh cookie and return `{ "user": ..., "accessToken": ... }` |
 | `POST` | `/api/auth/sign-out` | Revoke the current refresh token when present and clear the refresh cookie |
 | `POST` | `/api/auth/change-password` | Verify the current password and set a new one for the bearer-token user; revokes every refresh token and clears the cookie |
-| `GET` | `/api/auth/me` | Return `{ "user": ... }` — including the caller's `roles` and effective `permissions` — for `Authorization: Bearer <accessToken>` |
+| `POST` | `/api/auth/forgot-password` | Email a password-reset link for the given address; always returns `200` so the response cannot enumerate accounts |
+| `POST` | `/api/auth/reset-password` | Set a new password from a reset token, then revoke every session for the account |
+| `POST` | `/api/auth/verify-email` | Confirm an email address using a verification token |
+| `POST` | `/api/auth/resend-verification` | Re-send the email-verification link for the bearer-token user |
+| `GET` | `/api/auth/me` | Return `{ "user": ... }` — including the caller's `roles`, effective `permissions`, and `emailVerified` — for `Authorization: Bearer <accessToken>` |
 
 `sign-up` and `sign-in` are protected by an in-memory, per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header.
 
 Sign-in additionally enforces a per-account lockout: after 10 consecutive failed attempts an account is locked for 15 minutes (self-healing — the lock simply expires). A locked account returns the same generic invalid-credentials error so the lock state cannot be probed; a successful sign-in clears the counter.
 
-Auth sign-up/sign-in success and failure events are written to the `system_events` table using stable event types:
+Password reset (`forgot-password` → `reset-password`) and email verification (a link is sent on sign-up and confirmed via `verify-email`) deliver one-time tokens by email. Delivery goes through a pluggable `email.Sender`; the default development sender logs the message instead of delivering it, so the flows run end to end before a real provider is wired in. `GET /api/auth/me` reports `emailVerified`; verification status is tracked and surfaced but not yet enforced.
+
+Auth lifecycle success and failure events are written to the `system_events` table using stable event types:
 
 | Event Type | Description |
 |------------|-------------|
@@ -184,6 +190,9 @@ Auth sign-up/sign-in success and failure events are written to the `system_event
 | `auth.sign_up.failed` | Account registration failed |
 | `auth.sign_in.succeeded` | Credential authentication succeeded |
 | `auth.sign_in.failed` | Credential authentication failed |
+| `auth.password.changed` | A signed-in user changed their password |
+| `auth.password.reset` | A password was reset via a reset token |
+| `auth.email.verified` | A user confirmed their email address |
 
 Audit metadata is a safe JSON object with fields such as `masked_email` (the email reduced to a low-PII form like `d***@example.com`), `user_id`, `reason`, and `request_id`. Audit writes are best-effort: if recording an event fails, the auth response keeps its original success or failure result and the server logs the audit error.
 

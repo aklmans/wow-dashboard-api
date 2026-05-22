@@ -8,6 +8,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuthToken struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	Purpose   string
+	TokenHash string
+	ExpiresAt pgtype.Timestamptz
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
 type Project struct {
 	ID          pgtype.UUID
 	Name        string
@@ -70,6 +80,7 @@ type User struct {
 	UpdatedAt        pgtype.Timestamptz
 	FailedLoginCount int32
 	LockedUntil      pgtype.Timestamptz
+	EmailVerifiedAt  pgtype.Timestamptz
 }
 
 type UserRole struct {

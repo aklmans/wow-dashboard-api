@@ -16,6 +16,7 @@ import (
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/token"
 	"github.com/aklmans/wow-dashboard-api/internal/config"
+	"github.com/aklmans/wow-dashboard-api/internal/email"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	"github.com/aklmans/wow-dashboard-api/internal/http/handlers"
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
@@ -118,12 +119,16 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	authStore := authrepo.NewUserStore(queries)
 	refreshTokenStore := authrepo.NewRefreshTokenStore(queries)
+	authTokenStore := authrepo.NewAuthTokenStore(queries)
 	unitOfWork := authrepo.NewUnitOfWork(pool)
 	auditRecorder := authrepo.NewSystemEventRecorder(queries)
 	authSvc := authservice.NewService(authStore, tokenManager,
 		authservice.WithRefreshTokenStore(refreshTokenStore, cfg.RefreshTokenTTL()),
 		authservice.WithUnitOfWork(unitOfWork),
-		authservice.WithAuditRecorder(auditRecorder))
+		authservice.WithAuditRecorder(auditRecorder),
+		authservice.WithAuthTokenStore(authTokenStore),
+		authservice.WithEmailSender(email.LogSender{}),
+		authservice.WithAppBaseURL(cfg.AppBaseURL))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(pool),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)))
 	rolesSvc := rolesservice.NewService(rolesrepo.NewRoleStore(pool),

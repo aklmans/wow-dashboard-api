@@ -10,6 +10,7 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/auth/domain"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/password"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/service"
+	"github.com/aklmans/wow-dashboard-api/internal/email"
 	"github.com/google/uuid"
 )
 
@@ -598,6 +599,7 @@ type unitUserStore struct {
 	registerLockedResult bool
 	clearFailuresCalls   int
 	updatedPasswordHash  string
+	emailVerifiedSet     bool
 }
 
 func (s *unitUserStore) CreateUser(ctx context.Context, input domain.CreateUserInput) (domain.User, error) {
@@ -668,6 +670,11 @@ func (s *unitUserStore) GetUserByIDForAuth(ctx context.Context, id uuid.UUID) (d
 
 func (s *unitUserStore) UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string, updatedAt time.Time) error {
 	s.updatedPasswordHash = passwordHash
+	return nil
+}
+
+func (s *unitUserStore) SetEmailVerified(ctx context.Context, userID uuid.UUID, verifiedAt time.Time, updatedAt time.Time) error {
+	s.emailVerifiedSet = true
 	return nil
 }
 
@@ -781,4 +788,187 @@ func testDomainAuthUser(t *testing.T, id uuid.UUID, email string, displayName st
 		},
 		PasswordHash: hash,
 	}
+}
+
+type fakeAuthTokenStore struct {
+	created    []domain.CreateAuthTokenInput
+	token      domain.AuthToken
+	getErr     error
+	markedUsed []uuid.UUID
+	deleted    []string
+}
+
+func (s *fakeAuthTokenStore) CreateAuthToken(ctx context.Context, input domain.CreateAuthTokenInput) error {
+	s.created = append(s.created, input)
+	return nil
+}
+
+func (s *fakeAuthTokenStore) GetAuthTokenByHash(ctx context.Context, purpose string, tokenHash string) (domain.AuthToken, error) {
+	if s.getErr != nil {
+		return domain.AuthToken{}, s.getErr
+	}
+	return s.token, nil
+}
+
+func (s *fakeAuthTokenStore) MarkAuthTokenUsed(ctx context.Context, id uuid.UUID, usedAt time.Time) error {
+	s.markedUsed = append(s.markedUsed, id)
+	return nil
+}
+
+func (s *fakeAuthTokenStore) DeleteAuthTokensForUser(ctx context.Context, userID uuid.UUID, purpose string) error {
+	s.deleted = append(s.deleted, purpose)
+	return nil
+}
+
+type captureEmailSender struct {
+	messages []email.Message
+}
+
+func (s *captureEmailSender) Send(ctx context.Context, msg email.Message) error {
+	s.messages = append(s.messages, msg)
+	return nil
+}
+
+func TestServiceForgotPassword(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	t.Run("issues a token and emails it for a known user", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "pw"),
+		}
+		tokens := &fakeAuthTokenStore{}
+		mailer := &captureEmailSender{}
+		authSvc := service.NewService(store, &fakeTokenManager{},
+			service.WithAuthTokenStore(tokens), service.WithEmailSender(mailer))
+
+		if err := authSvc.ForgotPassword(context.Background(), "Demo@example.com"); err != nil {
+			t.Fatalf("ForgotPassword returned error: %v", err)
+		}
+		if len(tokens.created) != 1 || tokens.created[0].Purpose != domain.AuthTokenPurposePasswordReset {
+			t.Fatalf("created tokens = %#v, want one password_reset token", tokens.created)
+		}
+		if len(mailer.messages) != 1 {
+			t.Fatalf("sent %d emails, want 1", len(mailer.messages))
+		}
+	})
+
+	t.Run("is a silent no-op for an unknown email", func(t *testing.T) {
+		store := &unitUserStore{authUserErr: domain.ErrUserNotFound}
+		tokens := &fakeAuthTokenStore{}
+		authSvc := service.NewService(store, &fakeTokenManager{},
+			service.WithAuthTokenStore(tokens), service.WithEmailSender(&captureEmailSender{}))
+
+		if err := authSvc.ForgotPassword(context.Background(), "missing@example.com"); err != nil {
+			t.Fatalf("ForgotPassword error = %v, want nil (no enumeration)", err)
+		}
+		if len(tokens.created) != 0 {
+			t.Fatal("a token was created for an unknown email")
+		}
+	})
+}
+
+func TestServiceResetPassword(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	validToken := func() domain.AuthToken {
+		return domain.AuthToken{
+			ID:        uuid.New(),
+			UserID:    userID,
+			Purpose:   domain.AuthTokenPurposePasswordReset,
+			ExpiresAt: time.Now().Add(time.Hour),
+		}
+	}
+
+	t.Run("success updates the password and revokes sessions", func(t *testing.T) {
+		store := &unitUserStore{}
+		tokens := &fakeAuthTokenStore{token: validToken()}
+		refreshStore := &unitRefreshTokenStore{}
+		authSvc := service.NewService(store, &fakeTokenManager{},
+			service.WithAuthTokenStore(tokens),
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.ResetPassword(context.Background(), "raw-token", "new-password-123"); err != nil {
+			t.Fatalf("ResetPassword returned error: %v", err)
+		}
+		if store.updatedPasswordHash == "" {
+			t.Fatal("password was not updated")
+		}
+		if len(tokens.markedUsed) != 1 {
+			t.Fatalf("marked-used tokens = %d, want 1", len(tokens.markedUsed))
+		}
+		if refreshStore.revokedAllForUser != userID {
+			t.Fatalf("revokedAllForUser = %s, want %s", refreshStore.revokedAllForUser, userID)
+		}
+	})
+
+	t.Run("rejects an expired, used, or unknown token", func(t *testing.T) {
+		expired := validToken()
+		expired.ExpiresAt = time.Now().Add(-time.Minute)
+		usedAt := time.Now()
+		used := validToken()
+		used.UsedAt = &usedAt
+
+		cases := map[string]*fakeAuthTokenStore{
+			"expired": {token: expired},
+			"used":    {token: used},
+			"unknown": {getErr: domain.ErrAuthTokenNotFound},
+		}
+		for name, tokens := range cases {
+			t.Run(name, func(t *testing.T) {
+				store := &unitUserStore{}
+				authSvc := service.NewService(store, &fakeTokenManager{}, service.WithAuthTokenStore(tokens))
+				if err := authSvc.ResetPassword(context.Background(), "raw-token", "new-password-123"); !errors.Is(err, service.ErrInvalidToken) {
+					t.Fatalf("ResetPassword error = %v, want ErrInvalidToken", err)
+				}
+				if store.updatedPasswordHash != "" {
+					t.Fatal("password was updated despite an invalid token")
+				}
+			})
+		}
+	})
+
+	t.Run("rejects a short new password", func(t *testing.T) {
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{},
+			service.WithAuthTokenStore(&fakeAuthTokenStore{token: validToken()}))
+		if err := authSvc.ResetPassword(context.Background(), "raw-token", "short"); !errors.Is(err, service.ErrInvalidInput) {
+			t.Fatalf("ResetPassword error = %v, want ErrInvalidInput", err)
+		}
+	})
+}
+
+func TestServiceVerifyEmail(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	t.Run("success marks the email verified", func(t *testing.T) {
+		store := &unitUserStore{}
+		tokens := &fakeAuthTokenStore{token: domain.AuthToken{
+			ID:        uuid.New(),
+			UserID:    userID,
+			Purpose:   domain.AuthTokenPurposeEmailVerification,
+			ExpiresAt: time.Now().Add(time.Hour),
+		}}
+		authSvc := service.NewService(store, &fakeTokenManager{}, service.WithAuthTokenStore(tokens))
+
+		if err := authSvc.VerifyEmail(context.Background(), "raw-token"); err != nil {
+			t.Fatalf("VerifyEmail returned error: %v", err)
+		}
+		if !store.emailVerifiedSet {
+			t.Fatal("email was not marked verified")
+		}
+		if len(tokens.markedUsed) != 1 {
+			t.Fatalf("marked-used tokens = %d, want 1", len(tokens.markedUsed))
+		}
+	})
+
+	t.Run("rejects an unknown token", func(t *testing.T) {
+		store := &unitUserStore{}
+		tokens := &fakeAuthTokenStore{getErr: domain.ErrAuthTokenNotFound}
+		authSvc := service.NewService(store, &fakeTokenManager{}, service.WithAuthTokenStore(tokens))
+		if err := authSvc.VerifyEmail(context.Background(), "raw-token"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("VerifyEmail error = %v, want ErrInvalidToken", err)
+		}
+		if store.emailVerifiedSet {
+			t.Fatal("email was marked verified despite an unknown token")
+		}
+	})
 }

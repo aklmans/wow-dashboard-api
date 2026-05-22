@@ -94,6 +94,22 @@ func (openAPIAuthService) ChangePassword(context.Context, string, string, string
 	return nil
 }
 
+func (openAPIAuthService) ForgotPassword(context.Context, string) error {
+	return nil
+}
+
+func (openAPIAuthService) ResetPassword(context.Context, string, string) error {
+	return nil
+}
+
+func (openAPIAuthService) VerifyEmail(context.Context, string) error {
+	return nil
+}
+
+func (openAPIAuthService) ResendVerification(context.Context, string) error {
+	return nil
+}
+
 func (openAPIUsersService) ListUsers(context.Context, userservice.ListUsersInput) (domain.ListUsersResult, error) {
 	return domain.ListUsersResult{}, nil
 }

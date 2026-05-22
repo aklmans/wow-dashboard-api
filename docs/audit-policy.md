@@ -151,6 +151,9 @@ Event types currently emitted:
 | `auth.sign_up.failed` | Account registration failed; keep metadata minimal and safe. |
 | `auth.sign_in.succeeded` | Credential authentication succeeded. |
 | `auth.sign_in.failed` | Credential authentication failed. |
+| `auth.password.changed` | A signed-in user changed their own password. |
+| `auth.password.reset` | A password was reset using a reset token. |
+| `auth.email.verified` | A user confirmed their email address. |
 | `projects.project.created` | Project creation succeeded. |
 | `projects.project.updated` | Project update succeeded. |
 | `projects.project.archived` | Project archive succeeded. |

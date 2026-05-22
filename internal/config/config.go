@@ -20,6 +20,10 @@ type Config struct {
 	Port    int    `env:"PORT" envDefault:"7272"`
 	Env     string `env:"ENV" envDefault:"development"`
 
+	// AppBaseURL is the frontend base URL used to build links in transactional
+	// emails (password reset, email verification).
+	AppBaseURL string `env:"APP_BASE_URL" envDefault:"http://localhost:3000"`
+
 	// Structured logging configuration.
 	LogFormat string `env:"LOG_FORMAT" envDefault:""`
 	LogLevel  string `env:"LOG_LEVEL" envDefault:"info"`

@@ -24,6 +24,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/forgot-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a password reset
+         * @description Emails a password-reset link if the address matches an active account. Always succeeds, so the response cannot be used to probe which emails are registered.
+         */
+        post: operations["post-auth-forgot-password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -58,6 +78,46 @@ export interface paths {
          * @description Rotates the refresh token cookie and returns a new access token.
          */
         post: operations["post-auth-refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/resend-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend the email verification link
+         * @description Issues a fresh email-verification link for the signed-in user. A no-op when the email is already verified.
+         */
+        post: operations["post-auth-resend-verification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset a password with a token
+         * @description Sets a new password using a token from the forgot-password email, then revokes every session for the account.
+         */
+        post: operations["post-auth-reset-password"];
         delete?: never;
         options?: never;
         head?: never;
@@ -118,6 +178,26 @@ export interface paths {
          * @description Creates a user account, returns an access token, and sets the refresh token cookie.
          */
         post: operations["post-auth-sign-up"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify an email address
+         * @description Confirms an email address using a verification token from the sign-up email.
+         */
+        post: operations["post-auth-verify-email"];
         delete?: never;
         options?: never;
         head?: never;
@@ -446,6 +526,11 @@ export interface components {
              */
             email: string;
             /**
+             * @description Whether the user has confirmed their email address
+             * @example true
+             */
+            emailVerified: boolean;
+            /**
              * @description User identifier
              * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
              */
@@ -598,6 +683,20 @@ export interface components {
              * @example https://example.com/errors/example
              */
             type: string;
+        };
+        ForgotPasswordInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ForgotPasswordInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: email
+             * @description Email address to send a reset link to
+             * @example demo@minimals.cc
+             */
+            email: string;
         };
         HealthResponseBody: {
             /**
@@ -796,6 +895,18 @@ export interface components {
              * @example ready
              */
             status: string;
+        };
+        ResetPasswordInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ResetPasswordInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description The new password (minimum 8 characters) */
+            newPassword: string;
+            /** @description The reset token from the email */
+            token: string;
         };
         RoleBody: {
             /**
@@ -1098,6 +1209,16 @@ export interface components {
              */
             updatedAt: string;
         };
+        VerifyEmailInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/VerifyEmailInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description The verification token from the email */
+            token: string;
+        };
     };
     responses: {
         /** @description Project API error envelope */
@@ -1172,6 +1293,33 @@ export interface operations {
             500: components["responses"]["APIError"];
         };
     };
+    "post-auth-forgot-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForgotPasswordInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
     "get-auth-me": {
         parameters: {
             query?: never;
@@ -1222,6 +1370,60 @@ export interface operations {
             };
             401: components["responses"]["APIError"];
             403: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-resend-verification": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };
@@ -1308,6 +1510,34 @@ export interface operations {
             409: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
             429: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

@@ -14,6 +14,8 @@ const (
 	EventAuthSignInSucceeded = "auth.sign_in.succeeded"
 	EventAuthSignInFailed    = "auth.sign_in.failed"
 	EventAuthPasswordChanged = "auth.password.changed"
+	EventAuthPasswordReset   = "auth.password.reset"
+	EventAuthEmailVerified   = "auth.email.verified"
 
 	AuditReasonInvalidInput       = "invalid_input"
 	AuditReasonEmailAlreadyExists = "email_already_exists"
@@ -114,6 +116,22 @@ func (s *Service) recordPasswordChanged(ctx context.Context, metadata AuditMetad
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventAuthPasswordChanged,
 		Message:   "Auth password changed.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordPasswordReset(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthPasswordReset,
+		Message:   "Auth password reset.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordEmailVerified(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthEmailVerified,
+		Message:   "Auth email verified.",
 		Metadata:  metadata,
 	})
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/auth/domain"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/password"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/token"
+	"github.com/aklmans/wow-dashboard-api/internal/email"
 	"github.com/google/uuid"
 )
 
@@ -44,6 +45,10 @@ const (
 	// accountLockoutWindow is how long an account stays locked after reaching
 	// the failure threshold. The lock is self-healing — it simply expires.
 	accountLockoutWindow = 15 * time.Minute
+	// passwordResetTokenTTL bounds how long a password-reset link is valid.
+	passwordResetTokenTTL = time.Hour
+	// emailVerificationTokenTTL bounds how long an email-verification link is valid.
+	emailVerificationTokenTTL = 24 * time.Hour
 )
 
 // defaultRoleName is the role assigned to every newly registered user.
@@ -54,12 +59,13 @@ const defaultRoleName = "user"
 // are populated by CurrentUser; sign-in/sign-up leave them empty (clients
 // fetch the resolved set from /api/auth/me).
 type PublicUser struct {
-	ID          string   `json:"id"`
-	Email       string   `json:"email"`
-	DisplayName string   `json:"displayName"`
-	Status      string   `json:"status,omitempty"`
-	Roles       []string `json:"roles,omitempty"`
-	Permissions []string `json:"permissions,omitempty"`
+	ID            string   `json:"id"`
+	Email         string   `json:"email"`
+	DisplayName   string   `json:"displayName"`
+	Status        string   `json:"status,omitempty"`
+	EmailVerified bool     `json:"emailVerified"`
+	Roles         []string `json:"roles,omitempty"`
+	Permissions   []string `json:"permissions,omitempty"`
 }
 
 // Session represents a successful authentication result containing both the
@@ -97,6 +103,16 @@ type UserStore interface {
 	ClearLoginFailures(ctx context.Context, userID uuid.UUID, now time.Time) error
 	GetUserByIDForAuth(ctx context.Context, id uuid.UUID) (domain.AuthUser, error)
 	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string, updatedAt time.Time) error
+	SetEmailVerified(ctx context.Context, userID uuid.UUID, verifiedAt time.Time, updatedAt time.Time) error
+}
+
+// AuthTokenStore is the persistence port for the one-time tokens backing the
+// password-reset and email-verification flows.
+type AuthTokenStore interface {
+	CreateAuthToken(ctx context.Context, input domain.CreateAuthTokenInput) error
+	GetAuthTokenByHash(ctx context.Context, purpose string, tokenHash string) (domain.AuthToken, error)
+	MarkAuthTokenUsed(ctx context.Context, id uuid.UUID, usedAt time.Time) error
+	DeleteAuthTokensForUser(ctx context.Context, userID uuid.UUID, purpose string) error
 }
 
 // RefreshTokenStore defines the persistence port for opaque refresh tokens.
@@ -133,6 +149,9 @@ type Service struct {
 	refreshTokenTTL   time.Duration
 	unitOfWork        UnitOfWork
 	tokenManager      TokenManager
+	authTokenStore    AuthTokenStore
+	emailSender       email.Sender
+	appBaseURL        string
 	auditRecorder     AuditRecorder
 	now               func() time.Time
 }
@@ -179,12 +198,42 @@ func WithClock(now func() time.Time) Option {
 	}
 }
 
+// WithAuthTokenStore enables the password-reset and email-verification flows.
+func WithAuthTokenStore(store AuthTokenStore) Option {
+	return func(s *Service) {
+		if store != nil {
+			s.authTokenStore = store
+		}
+	}
+}
+
+// WithEmailSender configures transactional email delivery. The default is a
+// log-only sender.
+func WithEmailSender(sender email.Sender) Option {
+	return func(s *Service) {
+		if sender != nil {
+			s.emailSender = sender
+		}
+	}
+}
+
+// WithAppBaseURL sets the frontend base URL used to build links in emails.
+func WithAppBaseURL(baseURL string) Option {
+	return func(s *Service) {
+		if baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/"); baseURL != "" {
+			s.appBaseURL = baseURL
+		}
+	}
+}
+
 // NewService constructs a new Service instance with injected dependencies.
 func NewService(store UserStore, tokenManager TokenManager, opts ...Option) *Service {
 	s := &Service{
 		store:           store,
 		refreshTokenTTL: 14 * 24 * time.Hour,
 		tokenManager:    tokenManager,
+		emailSender:     email.LogSender{},
+		appBaseURL:      "http://localhost:3000",
 		auditRecorder:   noopAuditRecorder{},
 		now:             time.Now,
 	}
@@ -267,6 +316,7 @@ func (s *Service) SignUp(ctx context.Context, input SignUpInput) (*Session, erro
 			Email:  session.User.Email,
 			UserID: session.User.ID,
 		})
+		s.sendEmailVerification(ctx, userID, email)
 		return session, nil
 	}
 
@@ -304,6 +354,7 @@ func (s *Service) SignUp(ctx context.Context, input SignUpInput) (*Session, erro
 		Email:  session.User.Email,
 		UserID: session.User.ID,
 	})
+	s.sendEmailVerification(ctx, createdUser.ID, email)
 	return session, nil
 }
 
@@ -568,12 +619,13 @@ func (s *Service) CurrentUser(ctx context.Context, rawAccessToken string) (*Publ
 	}
 
 	return &PublicUser{
-		ID:          parsedUUID.String(),
-		Email:       user.Email,
-		DisplayName: user.DisplayName,
-		Status:      string(user.Status),
-		Roles:       roles,
-		Permissions: permissions,
+		ID:            parsedUUID.String(),
+		Email:         user.Email,
+		DisplayName:   user.DisplayName,
+		Status:        string(user.Status),
+		EmailVerified: user.EmailVerified,
+		Roles:         roles,
+		Permissions:   permissions,
 	}, nil
 }
 
@@ -639,6 +691,198 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 
 	s.recordPasswordChanged(ctx, AuditMetadata{UserID: userID.String()})
 	return nil
+}
+
+// ForgotPassword issues a password-reset token and emails it. To avoid account
+// enumeration the result is always nil whether or not the email matches an
+// active account.
+func (s *Service) ForgotPassword(ctx context.Context, rawEmail string) error {
+	if s.authTokenStore == nil {
+		return fmt.Errorf("auth: password reset is not configured")
+	}
+	emailAddr := strings.ToLower(strings.TrimSpace(rawEmail))
+
+	user, err := s.store.GetUserByEmailForAuth(ctx, emailAddr)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return nil // No enumeration: report success regardless.
+		}
+		return fmt.Errorf("auth: failed to look up user: %w", err)
+	}
+	if user.Status == domain.UserStatusDisabled {
+		return nil // Do not issue resets for disabled accounts.
+	}
+
+	now := s.now().UTC().Truncate(time.Microsecond)
+	rawToken, err := newRefreshToken()
+	if err != nil {
+		return fmt.Errorf("auth: failed to generate reset token: %w", err)
+	}
+	_ = s.authTokenStore.DeleteAuthTokensForUser(ctx, user.ID, domain.AuthTokenPurposePasswordReset)
+	if err := s.authTokenStore.CreateAuthToken(ctx, domain.CreateAuthTokenInput{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		Purpose:   domain.AuthTokenPurposePasswordReset,
+		TokenHash: hashRefreshToken(rawToken),
+		ExpiresAt: now.Add(passwordResetTokenTTL),
+		CreatedAt: now,
+	}); err != nil {
+		return fmt.Errorf("auth: failed to store reset token: %w", err)
+	}
+
+	if err := s.emailSender.Send(ctx, email.Message{
+		To:      user.Email,
+		Subject: "Reset your password",
+		Body: fmt.Sprintf("Reset your password by opening:\n%s/reset-password?token=%s\n\n"+
+			"The link expires in 1 hour. If you did not request this, ignore this email.", s.appBaseURL, rawToken),
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to send password reset email", "error", err)
+	}
+	return nil
+}
+
+// ResetPassword consumes a password-reset token and sets a new password,
+// revoking every existing session for the user.
+func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPassword string) error {
+	if s.authTokenStore == nil {
+		return fmt.Errorf("auth: password reset is not configured")
+	}
+	if len(newPassword) > maxPasswordLength {
+		return fmt.Errorf("%w: password must not exceed %d characters", ErrInvalidInput, maxPasswordLength)
+	}
+	if len(newPassword) < minPasswordLength {
+		return fmt.Errorf("%w: password must be at least %d characters", ErrInvalidInput, minPasswordLength)
+	}
+
+	authToken, err := s.consumeAuthToken(ctx, domain.AuthTokenPurposePasswordReset, rawToken)
+	if err != nil {
+		return err
+	}
+
+	newHash, err := password.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("auth: failed to hash password: %w", err)
+	}
+	now := s.now().UTC().Truncate(time.Microsecond)
+	if err := s.store.UpdateUserPassword(ctx, authToken.UserID, newHash, now); err != nil {
+		return fmt.Errorf("auth: failed to update password: %w", err)
+	}
+	if err := s.authTokenStore.MarkAuthTokenUsed(ctx, authToken.ID, now); err != nil {
+		slog.ErrorContext(ctx, "failed to mark reset token used", "error", err)
+	}
+	if s.refreshTokenStore != nil {
+		if err := s.refreshTokenStore.RevokeAllForUser(ctx, authToken.UserID, now); err != nil {
+			slog.ErrorContext(ctx, "failed to revoke refresh tokens after password reset", "error", err)
+		}
+	}
+	s.recordPasswordReset(ctx, AuditMetadata{UserID: authToken.UserID.String()})
+	return nil
+}
+
+// VerifyEmail consumes an email-verification token and marks the user's email
+// address as verified.
+func (s *Service) VerifyEmail(ctx context.Context, rawToken string) error {
+	if s.authTokenStore == nil {
+		return fmt.Errorf("auth: email verification is not configured")
+	}
+	authToken, err := s.consumeAuthToken(ctx, domain.AuthTokenPurposeEmailVerification, rawToken)
+	if err != nil {
+		return err
+	}
+	now := s.now().UTC().Truncate(time.Microsecond)
+	if err := s.store.SetEmailVerified(ctx, authToken.UserID, now, now); err != nil {
+		return fmt.Errorf("auth: failed to mark email verified: %w", err)
+	}
+	if err := s.authTokenStore.MarkAuthTokenUsed(ctx, authToken.ID, now); err != nil {
+		slog.ErrorContext(ctx, "failed to mark verification token used", "error", err)
+	}
+	s.recordEmailVerified(ctx, AuditMetadata{UserID: authToken.UserID.String()})
+	return nil
+}
+
+// ResendVerification issues a fresh email-verification token for the
+// signed-in user. It is a no-op if the email is already verified.
+func (s *Service) ResendVerification(ctx context.Context, rawAccessToken string) error {
+	if s.authTokenStore == nil {
+		return fmt.Errorf("auth: email verification is not configured")
+	}
+	claims, err := s.tokenManager.VerifyAccessToken(rawAccessToken)
+	if err != nil {
+		return ErrInvalidToken
+	}
+	userID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return fmt.Errorf("%w: subject is not a valid UUID", ErrInvalidToken)
+	}
+	user, err := s.store.GetUserByIDForAuth(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return ErrInvalidToken
+		}
+		return fmt.Errorf("auth: failed to retrieve user: %w", err)
+	}
+	if user.EmailVerified {
+		return nil // Already verified — nothing to do.
+	}
+	s.sendEmailVerification(ctx, userID, user.Email)
+	return nil
+}
+
+// consumeAuthToken looks up a token by purpose and confirms it is unused and
+// unexpired. A missing, used, or expired token surfaces as ErrInvalidToken.
+func (s *Service) consumeAuthToken(ctx context.Context, purpose string, rawToken string) (domain.AuthToken, error) {
+	rawToken = strings.TrimSpace(rawToken)
+	if rawToken == "" {
+		return domain.AuthToken{}, ErrInvalidToken
+	}
+	authToken, err := s.authTokenStore.GetAuthTokenByHash(ctx, purpose, hashRefreshToken(rawToken))
+	if err != nil {
+		if errors.Is(err, domain.ErrAuthTokenNotFound) {
+			return domain.AuthToken{}, ErrInvalidToken
+		}
+		return domain.AuthToken{}, fmt.Errorf("auth: failed to retrieve token: %w", err)
+	}
+	if authToken.UsedAt != nil {
+		return domain.AuthToken{}, ErrInvalidToken
+	}
+	if !authToken.ExpiresAt.After(s.now().UTC()) {
+		return domain.AuthToken{}, ErrInvalidToken
+	}
+	return authToken, nil
+}
+
+// sendEmailVerification issues an email-verification token for the user and
+// delivers it. It is best-effort — failures are logged, never fatal.
+func (s *Service) sendEmailVerification(ctx context.Context, userID uuid.UUID, recipientEmail string) {
+	if s.authTokenStore == nil {
+		return
+	}
+	now := s.now().UTC().Truncate(time.Microsecond)
+	rawToken, err := newRefreshToken()
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to generate email verification token", "error", err)
+		return
+	}
+	_ = s.authTokenStore.DeleteAuthTokensForUser(ctx, userID, domain.AuthTokenPurposeEmailVerification)
+	if err := s.authTokenStore.CreateAuthToken(ctx, domain.CreateAuthTokenInput{
+		ID:        uuid.New(),
+		UserID:    userID,
+		Purpose:   domain.AuthTokenPurposeEmailVerification,
+		TokenHash: hashRefreshToken(rawToken),
+		ExpiresAt: now.Add(emailVerificationTokenTTL),
+		CreatedAt: now,
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to store email verification token", "error", err)
+		return
+	}
+	if err := s.emailSender.Send(ctx, email.Message{
+		To:      recipientEmail,
+		Subject: "Verify your email address",
+		Body: fmt.Sprintf("Confirm your email address by opening:\n%s/verify-email?token=%s\n\n"+
+			"The link expires in 24 hours.", s.appBaseURL, rawToken),
+	}); err != nil {
+		slog.ErrorContext(ctx, "failed to send email verification", "error", err)
+	}
 }
 
 func (s *Service) issueSession(ctx context.Context, user domain.User, familyID uuid.UUID) (*Session, error) {
