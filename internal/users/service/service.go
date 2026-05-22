@@ -35,8 +35,7 @@ type ListUsersInput struct {
 type UserStore interface {
 	ListUsers(ctx context.Context, input domain.ListUsersInput) (domain.ListUsersResult, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (domain.User, error)
-	SetUserStatus(ctx context.Context, input domain.SetUserStatusInput) error
-	ReplaceUserRoles(ctx context.Context, input domain.ReplaceUserRolesInput) error
+	UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error)
 }
 
 // UpdateUserInput is the raw admin update input the handler passes to the
@@ -127,12 +126,10 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		return domain.User{}, fmt.Errorf("%w: at least one of status or roleIds must be provided", ErrInvalidInput)
 	}
 
-	// Confirm the target exists up front so a roles-only update on a missing
-	// user reports ErrNotFound rather than a foreign-key failure.
-	if _, err := s.fetchUser(ctx, targetID); err != nil {
-		return domain.User{}, err
-	}
-
+	// Normalize and validate every field up front so a malformed input never
+	// leaves a partial change behind; the store then applies the update
+	// atomically in a single transaction.
+	update := domain.UpdateUserInput{ID: targetID, UpdatedAt: s.now().UTC().Truncate(time.Microsecond)}
 	var changedFields []string
 	var auditRoleIDs []string
 
@@ -141,16 +138,7 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		if err != nil {
 			return domain.User{}, err
 		}
-		if err := s.store.SetUserStatus(ctx, domain.SetUserStatusInput{
-			ID:        targetID,
-			Status:    status,
-			UpdatedAt: s.now().UTC().Truncate(time.Microsecond),
-		}); err != nil {
-			if errors.Is(err, domain.ErrUserNotFound) {
-				return domain.User{}, ErrNotFound
-			}
-			return domain.User{}, err
-		}
+		update.Status = &status
 		changedFields = append(changedFields, "status")
 	}
 
@@ -159,15 +147,7 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		if err != nil {
 			return domain.User{}, err
 		}
-		if err := s.store.ReplaceUserRoles(ctx, domain.ReplaceUserRolesInput{
-			UserID:  targetID,
-			RoleIDs: roleIDs,
-		}); err != nil {
-			if errors.Is(err, domain.ErrRoleNotFound) {
-				return domain.User{}, fmt.Errorf("%w: one or more role ids do not exist", ErrInvalidInput)
-			}
-			return domain.User{}, err
-		}
+		update.RoleIDs = roleIDs
 		changedFields = append(changedFields, "roles")
 		auditRoleIDs = make([]string, len(roleIDs))
 		for i, id := range roleIDs {
@@ -175,8 +155,14 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		}
 	}
 
-	user, err := s.fetchUser(ctx, targetID)
+	user, err := s.store.UpdateUser(ctx, update)
 	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return domain.User{}, ErrNotFound
+		}
+		if errors.Is(err, domain.ErrRoleNotFound) {
+			return domain.User{}, fmt.Errorf("%w: one or more role ids do not exist", ErrInvalidInput)
+		}
 		return domain.User{}, err
 	}
 

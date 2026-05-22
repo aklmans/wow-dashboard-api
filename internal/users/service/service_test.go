@@ -121,7 +121,7 @@ func TestServiceGetUserPropagatesNotFound(t *testing.T) {
 func TestServiceUpdateUserChangesStatus(t *testing.T) {
 	actorID := uuid.New()
 	targetID := uuid.New()
-	store := &fakeUserStore{getResult: domain.User{ID: targetID, Status: domain.UserStatusDisabled, Roles: []string{"user"}}}
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID, Status: domain.UserStatusDisabled, Roles: []string{"user"}}}
 	audit := &fakeUserAuditRecorder{}
 	svc := service.NewService(store, service.WithAuditRecorder(audit))
 
@@ -132,11 +132,14 @@ func TestServiceUpdateUserChangesStatus(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateUser returned error: %v", err)
 	}
-	if !store.statusCalled || store.statusInput.Status != domain.UserStatusDisabled {
-		t.Fatalf("SetUserStatus call = %v / %#v, want disabled", store.statusCalled, store.statusInput)
+	if !store.updateCalled {
+		t.Fatal("store.UpdateUser was not called")
 	}
-	if store.rolesCalled {
-		t.Fatal("ReplaceUserRoles was called for a status-only update")
+	if store.updateInput.Status == nil || *store.updateInput.Status != domain.UserStatusDisabled {
+		t.Fatalf("update status = %v, want disabled", store.updateInput.Status)
+	}
+	if store.updateInput.RoleIDs != nil {
+		t.Fatalf("update RoleIDs = %v, want nil for a status-only update", store.updateInput.RoleIDs)
 	}
 	if len(audit.events) != 1 || audit.events[0].EventType != service.EventUserUpdated {
 		t.Fatalf("audit = %#v, want one users.user.updated", audit.events)
@@ -148,9 +151,8 @@ func TestServiceUpdateUserReplacesRoles(t *testing.T) {
 	targetID := uuid.New()
 	roleA := uuid.New()
 	roleB := uuid.New()
-	store := &fakeUserStore{getResult: domain.User{ID: targetID}}
-	audit := &fakeUserAuditRecorder{}
-	svc := service.NewService(store, service.WithAuditRecorder(audit))
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID}}
+	svc := service.NewService(store)
 
 	// roleA is repeated to confirm the service de-duplicates.
 	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
@@ -160,14 +162,11 @@ func TestServiceUpdateUserReplacesRoles(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateUser returned error: %v", err)
 	}
-	if !store.rolesCalled {
-		t.Fatal("ReplaceUserRoles was not called")
+	if len(store.updateInput.RoleIDs) != 2 {
+		t.Fatalf("update RoleIDs = %v, want 2 (de-duplicated)", store.updateInput.RoleIDs)
 	}
-	if len(store.rolesInput.RoleIDs) != 2 {
-		t.Fatalf("replaced role ids = %v, want 2 (de-duplicated)", store.rolesInput.RoleIDs)
-	}
-	if store.statusCalled {
-		t.Fatal("SetUserStatus was called for a roles-only update")
+	if store.updateInput.Status != nil {
+		t.Fatalf("update status = %v, want nil for a roles-only update", store.updateInput.Status)
 	}
 }
 
@@ -183,7 +182,7 @@ func TestServiceUpdateUserRejectsSelfModification(t *testing.T) {
 	}); !errors.Is(err, service.ErrSelfModification) {
 		t.Fatalf("UpdateUser error = %v, want ErrSelfModification", err)
 	}
-	if store.statusCalled || store.rolesCalled {
+	if store.updateCalled {
 		t.Fatal("store was mutated for a self modification")
 	}
 }
@@ -203,12 +202,12 @@ func TestServiceUpdateUserRejectsInvalidInput(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeUserStore{getResult: domain.User{}}
+			store := &fakeUserStore{}
 			svc := service.NewService(store)
 			if _, err := svc.UpdateUser(context.Background(), tt.input); !errors.Is(err, service.ErrInvalidInput) {
 				t.Fatalf("UpdateUser error = %v, want ErrInvalidInput", err)
 			}
-			if store.statusCalled || store.rolesCalled {
+			if store.updateCalled {
 				t.Fatal("store was mutated for invalid input")
 			}
 		})
@@ -216,7 +215,7 @@ func TestServiceUpdateUserRejectsInvalidInput(t *testing.T) {
 }
 
 func TestServiceUpdateUserMapsNotFound(t *testing.T) {
-	store := &fakeUserStore{getErr: domain.ErrUserNotFound}
+	store := &fakeUserStore{updateErr: domain.ErrUserNotFound}
 	svc := service.NewService(store)
 
 	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
@@ -229,7 +228,7 @@ func TestServiceUpdateUserMapsNotFound(t *testing.T) {
 }
 
 func TestServiceUpdateUserMapsUnknownRole(t *testing.T) {
-	store := &fakeUserStore{getResult: domain.User{}, rolesErr: domain.ErrRoleNotFound}
+	store := &fakeUserStore{updateErr: domain.ErrRoleNotFound}
 	svc := service.NewService(store)
 
 	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
@@ -264,13 +263,10 @@ type fakeUserStore struct {
 	getResult domain.User
 	getErr    error
 
-	statusCalled bool
-	statusInput  domain.SetUserStatusInput
-	statusErr    error
-
-	rolesCalled bool
-	rolesInput  domain.ReplaceUserRolesInput
-	rolesErr    error
+	updateCalled bool
+	updateInput  domain.UpdateUserInput
+	updateResult domain.User
+	updateErr    error
 }
 
 func (f *fakeUserStore) ListUsers(ctx context.Context, input domain.ListUsersInput) (domain.ListUsersResult, error) {
@@ -288,14 +284,11 @@ func (f *fakeUserStore) GetUserByID(ctx context.Context, id uuid.UUID) (domain.U
 	return f.getResult, nil
 }
 
-func (f *fakeUserStore) SetUserStatus(ctx context.Context, input domain.SetUserStatusInput) error {
-	f.statusCalled = true
-	f.statusInput = input
-	return f.statusErr
-}
-
-func (f *fakeUserStore) ReplaceUserRoles(ctx context.Context, input domain.ReplaceUserRolesInput) error {
-	f.rolesCalled = true
-	f.rolesInput = input
-	return f.rolesErr
+func (f *fakeUserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error) {
+	f.updateCalled = true
+	f.updateInput = input
+	if f.updateErr != nil {
+		return domain.User{}, f.updateErr
+	}
+	return f.updateResult, nil
 }

@@ -7,28 +7,25 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/aklmans/wow-dashboard-api/internal/store/query"
 	"github.com/aklmans/wow-dashboard-api/internal/users/domain"
 )
 
+// UserStore is the user management store adapter. It holds the pool directly
+// because an admin update can change a user's status and role set together,
+// which must be applied in one transaction.
 type UserStore struct {
+	pool    *pgxpool.Pool
 	queries *query.Queries
 }
 
-func NewUserStore(q *query.Queries) *UserStore {
-	return &UserStore{queries: q}
-}
-
-func NewUserStoreFromDB(db query.DBTX) *UserStore {
-	return NewUserStore(query.New(db))
+func NewUserStore(pool *pgxpool.Pool) *UserStore {
+	return &UserStore{pool: pool, queries: query.New(pool)}
 }
 
 func (s *UserStore) ListUsers(ctx context.Context, input domain.ListUsersInput) (domain.ListUsersResult, error) {
-	if s.queries == nil {
-		return domain.ListUsersResult{}, fmt.Errorf("usersrepo: queries is nil")
-	}
-
 	search := pgText(escapeLikePattern(input.Search))
 	role := pgText(input.Role)
 	status := pgText(string(input.Status))
@@ -72,10 +69,6 @@ func (s *UserStore) ListUsers(ctx context.Context, input domain.ListUsersInput) 
 
 // GetUserByID fetches a single user together with the names of their roles.
 func (s *UserStore) GetUserByID(ctx context.Context, id uuid.UUID) (domain.User, error) {
-	if s.queries == nil {
-		return domain.User{}, fmt.Errorf("usersrepo: queries is nil")
-	}
-
 	row, err := s.queries.GetUserByID(ctx, pgUUIDFromDomain(id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -100,49 +93,57 @@ func (s *UserStore) GetUserByID(ctx context.Context, id uuid.UUID) (domain.User,
 	return user, nil
 }
 
-// SetUserStatus updates a user's status. A missing user surfaces as
-// domain.ErrUserNotFound.
-func (s *UserStore) SetUserStatus(ctx context.Context, input domain.SetUserStatusInput) error {
-	if s.queries == nil {
-		return fmt.Errorf("usersrepo: queries is nil")
-	}
-
-	_, err := s.queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
-		ID:        pgUUIDFromDomain(input.ID),
-		Status:    string(input.Status),
-		UpdatedAt: pgTimestamp(input.UpdatedAt),
-	})
+// UpdateUser applies an admin status change and/or role-set replacement to a
+// user in one transaction, then returns the resulting user. A missing user
+// surfaces as domain.ErrUserNotFound; an unknown role id as
+// domain.ErrRoleNotFound. On any error the transaction is rolled back, so the
+// update is all-or-nothing.
+func (s *UserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error) {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return domain.User{}, fmt.Errorf("usersrepo: begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	q := query.New(tx)
+
+	// Confirm the user exists inside the transaction so a roles-only update on
+	// a missing user reports ErrUserNotFound rather than a foreign-key failure.
+	if _, err := q.GetUserByID(ctx, pgUUIDFromDomain(input.ID)); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.ErrUserNotFound
+			return domain.User{}, domain.ErrUserNotFound
 		}
-		return fmt.Errorf("usersrepo: set user status: %w", err)
-	}
-	return nil
-}
-
-// ReplaceUserRoles replaces a user's full set of role assignments. Every role
-// id must exist or the call fails with domain.ErrRoleNotFound and no change is
-// made.
-func (s *UserStore) ReplaceUserRoles(ctx context.Context, input domain.ReplaceUserRolesInput) error {
-	if s.queries == nil {
-		return fmt.Errorf("usersrepo: queries is nil")
+		return domain.User{}, fmt.Errorf("usersrepo: load user: %w", err)
 	}
 
-	roleIDs := pgUUIDsFromDomain(input.RoleIDs)
-	found, err := s.queries.CountRolesByIDs(ctx, roleIDs)
-	if err != nil {
-		return fmt.Errorf("usersrepo: count roles: %w", err)
-	}
-	if int(found) != len(input.RoleIDs) {
-		return domain.ErrRoleNotFound
+	if input.Status != nil {
+		if _, err := q.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
+			ID:        pgUUIDFromDomain(input.ID),
+			Status:    string(*input.Status),
+			UpdatedAt: pgTimestamp(input.UpdatedAt),
+		}); err != nil {
+			return domain.User{}, fmt.Errorf("usersrepo: update user status: %w", err)
+		}
 	}
 
-	if err := s.queries.ReplaceUserRoles(ctx, query.ReplaceUserRolesParams{
-		UserID:  pgUUIDFromDomain(input.UserID),
-		RoleIds: roleIDs,
-	}); err != nil {
-		return fmt.Errorf("usersrepo: replace user roles: %w", err)
+	if input.RoleIDs != nil {
+		roleIDs := pgUUIDsFromDomain(input.RoleIDs)
+		found, err := q.CountRolesByIDs(ctx, roleIDs)
+		if err != nil {
+			return domain.User{}, fmt.Errorf("usersrepo: count roles: %w", err)
+		}
+		if int(found) != len(input.RoleIDs) {
+			return domain.User{}, domain.ErrRoleNotFound
+		}
+		if err := q.ReplaceUserRoles(ctx, query.ReplaceUserRolesParams{
+			UserID:  pgUUIDFromDomain(input.ID),
+			RoleIds: roleIDs,
+		}); err != nil {
+			return domain.User{}, fmt.Errorf("usersrepo: replace user roles: %w", err)
+		}
 	}
-	return nil
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, fmt.Errorf("usersrepo: commit: %w", err)
+	}
+	return s.GetUserByID(ctx, input.ID)
 }

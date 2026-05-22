@@ -50,16 +50,13 @@ type ListUsersResult struct {
 	Total    int
 }
 
-// SetUserStatusInput is the normalized input for an admin status change.
-type SetUserStatusInput struct {
+// UpdateUserInput is the normalized input for an admin user update, applied
+// atomically by the store. A nil Status leaves the status unchanged; a nil
+// RoleIDs leaves role assignments unchanged, while a non-nil RoleIDs replaces
+// the user's entire role set.
+type UpdateUserInput struct {
 	ID        uuid.UUID
-	Status    UserStatus
+	Status    *UserStatus
+	RoleIDs   []uuid.UUID
 	UpdatedAt time.Time
-}
-
-// ReplaceUserRolesInput is the normalized input for replacing a user's full
-// set of role assignments.
-type ReplaceUserRolesInput struct {
-	UserID  uuid.UUID
-	RoleIDs []uuid.UUID
 }
