@@ -89,6 +89,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Base Standard Middlewares
 	router.Use(middleware.RequestID)
+
+	// Prometheus HTTP instrumentation, early so it times the whole request.
+	metrics := httpmiddleware.NewMetrics()
+	router.Use(metrics.Middleware())
+
 	router.Use(httpmiddleware.RequestLogger(logger))
 	router.Use(middleware.Recoverer)
 
@@ -97,6 +102,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Baseline security response headers; HSTS only in production (HTTPS).
 	router.Use(httpmiddleware.SecurityHeaders(cfg.Env == "production"))
+
+	// Prometheus scrape endpoint, served outside the Huma JSON API.
+	router.Handle("/metrics", metrics.Handler())
 
 	// Configure and initialize Huma API dynamically using the shared constructor
 	api := NewAPI(router)

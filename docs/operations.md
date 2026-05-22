@@ -179,7 +179,7 @@ make openapi-types
 
 Future evolution items, not blockers for the current baseline:
 
-- Metrics and distributed tracing.
+- Distributed tracing. (Prometheus metrics are exposed at `/metrics`.)
 - External secret-manager integration.
 - Distributed locks and job queues.
 - An attribute-based access-control (ABAC) policy engine. Role-based access

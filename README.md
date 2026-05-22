@@ -480,6 +480,10 @@ for the required variables and the full validation rule list.
 
 In Kubernetes or Docker Compose, configure `/healthz` as the liveness probe and `/readyz` as the readiness probe. Do not use `/readyz` as a liveness probe — a temporary database outage should stop new traffic, not force a restart loop.
 
+### Metrics
+
+`GET /metrics` exposes Prometheus metrics — `http_requests_total` and `http_request_duration_seconds` (labeled by method, matched route, and status) plus the standard Go runtime and process collectors. The route label uses the matched Chi pattern (e.g. `/api/users/{id}`), so cardinality stays bounded. The endpoint is unauthenticated; restrict it at the network or ingress layer if the deployment is internet-facing.
+
 ### Database Migrations
 
 The production container ships no migration tooling — run migrations as a
