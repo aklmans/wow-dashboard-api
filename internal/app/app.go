@@ -21,10 +21,12 @@ import (
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
 	"github.com/aklmans/wow-dashboard-api/internal/logging"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
+	rolesservice "github.com/aklmans/wow-dashboard-api/internal/roles/service"
 	"github.com/aklmans/wow-dashboard-api/internal/store"
 	"github.com/aklmans/wow-dashboard-api/internal/store/authrepo"
 	"github.com/aklmans/wow-dashboard-api/internal/store/projectsrepo"
 	"github.com/aklmans/wow-dashboard-api/internal/store/query"
+	"github.com/aklmans/wow-dashboard-api/internal/store/rolesrepo"
 	"github.com/aklmans/wow-dashboard-api/internal/store/systemeventsrepo"
 	"github.com/aklmans/wow-dashboard-api/internal/store/usersrepo"
 	systemeventsservice "github.com/aklmans/wow-dashboard-api/internal/systemevents/service"
@@ -35,6 +37,7 @@ import (
 type Dependencies struct {
 	AuthService             handlers.AuthService
 	UsersService            handlers.UsersService
+	RolesService            handlers.RolesService
 	ProjectsService         handlers.ProjectsService
 	SystemEventsService     handlers.SystemEventsService
 	RefreshCookie           handlers.RefreshCookieConfig
@@ -55,6 +58,9 @@ func RegisterRoutes(api huma.API, deps Dependencies) {
 	}
 	if deps.AuthService != nil && deps.UsersService != nil {
 		handlers.RegisterUsers(api, deps.AuthService, deps.UsersService)
+	}
+	if deps.AuthService != nil && deps.RolesService != nil {
+		handlers.RegisterRoles(api, deps.AuthService, deps.RolesService)
 	}
 	if deps.AuthService != nil && deps.ProjectsService != nil {
 		handlers.RegisterProjects(api, deps.AuthService, deps.ProjectsService)
@@ -117,6 +123,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		authservice.WithAuditRecorder(auditRecorder))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(queries),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)))
+	rolesSvc := rolesservice.NewService(rolesrepo.NewRoleStore(pool),
+		rolesservice.WithAuditRecorder(rolesrepo.NewSystemEventRecorder(queries)))
 	projectsSvc := projectservice.NewService(projectsrepo.NewProjectStore(queries),
 		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)))
 	systemEventsSvc := systemeventsservice.NewService(systemeventsrepo.NewEventStore(queries))
@@ -131,6 +139,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	RegisterRoutes(api, Dependencies{
 		AuthService:             authSvc,
 		UsersService:            usersSvc,
+		RolesService:            rolesSvc,
 		ProjectsService:         projectsSvc,
 		SystemEventsService:     systemEventsSvc,
 		RefreshCookie:           refreshCookieConfig(cfg),

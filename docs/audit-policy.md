@@ -158,6 +158,9 @@ Event types currently emitted:
 | `projects.member.role_changed` | A project member's role was changed. |
 | `projects.member.removed` | A project member's access was revoked. |
 | `users.user.updated` | An admin changed another user's status or replaced their role set. |
+| `roles.role.created` | An admin created a custom role. |
+| `roles.role.updated` | An admin changed a role's name, description, or permissions. |
+| `roles.role.deleted` | An admin deleted a custom role. |
 
 When adding an `event_type`, update this table and add tests that prove the
 event is emitted only under the intended conditions with safe metadata. Before

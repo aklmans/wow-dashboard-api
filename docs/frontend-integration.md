@@ -90,6 +90,10 @@ Sign-up returns `201`; sign-in, refresh, and me return `200`.
   `{ "code": "forbidden", "message": "You do not have permission to perform this action." }`.
 - `GET /api/auth/me` returns the user's `roles` and effective `permissions`
   arrays — use them to render menus and gate UI actions.
+- `/api/roles/*` and `/api/permissions` manage roles (gated by `roles:read` /
+  `roles:manage`). An admin composes a custom role from the catalog returned
+  by `GET /api/permissions`; the built-in `admin` and `user` roles are
+  immutable.
 - New sign-ups receive the `user` role. The seeded `demo@minimals.cc` user
   holds the `admin` role, which carries the `*` (all-permissions) wildcard.
 

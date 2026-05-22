@@ -104,6 +104,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List assignable permissions
+         * @description Returns the catalog of permissions an admin can assign to a role. Requires the roles:read permission.
+         */
+        get: operations["list-permissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -202,6 +222,58 @@ export interface paths {
          * @description Changes an existing member's access role. Owner only.
          */
         patch: operations["patch-project-member"];
+        trace?: never;
+    };
+    "/api/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List roles
+         * @description Returns every role with its permissions and assigned-user count. Requires the roles:read permission.
+         */
+        get: operations["list-roles"];
+        put?: never;
+        /**
+         * Create a role
+         * @description Creates a custom role from assignable catalog permissions. Requires the roles:manage permission.
+         */
+        post: operations["create-role"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/roles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get role by id
+         * @description Returns a single role by id. Requires the roles:read permission.
+         */
+        get: operations["get-role"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a role
+         * @description Deletes a custom role. Requires the roles:manage permission. System roles, and roles still assigned to users, cannot be deleted.
+         */
+        delete: operations["delete-role"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a role
+         * @description Updates a custom role's name, description, and/or permission set. Requires the roles:manage permission. System roles cannot be modified.
+         */
+        patch: operations["update-role"];
         trace?: never;
     };
     "/api/system-events": {
@@ -428,6 +500,26 @@ export interface components {
              */
             status?: string;
         };
+        CreateRoleInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/CreateRoleInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description Optional role description
+             * @example Read-only access to audit data
+             */
+            description?: string;
+            /**
+             * @description Unique role name
+             * @example auditor
+             */
+            name: string;
+            /** @description Permission strings to grant; each must be an assignable catalog permission */
+            permissions?: string[] | null;
+        };
         ErrorDetail: {
             /** @description Where the error occurred, e.g. 'body.items[3].tags' or 'path.thing-id' */
             location?: string;
@@ -487,6 +579,16 @@ export interface components {
              * @example ok
              */
             status: string;
+        };
+        PermissionsListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PermissionsListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Every permission an admin can assign to a role */
+            permissions: string[];
         };
         ProjectDetailBody: {
             /**
@@ -663,6 +765,79 @@ export interface components {
              */
             status: string;
         };
+        RoleBody: {
+            /**
+             * Format: date-time
+             * @description Creation timestamp
+             */
+            createdAt: string;
+            /**
+             * @description Role description
+             * @example Read-only access to audit data
+             */
+            description: string;
+            /**
+             * @description Role identifier
+             * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
+             */
+            id: string;
+            /**
+             * @description Whether this is a built-in role that cannot be modified
+             * @example false
+             */
+            isSystem: boolean;
+            /**
+             * @description Role name
+             * @example auditor
+             */
+            name: string;
+            /** @description Permission strings granted by the role */
+            permissions: string[];
+            /**
+             * Format: date-time
+             * @description Last update timestamp
+             */
+            updatedAt: string;
+            /**
+             * Format: int64
+             * @description Number of users currently assigned this role
+             * @example 3
+             */
+            userCount: number;
+        };
+        RoleDeletedBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RoleDeletedBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description Deletion success flag
+             * @example true
+             */
+            success: boolean;
+        };
+        RoleDetailBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RoleDetailBody.json
+             */
+            readonly $schema?: string;
+            /** @description Requested role */
+            role: components["schemas"]["RoleBody"];
+        };
+        RolesListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/RolesListBody.json
+             */
+            readonly $schema?: string;
+            /** @description All roles */
+            roles: components["schemas"]["RoleBody"][];
+        };
         SignInInputBody: {
             /**
              * Format: uri
@@ -788,6 +963,20 @@ export interface components {
              * @enum {string}
              */
             role: "viewer" | "editor";
+        };
+        UpdateRoleInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UpdateRoleInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description New description; omit to leave unchanged */
+            description?: string;
+            /** @description New name; omit to leave unchanged */
+            name?: string;
+            /** @description Replacement permission set; omit to leave unchanged */
+            permissions?: string[];
         };
         UpdateUserInputBody: {
             /**
@@ -1055,6 +1244,32 @@ export interface operations {
             409: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
             429: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "list-permissions": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionsListBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };
@@ -1361,6 +1576,165 @@ export interface operations {
             401: components["responses"]["APIError"];
             403: components["responses"]["APIError"];
             404: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "list-roles": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RolesListBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "create-role": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRoleInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleDetailBody"];
+                };
+            };
+            400: components["responses"]["APIError"];
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "get-role": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Role UUID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleDetailBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "delete-role": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Role UUID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleDeletedBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "update-role": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Role UUID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRoleInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoleDetailBody"];
+                };
+            };
+            400: components["responses"]["APIError"];
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };

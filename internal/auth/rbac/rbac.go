@@ -15,6 +15,8 @@ const (
 
 	PermissionUsersRead        Permission = "users:read"
 	PermissionUsersManage      Permission = "users:manage"
+	PermissionRolesRead        Permission = "roles:read"
+	PermissionRolesManage      Permission = "roles:manage"
 	PermissionSystemEventsRead Permission = "system_events:read"
 )
 
@@ -25,6 +27,8 @@ const (
 var Catalog = []Permission{
 	PermissionUsersRead,
 	PermissionUsersManage,
+	PermissionRolesRead,
+	PermissionRolesManage,
 	PermissionSystemEventsRead,
 }
 

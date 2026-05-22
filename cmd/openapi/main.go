@@ -13,6 +13,8 @@ import (
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	projectsdomain "github.com/aklmans/wow-dashboard-api/internal/projects/domain"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
+	rolesdomain "github.com/aklmans/wow-dashboard-api/internal/roles/domain"
+	rolesservice "github.com/aklmans/wow-dashboard-api/internal/roles/service"
 	systemeventsdomain "github.com/aklmans/wow-dashboard-api/internal/systemevents/domain"
 	systemeventsservice "github.com/aklmans/wow-dashboard-api/internal/systemevents/service"
 	"github.com/aklmans/wow-dashboard-api/internal/users/domain"
@@ -28,6 +30,7 @@ func main() {
 	app.RegisterRoutes(api, app.Dependencies{
 		AuthService:         openAPIAuthService{},
 		UsersService:        openAPIUsersService{},
+		RolesService:        openAPIRolesService{},
 		ProjectsService:     openAPIProjectsService{},
 		SystemEventsService: openAPISystemEventsService{},
 		ReadyChecker:        openAPIReadyChecker{},
@@ -97,6 +100,28 @@ func (openAPIUsersService) GetUser(context.Context, string) (domain.User, error)
 
 func (openAPIUsersService) UpdateUser(context.Context, userservice.UpdateUserInput) (domain.User, error) {
 	return domain.User{}, nil
+}
+
+type openAPIRolesService struct{}
+
+func (openAPIRolesService) ListRoles(context.Context) ([]rolesdomain.Role, error) {
+	return nil, nil
+}
+
+func (openAPIRolesService) GetRole(context.Context, string) (rolesdomain.Role, error) {
+	return rolesdomain.Role{}, nil
+}
+
+func (openAPIRolesService) CreateRole(context.Context, rolesservice.CreateRoleInput) (rolesdomain.Role, error) {
+	return rolesdomain.Role{}, nil
+}
+
+func (openAPIRolesService) UpdateRole(context.Context, rolesservice.UpdateRoleInput) (rolesdomain.Role, error) {
+	return rolesdomain.Role{}, nil
+}
+
+func (openAPIRolesService) DeleteRole(context.Context, string, string) error {
+	return nil
 }
 
 type openAPIProjectsService struct{}

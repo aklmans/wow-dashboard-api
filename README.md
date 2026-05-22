@@ -207,6 +207,21 @@ User management endpoints live under `/api/users` and require `Authorization: Be
 
 `PATCH /api/users/{id}` accepts a partial body with any subset of `status` (`active` or `disabled`) and `roleIds` (a non-empty set of role UUIDs that **replaces** the user's roles); at least one field must be provided. An administrator **cannot change their own status or roles** — this guarantees the system always retains at least one admin and prevents accidental self-lockout; hand over admin by assigning the admin role to another user first. Disabling a user takes effect immediately on refresh and within the access-token TTL on bearer requests. A successful update writes a `users.user.updated` system event.
 
+## Roles Endpoints
+
+Role management endpoints live under `/api/roles` and require `Authorization: Bearer <accessToken>`. Roles are dynamic and database-backed: an admin composes a role from the fixed permission catalog, and a user's effective permissions are the union across all of their roles. Reading requires the `roles:read` permission; creating, updating, and deleting requires `roles:manage`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/roles` | List every role with its `permissions` and `userCount` |
+| `GET` | `/api/roles/{id}` | Return a single role as `{ "role": { ... } }` |
+| `POST` | `/api/roles` | Create a role: `{ "name": "...", "description": "...", "permissions": [...] }`. Returns `201`; `409` when the name is taken |
+| `PATCH` | `/api/roles/{id}` | Update a role's `name`, `description`, and/or `permissions` (the set is replaced). `404` when not found; `409` for a system role |
+| `DELETE` | `/api/roles/{id}` | Delete a role. `409` for a system role or one still assigned to users |
+| `GET` | `/api/permissions` | Return the catalog of permissions that can be assigned to a role |
+
+The built-in `admin` and `user` roles are **system roles**: they cannot be renamed, re-permissioned, or deleted through the API. A custom role cannot be deleted while any user is still assigned to it — reassign those users first. Every assigned permission must belong to the catalog returned by `GET /api/permissions`; the `*` wildcard is reserved for the `admin` role and cannot be assigned. Role writes record `roles.role.created`, `roles.role.updated`, and `roles.role.deleted` system events.
+
 ## Projects Endpoints
 
 Project management endpoints live under `/api/projects` and require `Authorization: Bearer <accessToken>`. A project has a single **owner** (`owner_user_id`) and may additionally be **shared** with other users as `viewer` or `editor` members.

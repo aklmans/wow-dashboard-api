@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addRolePermissions = `-- name: AddRolePermissions :exec
+INSERT INTO role_permissions (role_id, permission)
+SELECT $1, p
+FROM unnest($2::text[]) AS p
+`
+
+type AddRolePermissionsParams struct {
+	RoleID      pgtype.UUID
+	Permissions []string
+}
+
+func (q *Queries) AddRolePermissions(ctx context.Context, arg AddRolePermissionsParams) error {
+	_, err := q.db.Exec(ctx, addRolePermissions, arg.RoleID, arg.Permissions)
+	return err
+}
+
 const countRolesByIDs = `-- name: CountRolesByIDs :one
 SELECT count(*)::bigint
 FROM roles
@@ -22,6 +38,96 @@ func (q *Queries) CountRolesByIDs(ctx context.Context, ids []pgtype.UUID) (int64
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const createRole = `-- name: CreateRole :one
+INSERT INTO roles (id, name, description, is_system, created_at, updated_at)
+VALUES ($1, $2, $3, false, $4, $5)
+RETURNING id, name, description, is_system, created_at, updated_at
+`
+
+type CreateRoleParams struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error) {
+	row := q.db.QueryRow(ctx, createRole,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Role
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteRole = `-- name: DeleteRole :execrows
+DELETE FROM roles
+WHERE id = $1
+  AND is_system = false
+  AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.role_id = $1)
+`
+
+func (q *Queries) DeleteRole(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRole, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getRoleByID = `-- name: GetRoleByID :one
+SELECT
+    r.id, r.name, r.description, r.is_system, r.created_at, r.updated_at,
+    COALESCE(
+        array_agg(DISTINCT rp.permission) FILTER (WHERE rp.permission IS NOT NULL),
+        ARRAY[]::text[]
+    )::text[] AS permissions,
+    (SELECT count(*) FROM user_roles ur WHERE ur.role_id = r.id)::bigint AS user_count
+FROM roles r
+LEFT JOIN role_permissions rp ON rp.role_id = r.id
+WHERE r.id = $1
+GROUP BY r.id
+`
+
+type GetRoleByIDRow struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	IsSystem    bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	Permissions []string
+	UserCount   int64
+}
+
+func (q *Queries) GetRoleByID(ctx context.Context, id pgtype.UUID) (GetRoleByIDRow, error) {
+	row := q.db.QueryRow(ctx, getRoleByID, id)
+	var i GetRoleByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IsSystem,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Permissions,
+		&i.UserCount,
+	)
+	return i, err
 }
 
 const getRoleByName = `-- name: GetRoleByName :one
@@ -42,4 +148,102 @@ func (q *Queries) GetRoleByName(ctx context.Context, name string) (Role, error) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listRoles = `-- name: ListRoles :many
+SELECT
+    r.id, r.name, r.description, r.is_system, r.created_at, r.updated_at,
+    COALESCE(
+        array_agg(DISTINCT rp.permission) FILTER (WHERE rp.permission IS NOT NULL),
+        ARRAY[]::text[]
+    )::text[] AS permissions,
+    (SELECT count(*) FROM user_roles ur WHERE ur.role_id = r.id)::bigint AS user_count
+FROM roles r
+LEFT JOIN role_permissions rp ON rp.role_id = r.id
+GROUP BY r.id
+ORDER BY r.is_system DESC, r.name ASC
+`
+
+type ListRolesRow struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	IsSystem    bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	Permissions []string
+	UserCount   int64
+}
+
+func (q *Queries) ListRoles(ctx context.Context) ([]ListRolesRow, error) {
+	rows, err := q.db.Query(ctx, listRoles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRolesRow
+	for rows.Next() {
+		var i ListRolesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.IsSystem,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Permissions,
+			&i.UserCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const replaceRolePermissions = `-- name: ReplaceRolePermissions :exec
+WITH cleared AS (
+    DELETE FROM role_permissions WHERE role_id = $1
+)
+INSERT INTO role_permissions (role_id, permission)
+SELECT $1, p
+FROM unnest($2::text[]) AS p
+`
+
+type ReplaceRolePermissionsParams struct {
+	RoleID      pgtype.UUID
+	Permissions []string
+}
+
+func (q *Queries) ReplaceRolePermissions(ctx context.Context, arg ReplaceRolePermissionsParams) error {
+	_, err := q.db.Exec(ctx, replaceRolePermissions, arg.RoleID, arg.Permissions)
+	return err
+}
+
+const updateRoleDetails = `-- name: UpdateRoleDetails :exec
+UPDATE roles
+SET name = COALESCE($1, name),
+    description = COALESCE($2, description),
+    updated_at = $3
+WHERE id = $4
+`
+
+type UpdateRoleDetailsParams struct {
+	Name        pgtype.Text
+	Description pgtype.Text
+	UpdatedAt   pgtype.Timestamptz
+	ID          pgtype.UUID
+}
+
+func (q *Queries) UpdateRoleDetails(ctx context.Context, arg UpdateRoleDetailsParams) error {
+	_, err := q.db.Exec(ctx, updateRoleDetails,
+		arg.Name,
+		arg.Description,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
 }
