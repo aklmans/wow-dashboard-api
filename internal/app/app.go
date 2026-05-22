@@ -94,6 +94,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Apply our Custom CORS Middleware
 	router.Use(httpmiddleware.CORS(cfg.CORS))
 
+	// Baseline security response headers; HSTS only in production (HTTPS).
+	router.Use(httpmiddleware.SecurityHeaders(cfg.Env == "production"))
+
 	// Configure and initialize Huma API dynamically using the shared constructor
 	api := NewAPI(router)
 
