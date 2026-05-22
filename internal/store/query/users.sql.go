@@ -209,14 +209,15 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 
 const updateUserStatus = `-- name: UpdateUserStatus :one
 UPDATE users
-SET status = $1, updated_at = now()
-WHERE id = $2
+SET status = $1, updated_at = $2
+WHERE id = $3
 RETURNING id, email, display_name, status, role, created_at, updated_at
 `
 
 type UpdateUserStatusParams struct {
-	Status string
-	ID     pgtype.UUID
+	Status    string
+	UpdatedAt pgtype.Timestamptz
+	ID        pgtype.UUID
 }
 
 type UpdateUserStatusRow struct {
@@ -230,7 +231,7 @@ type UpdateUserStatusRow struct {
 }
 
 func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (UpdateUserStatusRow, error) {
-	row := q.db.QueryRow(ctx, updateUserStatus, arg.Status, arg.ID)
+	row := q.db.QueryRow(ctx, updateUserStatus, arg.Status, arg.UpdatedAt, arg.ID)
 	var i UpdateUserStatusRow
 	err := row.Scan(
 		&i.ID,

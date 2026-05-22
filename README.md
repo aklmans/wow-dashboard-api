@@ -182,7 +182,7 @@ Auth sign-up/sign-in success and failure events are written to the `system_event
 | `auth.sign_in.succeeded` | Credential authentication succeeded |
 | `auth.sign_in.failed` | Credential authentication failed |
 
-Audit metadata is a safe JSON object with fields such as `email`, `user_id`, `role`, `reason`, and `request_id`. Audit writes are best-effort: if recording an event fails, the auth response keeps its original success or failure result and the server logs the audit error.
+Audit metadata is a safe JSON object with fields such as `masked_email` (the email reduced to a low-PII form like `d***@example.com`), `user_id`, `role`, `reason`, and `request_id`. Audit writes are best-effort: if recording an event fails, the auth response keeps its original success or failure result and the server logs the audit error.
 
 Local auth endpoint testing requires a PostgreSQL database and `DATABASE_URL` with migrations applied. `cmd/openapi` uses a stub service, so `make openapi` does not require a database connection.
 

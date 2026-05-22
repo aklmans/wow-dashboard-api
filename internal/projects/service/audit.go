@@ -55,12 +55,8 @@ func WithAuditRecorder(recorder AuditRecorder) Option {
 }
 
 func (s *Service) recordAudit(ctx context.Context, event AuditEvent) {
-	recorder := s.auditRecorder
-	if recorder == nil {
-		recorder = noopAuditRecorder{}
-	}
 	event.Metadata = withAuditRequestID(ctx, event.Metadata)
-	if err := recorder.RecordProjectEvent(ctx, event); err != nil {
+	if err := s.auditRecorder.RecordProjectEvent(ctx, event); err != nil {
 		slog.ErrorContext(ctx, "failed to record projects audit event",
 			"event_type", event.EventType,
 			"error", err,

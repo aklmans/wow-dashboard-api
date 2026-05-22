@@ -45,10 +45,9 @@ func (s *EventStore) ListEvents(ctx context.Context, input domain.ListEventsInpu
 		events = append(events, event)
 	}
 
-	return domain.ListEventsResult{
-		Events: events,
-		Limit:  input.Limit,
-	}, nil
+	// Limit is part of the response contract owned by the service layer,
+	// which normalizes and sets it; the store only returns the event rows.
+	return domain.ListEventsResult{Events: events}, nil
 }
 
 func eventFromRow(row query.SystemEvent) (domain.Event, error) {

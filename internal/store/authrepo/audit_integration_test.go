@@ -20,7 +20,7 @@ func TestSystemEventRecorderIntegration(t *testing.T) {
 		EventType: authservice.EventAuthSignInSucceeded,
 		Message:   "Auth sign-in succeeded.",
 		Metadata: authservice.AuditMetadata{
-			Email:     "demo@example.com",
+			Email:     "d***@example.com",
 			UserID:    "00000000-0000-0000-0000-000000000123",
 			Role:      "admin",
 			RequestID: "req-audit-123",
@@ -46,10 +46,10 @@ func TestSystemEventRecorderIntegration(t *testing.T) {
 		t.Fatalf("metadata is not JSON object: %v", err)
 	}
 	for key, want := range map[string]string{
-		"email":      "demo@example.com",
-		"user_id":    "00000000-0000-0000-0000-000000000123",
-		"role":       "admin",
-		"request_id": "req-audit-123",
+		"masked_email": "d***@example.com",
+		"user_id":      "00000000-0000-0000-0000-000000000123",
+		"role":         "admin",
+		"request_id":   "req-audit-123",
 	} {
 		if got := metadata[key]; got != want {
 			t.Fatalf("metadata[%q] = %q, want %q; metadata=%v", key, got, want, metadata)

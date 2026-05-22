@@ -72,7 +72,7 @@ func (s *ProjectStore) ListProjects(ctx context.Context, input domain.ListProjec
 	}
 
 	owner := pgUUIDFromDomain(input.OwnerUserID)
-	search := pgText(input.Search)
+	search := pgText(escapeLikePattern(input.Search))
 	status := pgText(string(input.Status))
 
 	total, err := s.queries.CountProjectsPage(ctx, query.CountProjectsPageParams{
@@ -188,6 +188,14 @@ func (s *ProjectStore) ArchiveProject(ctx context.Context, ownerUserID uuid.UUID
 func pgText(value string) pgtype.Text {
 	value = strings.TrimSpace(value)
 	return pgtype.Text{String: value, Valid: value != ""}
+}
+
+// escapeLikePattern escapes the ILIKE wildcard metacharacters so a user search
+// term is matched literally rather than as a pattern (e.g. a term of "50%"
+// matches the text "50%", not "50" followed by anything). PostgreSQL's default
+// ILIKE escape character is backslash, so backslash is escaped first.
+func escapeLikePattern(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
 // pgTextPtr maps a partial-update string pointer to a pgtype.Text. Nil means

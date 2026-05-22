@@ -110,7 +110,7 @@ func (s *Service) ListProjects(ctx context.Context, input ListProjectsInput) (do
 	})
 	if err != nil {
 		if errors.Is(err, pagination.ErrInvalidPagination) {
-			return domain.ListProjectsResult{}, fmt.Errorf("%w: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "pagination: invalid input: "))
+			return domain.ListProjectsResult{}, fmt.Errorf("%w: %s", ErrInvalidInput, pagination.Detail(err))
 		}
 		return domain.ListProjectsResult{}, err
 	}
@@ -146,7 +146,7 @@ func (s *Service) GetProject(ctx context.Context, ownerUserID string, id string)
 	parsedID, err := pathparam.ParseUUID(id, "id")
 	if err != nil {
 		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "pathparam: invalid uuid: "))
+			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
 		}
 		return domain.Project{}, err
 	}
@@ -233,7 +233,7 @@ func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (
 	parsedID, err := pathparam.ParseUUID(input.ID, "id")
 	if err != nil {
 		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "pathparam: invalid uuid: "))
+			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
 		}
 		return domain.Project{}, err
 	}
@@ -317,7 +317,7 @@ func (s *Service) ArchiveProject(ctx context.Context, ownerUserID string, id str
 	parsedID, err := pathparam.ParseUUID(id, "id")
 	if err != nil {
 		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "pathparam: invalid uuid: "))
+			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
 		}
 		return domain.Project{}, err
 	}
@@ -343,7 +343,7 @@ func parseOwnerID(value string) (uuid.UUID, error) {
 	parsed, err := pathparam.ParseUUID(value, "ownerUserId")
 	if err != nil {
 		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return uuid.Nil, fmt.Errorf("%w: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "pathparam: invalid uuid: "))
+			return uuid.Nil, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
 		}
 		return uuid.Nil, err
 	}

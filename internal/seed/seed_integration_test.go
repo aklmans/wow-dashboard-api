@@ -91,8 +91,9 @@ func TestSeedDemoUserIntegration(t *testing.T) {
 		t.Fatalf("failed to scan seeded user ID: %v", err)
 	}
 	if _, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
-		ID:     pgID,
-		Status: "disabled",
+		ID:        pgID,
+		Status:    "disabled",
+		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 	}); err != nil {
 		t.Fatalf("failed to disable seeded user before second seed: %v", err)
 	}

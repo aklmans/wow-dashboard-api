@@ -30,7 +30,7 @@ func (s *UserStore) ListUsers(ctx context.Context, input domain.ListUsersInput) 
 	}
 
 	filters := query.CountUsersPageParams{
-		Search: pgText(input.Search),
+		Search: pgText(escapeLikePattern(input.Search)),
 		Role:   pgText(string(input.Role)),
 		Status: pgText(string(input.Status)),
 	}

@@ -65,7 +65,7 @@ func (s *Service) GetUser(ctx context.Context, id string) (domain.User, error) {
 	parsed, err := pathparam.ParseUUID(id, "id")
 	if err != nil {
 		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.User{}, fmt.Errorf("%w: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "pathparam: invalid uuid: "))
+			return domain.User{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
 		}
 		return domain.User{}, err
 	}
@@ -88,7 +88,7 @@ func normalizeListUsersInput(input ListUsersInput) (domain.ListUsersInput, error
 	})
 	if err != nil {
 		if errors.Is(err, pagination.ErrInvalidPagination) {
-			return domain.ListUsersInput{}, fmt.Errorf("%w: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "pagination: invalid input: "))
+			return domain.ListUsersInput{}, fmt.Errorf("%w: %s", ErrInvalidInput, pagination.Detail(err))
 		}
 		return domain.ListUsersInput{}, err
 	}

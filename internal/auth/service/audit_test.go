@@ -37,11 +37,11 @@ func TestAuthAuditRecordsSignUpSuccess(t *testing.T) {
 		t.Fatalf("event type = %q, want %q", event.EventType, service.EventAuthSignUpSucceeded)
 	}
 	metadata := eventMetadata(t, event)
-	assertMetadataValue(t, metadata, "email", "new.user@example.com")
+	assertMetadataValue(t, metadata, "masked_email", "n***@example.com")
 	assertMetadataValue(t, metadata, "user_id", session.User.ID)
 	assertMetadataValue(t, metadata, "role", "user")
 	assertMetadataValue(t, metadata, "request_id", "req-audit-123")
-	assertNoAuditMetadataLeaks(t, event, "secure-password", "password", "password_hash", "raw-access-token-secret")
+	assertNoAuditMetadataLeaks(t, event, "secure-password", "password", "password_hash", "raw-access-token-secret", "new.user@example.com")
 }
 
 func TestAuthAuditRecordsSignUpFailure(t *testing.T) {
@@ -64,7 +64,7 @@ func TestAuthAuditRecordsSignUpFailure(t *testing.T) {
 		t.Fatalf("event type = %q, want %q", event.EventType, service.EventAuthSignUpFailed)
 	}
 	metadata := eventMetadata(t, event)
-	assertMetadataValue(t, metadata, "email", "bad-email")
+	assertMetadataValue(t, metadata, "masked_email", "***")
 	assertMetadataValue(t, metadata, "reason", service.AuditReasonInvalidInput)
 	assertMetadataValue(t, metadata, "request_id", "req-audit-123")
 	assertNoAuditMetadataLeaks(t, event, "secret-password", "password", "password_hash")
@@ -91,7 +91,7 @@ func TestAuthAuditRecordsDuplicateSignUpFailureWithoutSyntheticUserID(t *testing
 		t.Fatalf("event type = %q, want %q", event.EventType, service.EventAuthSignUpFailed)
 	}
 	metadata := eventMetadata(t, event)
-	assertMetadataValue(t, metadata, "email", "existing@example.com")
+	assertMetadataValue(t, metadata, "masked_email", "e***@example.com")
 	assertMetadataValue(t, metadata, "reason", service.AuditReasonEmailAlreadyExists)
 	if metadata["user_id"] != "" {
 		t.Fatalf("metadata user_id = %q, want omitted because existing user id is unknown", metadata["user_id"])
@@ -119,11 +119,11 @@ func TestAuthAuditRecordsSignInSuccess(t *testing.T) {
 		t.Fatalf("event type = %q, want %q", event.EventType, service.EventAuthSignInSucceeded)
 	}
 	metadata := eventMetadata(t, event)
-	assertMetadataValue(t, metadata, "email", "demo@example.com")
+	assertMetadataValue(t, metadata, "masked_email", "d***@example.com")
 	assertMetadataValue(t, metadata, "user_id", session.User.ID)
 	assertMetadataValue(t, metadata, "role", "admin")
 	assertMetadataValue(t, metadata, "request_id", "req-audit-123")
-	assertNoAuditMetadataLeaks(t, event, "correct-password", "password", "password_hash", "raw-access-token-secret")
+	assertNoAuditMetadataLeaks(t, event, "correct-password", "password", "password_hash", "raw-access-token-secret", "demo@example.com")
 }
 
 func TestAuthAuditRecordsSignInFailure(t *testing.T) {
@@ -145,7 +145,7 @@ func TestAuthAuditRecordsSignInFailure(t *testing.T) {
 		t.Fatalf("event type = %q, want %q", event.EventType, service.EventAuthSignInFailed)
 	}
 	metadata := eventMetadata(t, event)
-	assertMetadataValue(t, metadata, "email", "missing@example.com")
+	assertMetadataValue(t, metadata, "masked_email", "m***@example.com")
 	assertMetadataValue(t, metadata, "reason", service.AuditReasonInvalidCredentials)
 	assertMetadataValue(t, metadata, "request_id", "req-audit-123")
 	assertNoAuditMetadataLeaks(t, event, "wrong-password", "password", "password_hash")

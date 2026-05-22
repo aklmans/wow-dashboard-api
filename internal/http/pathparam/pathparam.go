@@ -17,6 +17,17 @@ import (
 // into their own validation envelope.
 var ErrInvalidUUID = errors.New("pathparam: invalid uuid")
 
+// Detail returns the human-readable detail of an ErrInvalidUUID error with the
+// package sentinel prefix stripped, so callers can embed it in their own
+// envelope without hardcoding this package's message text. The prefix is
+// derived from the sentinel itself. For any other error it returns err.Error().
+func Detail(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimPrefix(err.Error(), ErrInvalidUUID.Error()+": ")
+}
+
 // ParseUUID trims whitespace and parses value as a UUID. The field name is
 // included in the returned error so callers can echo a precise message to
 // the client (e.g. "id must be a valid UUID").

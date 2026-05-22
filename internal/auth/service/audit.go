@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -22,7 +23,10 @@ const (
 
 // AuditMetadata is the safe, stable metadata shape stored for auth audit events.
 type AuditMetadata struct {
-	Email     string `json:"email,omitempty"`
+	// Email is set by callers with the raw address. recordAudit masks it
+	// before the event is persisted, so it is stored and serialized as
+	// masked_email (e.g. "d***@example.com") — never the plaintext address.
+	Email     string `json:"masked_email,omitempty"`
 	UserID    string `json:"user_id,omitempty"`
 	Role      string `json:"role,omitempty"`
 	Reason    string `json:"reason,omitempty"`
@@ -48,17 +52,29 @@ func (noopAuditRecorder) RecordAuthEvent(context.Context, AuditEvent) error {
 }
 
 func (s *Service) recordAudit(ctx context.Context, event AuditEvent) {
-	recorder := s.auditRecorder
-	if recorder == nil {
-		recorder = noopAuditRecorder{}
-	}
 	event.Metadata = withAuditRequestID(ctx, event.Metadata)
-	if err := recorder.RecordAuthEvent(ctx, event); err != nil {
+	event.Metadata.Email = maskEmail(event.Metadata.Email)
+	if err := s.auditRecorder.RecordAuthEvent(ctx, event); err != nil {
 		slog.ErrorContext(ctx, "failed to record auth audit event",
 			"event_type", event.EventType,
 			"error", err,
 		)
 	}
+}
+
+// maskEmail reduces an email address to a low-PII form safe for long-term
+// audit storage: the first character of the local part, then "***", then the
+// domain (e.g. "demo@example.com" -> "d***@example.com"). An empty value
+// yields "" and a value without a usable local part yields "***".
+func maskEmail(email string) string {
+	if email == "" {
+		return ""
+	}
+	at := strings.LastIndex(email, "@")
+	if at <= 0 || at == len(email)-1 {
+		return "***"
+	}
+	return email[:1] + "***" + email[at:]
 }
 
 func (s *Service) recordSignUpSucceeded(ctx context.Context, metadata AuditMetadata) {

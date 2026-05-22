@@ -35,9 +35,6 @@ func TestEventStoreListEventsIntegration(t *testing.T) {
 		t.Fatalf("ListEvents returned error: %v", err)
 	}
 
-	if result.Limit != 10 {
-		t.Fatalf("result limit = %d, want 10", result.Limit)
-	}
 	if len(result.Events) != 2 {
 		t.Fatalf("len(events) = %d, want 2", len(result.Events))
 	}

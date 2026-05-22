@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/aklmans/wow-dashboard-api/internal/config"
 	"github.com/aklmans/wow-dashboard-api/internal/seed"
@@ -18,7 +20,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	pool, err := store.NewPool(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize database pool: %v\n", err)

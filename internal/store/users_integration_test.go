@@ -342,8 +342,9 @@ func TestUsersIntegration(t *testing.T) {
 
 		// Disable the user — UpdateUserStatusRow is public, no PasswordHash.
 		updated, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
-			ID:     alice.ID,
-			Status: "disabled",
+			ID:        alice.ID,
+			Status:    "disabled",
+			UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 		})
 		if err != nil {
 			t.Fatalf("UpdateUserStatus failed: %v", err)
@@ -363,8 +364,9 @@ func TestUsersIntegration(t *testing.T) {
 
 		// Re-enable the user
 		reEnabled, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
-			ID:     alice.ID,
-			Status: "active",
+			ID:        alice.ID,
+			Status:    "active",
+			UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 		})
 		if err != nil {
 			t.Fatalf("UpdateUserStatus (re-enable) failed: %v", err)

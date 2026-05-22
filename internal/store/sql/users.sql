@@ -37,6 +37,6 @@ LIMIT @limit_val OFFSET @offset_val;
 
 -- name: UpdateUserStatus :one
 UPDATE users
-SET status = @status, updated_at = now()
+SET status = @status, updated_at = @updated_at
 WHERE id = @id
 RETURNING id, email, display_name, status, role, created_at, updated_at;

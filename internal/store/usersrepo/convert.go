@@ -16,6 +16,13 @@ func pgText(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
 }
 
+// escapeLikePattern escapes the ILIKE wildcard metacharacters so a user search
+// term is matched literally rather than as a pattern. PostgreSQL's default
+// ILIKE escape character is backslash, so backslash is escaped first.
+func escapeLikePattern(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+}
+
 func domainUUID(id pgtype.UUID) (uuid.UUID, error) {
 	if !id.Valid {
 		return uuid.Nil, fmt.Errorf("usersrepo: invalid user id")

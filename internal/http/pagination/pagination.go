@@ -44,6 +44,18 @@ type Normalized struct {
 	Search   string
 }
 
+// Detail returns the human-readable detail of an ErrInvalidPagination error
+// with the package sentinel prefix stripped, so callers can embed it in their
+// own envelope without hardcoding this package's message text. The prefix is
+// derived from the sentinel itself, so it stays correct if the sentinel
+// message ever changes. For any other error it returns err.Error().
+func Detail(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimPrefix(err.Error(), ErrInvalidPagination.Error()+": ")
+}
+
 // Normalize applies defaults, validates bounds, trims Search, and computes
 // Offset. A zero Page or PageSize is treated as "unset" and replaced with
 // the default. Negative values, or a PageSize above MaxPageSize, return

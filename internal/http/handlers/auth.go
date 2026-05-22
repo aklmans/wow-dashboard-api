@@ -271,12 +271,19 @@ func parseCookieValue(header string, name string) (string, bool) {
 	if header == "" || strings.TrimSpace(name) == "" {
 		return "", false
 	}
-	req := http.Request{Header: http.Header{"Cookie": []string{header}}}
-	cookie, err := req.Cookie(name)
-	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+	cookies, err := http.ParseCookie(header)
+	if err != nil {
 		return "", false
 	}
-	return cookie.Value, true
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			if value := strings.TrimSpace(cookie.Value); value != "" {
+				return value, true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 func DefaultRefreshCookieConfig() RefreshCookieConfig {
