@@ -281,8 +281,9 @@ func TestServiceIntegration(t *testing.T) {
 		if len(profile.Roles) != 1 || profile.Roles[0] != "user" {
 			t.Errorf("expected roles [user], got %v", profile.Roles)
 		}
-		if len(profile.Permissions) != 0 {
-			t.Errorf("expected no permissions for a plain user, got %v", profile.Permissions)
+		// The built-in user role carries projects:create and nothing else.
+		if len(profile.Permissions) != 1 || profile.Permissions[0] != "projects:create" {
+			t.Errorf("expected permissions [projects:create] for a plain user, got %v", profile.Permissions)
 		}
 	})
 
