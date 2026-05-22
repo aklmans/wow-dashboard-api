@@ -1,0 +1,1130 @@
+{
+  "info": {
+    "_postman_id": "7d2efc77-2f62-4a5a-9252-faf3a3f1b1a4",
+    "name": "wow-dashboard-api Black-Box Smoke",
+    "description": "Newman smoke and acceptance baseline for the local wow-dashboard-api service. It exercises health, auth, admin users, system audit events, and owner-scoped projects through the public HTTP API.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.environment.get('runSuffix')) {",
+          "  const suffix = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;",
+          "  const projectBase = pm.environment.get('projectName') || 'Newman Project';",
+          "  const duplicateProjectBase = pm.environment.get('duplicateProjectName') || 'Newman Duplicate Project';",
+          "  pm.environment.set('runSuffix', suffix);",
+          "  pm.environment.set('projectName', `${projectBase} ${suffix}`);",
+          "  pm.environment.set('duplicateProjectName', `${duplicateProjectBase} ${suffix}`);",
+          "  pm.environment.set('updatedProjectName', `${projectBase} Updated ${suffix}`);",
+          "  pm.environment.set('newUserEmail', `postman-user-${suffix}@example.test`);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "GET /healthz",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('health response is ok', function () {",
+              "  pm.expect(body).to.have.property('status', 'ok');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/healthz",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "healthz"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /readyz",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('readiness response is ready', function () {",
+              "  pm.expect(body).to.have.property('status', 'ready');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/readyz",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "readyz"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/auth/sign-up disposable user",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('sign-up returns a user access token', function () {",
+              "  pm.expect(body).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+              "  pm.expect(body).to.have.property('user');",
+              "  pm.expect(body.user).to.have.property('email', pm.environment.get('newUserEmail'));",
+              "  pm.expect(body.user).to.have.property('role', 'user');",
+              "});",
+              "",
+              "pm.environment.set('userAccessToken', body.accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{newUserEmail}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Postman\",\n  \"lastName\": \"User\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/sign-up",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "sign-up"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/users as role=user returns 403",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 403', function () {",
+              "  pm.response.to.have.status(403);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('forbidden response has stable error envelope', function () {",
+              "  pm.expect(body).to.include.keys(['code', 'message', 'request_id']);",
+              "  pm.expect(body.code).to.eql('forbidden');",
+              "  pm.expect(body.message).to.eql('Admin role required.');",
+              "  pm.expect(body.request_id).to.be.a('string');",
+              "  pm.expect(body.request_id.length).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userAccessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/users",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "users"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/system-events as role=user returns 403",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 403', function () {",
+              "  pm.response.to.have.status(403);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('forbidden response has stable error envelope', function () {",
+              "  pm.expect(body).to.include.keys(['code', 'message', 'request_id']);",
+              "  pm.expect(body.code).to.eql('forbidden');",
+              "  pm.expect(body.message).to.eql('Admin role required.');",
+              "  pm.expect(body.request_id).to.be.a('string');",
+              "  pm.expect(body.request_id.length).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userAccessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/system-events",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "system-events"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/auth/sign-in admin",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "const setCookie = pm.response.headers.get('Set-Cookie') || '';",
+              "pm.test('sign-in returns admin session', function () {",
+              "  pm.expect(body).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+              "  pm.expect(body).to.have.property('user');",
+              "  pm.expect(body.user).to.have.property('email', pm.environment.get('email'));",
+              "  pm.expect(body.user).to.have.property('role', 'admin');",
+              "});",
+              "",
+              "pm.test('sign-in sets an HttpOnly refresh cookie', function () {",
+              "  pm.expect(setCookie).to.include('wow_dashboard_refresh_token=');",
+              "  pm.expect(setCookie).to.include('HttpOnly');",
+              "});",
+              "",
+              "const refreshCookie = setCookie.match(/wow_dashboard_refresh_token=([^;]+)/);",
+              "if (refreshCookie) {",
+              "  pm.environment.set('refreshCookie', refreshCookie[1]);",
+              "}",
+              "pm.environment.set('accessToken', body.accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/sign-in",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "sign-in"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/auth/me admin",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('me returns current admin user', function () {",
+              "  pm.expect(body).to.have.property('user');",
+              "  pm.expect(body.user).to.have.property('email', pm.environment.get('email'));",
+              "  pm.expect(body.user).to.have.property('role', 'admin');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/me",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "me"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/auth/refresh admin",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "const setCookie = pm.response.headers.get('Set-Cookie') || '';",
+              "pm.test('refresh returns rotated admin session', function () {",
+              "  pm.expect(body).to.have.property('accessToken').that.is.a('string').and.is.not.empty;",
+              "  pm.expect(body).to.have.property('user');",
+              "  pm.expect(body.user).to.have.property('email', pm.environment.get('email'));",
+              "  pm.expect(body.user).to.have.property('role', 'admin');",
+              "});",
+              "",
+              "pm.test('refresh rotates the HttpOnly refresh cookie', function () {",
+              "  pm.expect(setCookie).to.include('wow_dashboard_refresh_token=');",
+              "  pm.expect(setCookie).to.include('HttpOnly');",
+              "});",
+              "",
+              "const refreshCookie = setCookie.match(/wow_dashboard_refresh_token=([^;]+)/);",
+              "if (refreshCookie) {",
+              "  pm.environment.set('refreshCookie', refreshCookie[1]);",
+              "}",
+              "pm.environment.set('accessToken', body.accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/refresh",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "refresh"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/users admin list",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('users response is paginated and safe', function () {",
+              "  pm.expect(body).to.have.property('users').that.is.an('array');",
+              "  pm.expect(body.users.length).to.be.above(0);",
+              "  pm.expect(body).to.have.property('page');",
+              "  pm.expect(body).to.have.property('pageSize');",
+              "  pm.expect(body).to.have.property('total');",
+              "  pm.expect(body.users[0]).to.have.property('id').that.is.a('string').and.is.not.empty;",
+              "  pm.expect(body.users[0]).to.not.have.property('password_hash');",
+              "  pm.expect(body.users[0]).to.not.have.property('passwordHash');",
+              "});",
+              "",
+              "pm.environment.set('userId', body.users[0].id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/users",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "users"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/users/{{userId}} admin detail",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('user detail response is safe', function () {",
+              "  pm.expect(body).to.have.property('user');",
+              "  pm.expect(body.user).to.have.property('id', pm.environment.get('userId'));",
+              "  pm.expect(body.user).to.have.property('email').that.is.a('string').and.is.not.empty;",
+              "  pm.expect(body.user).to.not.have.property('password_hash');",
+              "  pm.expect(body.user).to.not.have.property('passwordHash');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/users/{{userId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "users",
+            "{{userId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/projects create project",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('project is created active', function () {",
+              "  pm.expect(body).to.have.property('project');",
+              "  pm.expect(body.project).to.have.property('id').that.is.a('string').and.is.not.empty;",
+              "  pm.expect(body.project).to.have.property('name', pm.environment.get('projectName'));",
+              "  pm.expect(body.project).to.have.property('status', 'active');",
+              "});",
+              "",
+              "pm.environment.set('projectId', body.project.id);",
+              "pm.environment.set('projectName', body.project.name);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"{{projectName}}\",\n  \"description\": \"Created by the Newman smoke collection.\",\n  \"status\": \"active\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/projects",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/projects list",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('projects response is paginated', function () {",
+              "  pm.expect(body).to.have.property('projects').that.is.an('array');",
+              "  pm.expect(body).to.have.property('page');",
+              "  pm.expect(body).to.have.property('pageSize');",
+              "  pm.expect(body).to.have.property('total');",
+              "  pm.expect(body.projects.some((project) => project.id === pm.environment.get('projectId'))).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/projects",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/projects/{{projectId}} detail",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('project detail matches created project', function () {",
+              "  pm.expect(body).to.have.property('project');",
+              "  pm.expect(body.project).to.have.property('id', pm.environment.get('projectId'));",
+              "  pm.expect(body.project).to.have.property('name', pm.environment.get('projectName'));",
+              "  pm.expect(body.project).to.have.property('status', 'active');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/projects/{{projectId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects",
+            "{{projectId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/projects duplicate create returns 409",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 409', function () {",
+              "  pm.response.to.have.status(409);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('conflict response has stable error envelope', function () {",
+              "  pm.expect(body).to.include.keys(['code', 'message', 'request_id']);",
+              "  pm.expect(body.code).to.eql('conflict');",
+              "  pm.expect(body.message).to.eql('Project name already exists.');",
+              "  pm.expect(body.request_id).to.be.a('string');",
+              "  pm.expect(body.request_id.length).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"{{projectName}}\",\n  \"description\": \"This duplicate create should be rejected.\",\n  \"status\": \"active\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/projects",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/projects create second project",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('second project is created active', function () {",
+              "  pm.expect(body).to.have.property('project');",
+              "  pm.expect(body.project).to.have.property('id').that.is.a('string').and.is.not.empty;",
+              "  pm.expect(body.project).to.have.property('name', pm.environment.get('duplicateProjectName'));",
+              "  pm.expect(body.project).to.have.property('status', 'active');",
+              "});",
+              "",
+              "pm.environment.set('duplicateProjectId', body.project.id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"{{duplicateProjectName}}\",\n  \"description\": \"Second project used for update-conflict smoke coverage.\",\n  \"status\": \"active\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/projects",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "PATCH /api/projects/{{duplicateProjectId}} duplicate update returns 409",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 409', function () {",
+              "  pm.response.to.have.status(409);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('update conflict response has stable error envelope', function () {",
+              "  pm.expect(body).to.include.keys(['code', 'message', 'request_id']);",
+              "  pm.expect(body.code).to.eql('conflict');",
+              "  pm.expect(body.message).to.eql('Project name already exists.');",
+              "  pm.expect(body.request_id).to.be.a('string');",
+              "  pm.expect(body.request_id.length).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"{{projectName}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/projects/{{duplicateProjectId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects",
+            "{{duplicateProjectId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "PATCH /api/projects/{{projectId}} update project",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('project update returns updated active project', function () {",
+              "  pm.expect(body).to.have.property('project');",
+              "  pm.expect(body.project).to.have.property('id', pm.environment.get('projectId'));",
+              "  pm.expect(body.project).to.have.property('name', pm.environment.get('updatedProjectName'));",
+              "  pm.expect(body.project).to.have.property('description', 'Updated by the Newman smoke collection.');",
+              "  pm.expect(body.project).to.have.property('status', 'active');",
+              "});",
+              "",
+              "pm.environment.set('projectName', body.project.name);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"{{updatedProjectName}}\",\n  \"description\": \"Updated by the Newman smoke collection.\",\n  \"status\": \"active\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/projects/{{projectId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects",
+            "{{projectId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "DELETE /api/projects/{{duplicateProjectId}} archive second project",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('second project is archived', function () {",
+              "  pm.expect(body).to.have.property('project');",
+              "  pm.expect(body.project).to.have.property('id', pm.environment.get('duplicateProjectId'));",
+              "  pm.expect(body.project).to.have.property('status', 'archived');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/projects/{{duplicateProjectId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects",
+            "{{duplicateProjectId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "DELETE /api/projects/{{projectId}} archive project",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('project is archived', function () {",
+              "  pm.expect(body).to.have.property('project');",
+              "  pm.expect(body.project).to.have.property('id', pm.environment.get('projectId'));",
+              "  pm.expect(body.project).to.have.property('status', 'archived');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/projects/{{projectId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects",
+            "{{projectId}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "GET /api/system-events admin list",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "const limitParam = pm.request.url.query.all().find(function (param) {",
+              "  return param.key === 'limit';",
+              "});",
+              "const requestedLimit = Number(limitParam.value);",
+              "pm.test('system events response respects requested limit', function () {",
+              "  pm.expect(body).to.have.property('limit', requestedLimit);",
+              "  pm.expect(body).to.have.property('events');",
+              "  pm.expect(body.events).to.not.eql(null);",
+              "  pm.expect(body.events).to.be.an('array');",
+              "  pm.expect(body.events.length).to.be.at.most(requestedLimit);",
+              "});",
+              "",
+              "pm.test('system events include stable public fields', function () {",
+              "  body.events.forEach(function (event) {",
+              "    pm.expect(event).to.include.keys(['id', 'eventType', 'message', 'metadata', 'createdAt']);",
+              "    pm.expect(event.id).to.be.a('string').and.is.not.empty;",
+              "    pm.expect(event.eventType).to.be.a('string').and.is.not.empty;",
+              "    pm.expect(event.message).to.be.a('string');",
+              "    pm.expect(event.metadata).to.not.eql(null);",
+              "    pm.expect(event.metadata).to.be.an('object');",
+              "    pm.expect(event.createdAt).to.be.a('string').and.is.not.empty;",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{accessToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/system-events?limit=7",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "system-events"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "7"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/auth/sign-out",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "const setCookie = pm.response.headers.get('Set-Cookie') || '';",
+              "pm.test('sign-out succeeds and clears refresh cookie', function () {",
+              "  pm.expect(body).to.have.property('success', true);",
+              "  pm.expect(setCookie).to.include('wow_dashboard_refresh_token=');",
+              "  pm.expect(setCookie).to.include('HttpOnly');",
+              "});",
+              "",
+              "pm.environment.unset('accessToken');",
+              "pm.environment.unset('refreshCookie');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/sign-out",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "sign-out"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "POST /api/auth/refresh after sign-out returns 401",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "});",
+              "",
+              "const body = pm.response.json();",
+              "pm.test('unauthorized response has stable error envelope', function () {",
+              "  pm.expect(body).to.include.keys(['code', 'message', 'request_id']);",
+              "  pm.expect(body.code).to.eql('unauthorized');",
+              "  pm.expect(body.message).to.eql('Authorization token missing or invalid.');",
+              "  pm.expect(body.request_id).to.be.a('string');",
+              "  pm.expect(body.request_id.length).to.be.above(0);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/refresh",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "refresh"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
