@@ -250,8 +250,12 @@ func TestServiceIntegration(t *testing.T) {
 			t.Fatal("expected error on disabled user SignIn, got nil")
 		}
 
-		if !errors.Is(err, service.ErrUserDisabled) {
-			t.Errorf("expected error %v, got %v", service.ErrUserDisabled, err)
+		// Sign-in returns the generic invalid-credentials error for a disabled
+		// account so it cannot be used to enumerate which accounts exist; the
+		// disabled state is only surfaced post-authentication (CurrentUser,
+		// Refresh).
+		if !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Errorf("expected error %v, got %v", service.ErrInvalidCredentials, err)
 		}
 	})
 
