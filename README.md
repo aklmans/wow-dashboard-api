@@ -1,0 +1,483 @@
+# wow-dashboard-api
+
+Go API service for the Minimal Starter dashboard projects. Provides stable, typed, documented endpoints that the Next.js and Vite starter frontends can consume.
+
+**Stack:** Go 1.26 · chi · Huma v2 · PostgreSQL · sqlc · goose · JWT auth · Air
+
+For frontend starter handoff details, see [Frontend Starter Integration Guide](docs/frontend-integration.md).
+For audit event scope and failure-event rules, see [Audit Policy](docs/audit-policy.md).
+For pre-production gates and the API infrastructure pause criteria, see [Production Readiness Checklist](docs/production-readiness-checklist.md).
+
+## Prerequisites
+
+- **Go 1.26.x** – [golang.org/dl](https://go.dev/dl/)
+- **Air** – live-reload for local development
+  ```sh
+  go install github.com/air-verse/air@latest
+  ```
+
+## Local Development
+
+1. Copy the example environment file and adjust as needed:
+   ```sh
+   cp .env.example .env
+   ```
+
+2. Start local PostgreSQL, apply migrations, and seed the demo auth user:
+   ```sh
+   make compose-up
+   make local-setup
+   ```
+
+3. Start the dev server with live reload:
+   ```sh
+   make dev
+   ```
+   The API listens on `http://localhost:7272` by default.
+
+4. In another terminal, verify the local auth flow:
+   ```sh
+   make smoke-auth
+   ```
+
+5. Optionally run the black-box Postman/Newman smoke baseline:
+   ```sh
+   make postman-test
+   ```
+
+`make local-reset` deletes the local PostgreSQL Docker volume and all local data before recreating the database, migrations, and demo seed.
+
+## Configuration
+
+All configuration is loaded from environment variables (via `caarlos0/env`). Most fields have local-development defaults; running the API with auth routes enabled requires `DATABASE_URL` so the auth service can reach PostgreSQL.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_NAME` | `wow-dashboard-api` | Application name for logs and identification |
+| `PORT` | `7272` | HTTP listen port |
+| `ENV` | `development` | Environment stage (`development`, `staging`, `production`) |
+| `LOG_FORMAT` | `text` outside production, `json` in production | Structured log format (`text` or `json`). Invalid values cause startup to fail. |
+| `LOG_LEVEL` | `info` | Structured log level (`debug`, `info`, `warn`, `error`). Invalid values cause startup to fail. |
+| `READ_TIMEOUT_SECONDS` | `15` | HTTP server read timeout |
+| `WRITE_TIMEOUT_SECONDS` | `15` | HTTP server write timeout |
+| `IDLE_TIMEOUT_SECONDS` | `60` | HTTP server idle timeout |
+| `HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown deadline for draining in-flight HTTP requests |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173,http://localhost:8082,http://localhost:8083,http://localhost:8084,http://localhost:8085` | Comma-separated allowed origins |
+| `DATABASE_URL` | `postgres://spec:spec@localhost:5432/wow_dashboard_api?sslmode=disable` | PostgreSQL database connection URL for local Compose (masks credentials in errors/logs) |
+| `DB_MAX_CONNS` | `10` | Maximum number of open connections in the pool |
+| `DB_MIN_CONNS` | `1` | Minimum number of open connections in the pool |
+| `DB_MAX_CONN_LIFETIME_SECONDS` | `1800` | Maximum amount of time a connection may be reused |
+| `DB_MAX_CONN_IDLE_TIME_SECONDS` | `300` | Maximum amount of time a connection may be idle |
+| `DB_HEALTH_TIMEOUT_SECONDS` | `3` | Timeout for pinging the database health |
+| `AUTH_RATE_LIMIT_ENABLED` | `true` | Enable per-IP application rate limiting for auth sign-in/sign-up |
+| `AUTH_RATE_LIMIT_REQUESTS` | `10` | Sustained auth requests allowed per window per IP |
+| `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `60` | Auth rate limit window in seconds |
+| `AUTH_RATE_LIMIT_BURST` | `5` | Auth requests allowed immediately before throttling per IP |
+| `JWT_ACCESS_SECRET` | `dev-only-change-me-min-32-characters` | JWT signing secret (minimum 32 characters, default forbidden in production) |
+| `JWT_ISSUER` | `wow-dashboard-api` | Expected JWT issuer claim |
+| `JWT_AUDIENCE` | `wow-dashboard` | Expected JWT audience claim |
+| `JWT_ACCESS_TOKEN_TTL_SECONDS` | `900` | Access token time-to-live in seconds (defaults to 15 minutes / 900 seconds) |
+| `REFRESH_TOKEN_TTL_SECONDS` | `1209600` | Refresh token time-to-live in seconds (defaults to 14 days) |
+| `REFRESH_TOKEN_COOKIE_NAME` | `wow_dashboard_refresh_token` | HttpOnly refresh token cookie name |
+| `REFRESH_TOKEN_COOKIE_SECURE` | `false` | Whether refresh cookies require HTTPS; `ENV=production` requires this to be `true` |
+| `REFRESH_TOKEN_COOKIE_SAMESITE` | `lax` | Refresh cookie SameSite mode (`lax`, `strict`, or `none`) |
+
+See [`.env.example`](.env.example) for a copy-pasteable template.
+
+### Production Hardening & Safety Rules
+
+When `ENV=production`, the application applies strict safety checks at startup to prevent weak or insecure defaults:
+- **DATABASE_URL**: Must not be empty.
+- **JWT_ACCESS_SECRET**: Must be at least 32 characters, must not be the dev-default secret, and must not contain any common placeholder patterns (case-insensitive checks for `change-me`, `changeme`, `dev-only`, `example`, `secret`).
+- **JWT_ACCESS_TOKEN_TTL_SECONDS**: Must be between 60 and 3600 seconds inclusive (1 minute to 1 hour).
+- **CORS_ALLOWED_ORIGINS**: All origins must start with `https://`, and must not contain wildcard origins (`*`), empty entries, or loopback addresses/hosts (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`, `::1`).
+- **REFRESH_TOKEN_COOKIE_SECURE**: Must be `true` (if left empty or unset in production, it automatically defaults to `true`). If explicitly set to `false`, the server will refuse to start.
+- **Cookie Name**: Must not contain spaces, semicolons, commas, equals, control characters, or non-ASCII characters.
+
+Across all environments:
+- **All second-based timeouts**: Must be strictly `> 0`.
+- **Database Pool Sizes**: `DB_MAX_CONNS` must be `> 0`, `DB_MIN_CONNS` must be `>= 0`, and `DB_MIN_CONNS` must be less than or equal to `DB_MAX_CONNS`.
+- **REFRESH_TOKEN_COOKIE_SAMESITE**: If SameSite is set to `none`, `REFRESH_TOKEN_COOKIE_SECURE` must be `true` (to adhere to modern browser cookie standards).
+
+
+Production CORS must use exact origins owned by the deployment, for example `https://app.example.com`. Do not use public shared-hosting wildcards such as `*.vercel.app` or `*.netlify.app` for credentialed CORS; `ENV=production` rejects wildcard origins.
+
+The application does not trust client-supplied forwarding headers such as `X-Forwarded-For` or `X-Real-IP` by default. Auth rate limiting keys off the socket remote address seen by the Go server. When deploying behind a trusted reverse proxy, enforce abuse limits at the edge or add a reviewed trusted-proxy configuration before relying on forwarded client IPs.
+
+## Logging And Shutdown
+
+The API uses the standard library `log/slog` for structured process and request logs. Local development defaults to text logs; `ENV=production` defaults to JSON logs unless `LOG_FORMAT` is explicitly set. `LOG_LEVEL` accepts `debug`, `info`, `warn`, and `error`.
+
+Each HTTP request emits one `http_request` event with fields such as `request_id`, `method`, `path`, `status`, `duration_ms`, `remote_addr`, and `user_agent`. Query strings are logged only after sensitive names such as token and password fields are redacted. Request and response headers are not logged, so `Authorization`, `Cookie`, and `Set-Cookie` values stay out of logs.
+
+Example JSON request log shape:
+
+```json
+{
+  "level": "INFO",
+  "msg": "http_request",
+  "request_id": "abc-123",
+  "method": "GET",
+  "path": "/readyz",
+  "status": 200,
+  "duration_ms": 2.4,
+  "remote_addr": "127.0.0.1:54321",
+  "user_agent": "kube-probe/1.30"
+}
+```
+
+For production, prefer `ENV=production`, leave `LOG_FORMAT` unset or set it to `json`, and ship stdout/stderr to the platform log collector. Avoid `LOG_LEVEL=debug` unless temporarily investigating an issue.
+
+The API handles `SIGINT` and `SIGTERM` with graceful shutdown. On shutdown it stops accepting new connections, lets in-flight requests complete until `HTTP_SHUTDOWN_TIMEOUT_SECONDS`, then closes the PostgreSQL pool before the process exits. In Docker or Kubernetes, use `/healthz` as the liveness probe and `/readyz` as the readiness probe; during a rolling shutdown the platform should stop routing new traffic before or while `SIGTERM` gives the server time to drain.
+
+## Error Responses
+
+All error responses use a stable JSON envelope:
+
+```json
+{
+  "code": "not_found",
+  "message": "The requested resource was not found.",
+  "request_id": "abc-123-def"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `code` | `string` | Machine-readable error code (e.g. `bad_request`, `unauthorized`, `not_found`, `internal_error`) |
+| `message` | `string` | Human-readable, safe message — never contains internal details |
+| `request_id` | `string` | The request ID from the current request for tracing |
+| `details` | `array` | Optional field-level validation errors with `field` and `message`. Omitted if empty (`omitempty`). |
+
+Internal errors always return a generic message. The original cause is logged server-side but never sent to clients.
+
+## Health Checks
+
+| Method | Path | Purpose | Dependencies |
+|--------|------|---------|--------------|
+| `GET` | `/healthz` | Liveness probe returning `{ "status": "ok" }` | None |
+| `GET` | `/readyz` | Readiness probe returning `{ "status": "ready" }` | PostgreSQL ping |
+
+When `/readyz` cannot reach PostgreSQL, it returns `503` using the standard API error envelope with `code: "service_unavailable"` and the safe message `Service is not ready.`
+
+Use `/healthz` for liveness and `/readyz` for readiness. Do not configure `/readyz` as a liveness probe; a temporary database outage should stop new traffic, not force a restart loop.
+
+## Auth Endpoints
+
+Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/auth/sign-up` | Create an account, return `{ "user": ..., "accessToken": ... }`, and set the HttpOnly refresh cookie |
+| `POST` | `/api/auth/sign-in` | Authenticate credentials, return `{ "user": ..., "accessToken": ... }`, and set the HttpOnly refresh cookie |
+| `POST` | `/api/auth/refresh` | Rotate the refresh cookie and return `{ "user": ..., "accessToken": ... }` |
+| `POST` | `/api/auth/sign-out` | Revoke the current refresh token when present and clear the refresh cookie |
+| `GET` | `/api/auth/me` | Return `{ "user": ... }` for `Authorization: Bearer <accessToken>` |
+
+`sign-up` and `sign-in` are protected by an in-memory, per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header.
+
+Auth sign-up/sign-in success and failure events are written to the `system_events` table using stable event types:
+
+| Event Type | Description |
+|------------|-------------|
+| `auth.sign_up.succeeded` | Account registration succeeded |
+| `auth.sign_up.failed` | Account registration failed |
+| `auth.sign_in.succeeded` | Credential authentication succeeded |
+| `auth.sign_in.failed` | Credential authentication failed |
+
+Audit metadata is a safe JSON object with fields such as `email`, `user_id`, `role`, `reason`, and `request_id`. Audit writes are best-effort: if recording an event fails, the auth response keeps its original success or failure result and the server logs the audit error.
+
+Local auth endpoint testing requires a PostgreSQL database and `DATABASE_URL` with migrations applied. `cmd/openapi` uses a stub service, so `make openapi` does not require a database connection.
+
+Basic user roles are persisted on the `users` table:
+
+| Role | Description |
+|------|-------------|
+| `user` | Default role for normal sign-ups |
+| `admin` | Local demo seed user role |
+
+## Users Endpoints
+
+User management read endpoints live under `/api/users` and require `Authorization: Bearer <accessToken>`. The authenticated user must be active **and carry the `admin` role**; non-admin authenticated users receive `403 forbidden` with the `Admin role required.` envelope.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/users` | Return paginated users as `{ "users": [...], "page": 1, "pageSize": 20, "total": 1 }` |
+| `GET` | `/api/users/{id}` | Return a single user as `{ "user": { ... } }`. `404` when no user has the given id; `422` when `{id}` is not a valid UUID |
+
+`GET /api/users` supports `page` (default `1`), `pageSize` (default `20`, max `100`), `search` (matches `email` or `display_name`), `role` (`admin` or `user`), and `status` (`active` or `disabled`). Responses never include `password_hash`.
+
+## Projects Endpoints
+
+Project management endpoints live under `/api/projects` and require `Authorization: Bearer <accessToken>`. Projects are owner-scoped: every endpoint only operates on rows whose `owner_user_id` matches the authenticated user.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/projects` | Return paginated projects as `{ "projects": [...], "page": 1, "pageSize": 20, "total": 1 }` |
+| `GET` | `/api/projects/{id}` | Return a single project as `{ "project": { ... } }`. `404` when the id does not belong to the current user; `422` when `{id}` is not a valid UUID |
+| `POST` | `/api/projects` | Create a project owned by the current user. Returns `201` with `{ "project": { ... } }`; `409 conflict` when the owner already has a project with the same name; `422` for invalid bodies |
+| `PATCH` | `/api/projects/{id}` | Partially update a project owned by the current user. Returns `200` with `{ "project": { ... } }`; `404` when the id does not belong to the current user; `409 conflict` when the new name is already used by another project owned by the current user; `422` for invalid bodies |
+| `DELETE` | `/api/projects/{id}` | Archive a project owned by the current user. Returns `200` with `{ "project": { ... } }` carrying `status: "archived"`; `404` when the id does not belong to the current user; `422` when `{id}` is not a valid UUID |
+
+`GET /api/projects` supports `page`, `pageSize`, `search` (matches `name` or `description`), and `status` (`active` or `archived`). `POST /api/projects` accepts `{ "name": "...", "description": "...", "status": "active" }` (description and status are optional; status defaults to `active`).
+
+`PATCH /api/projects/{id}` accepts a partial body with any subset of `name`, `description`, and `status`. Omitted fields stay unchanged; passing an empty `description` clears the stored value; at least one field must be provided. `updated_at` is refreshed on every successful update.
+
+Project names are unique per owner after service-layer trimming. A duplicate create or update returns the standard error envelope with HTTP `409`, `code: "conflict"`, and `message: "Project name already exists."`. This baseline uses PostgreSQL's default case-sensitive text comparison, so `"Demo"` and `"demo"` may coexist for the same owner. Archived projects still reserve their names; archiving does not free a name for reuse.
+
+`DELETE /api/projects/{id}` archives the project (sets `status` to `archived` and refreshes `updated_at`) instead of physically deleting the row. The endpoint is idempotent: archiving a project that is already archived still returns `200` with the archived project.
+
+Project create/update/archive success events are written to the `system_events` table using stable event types:
+
+| Event Type | Description |
+|------------|-------------|
+| `projects.project.created` | Project creation succeeded |
+| `projects.project.updated` | Project update succeeded |
+| `projects.project.archived` | Project archive succeeded |
+
+Project audit metadata is a safe JSON object with `project_id`, `owner_user_id`, `status`, `changed_fields`, and `request_id`. `changed_fields` records field names only, not submitted values. Audit writes are best-effort: if recording an event fails, the project response keeps its original success result and the server logs the audit error.
+
+## System Events Endpoints
+
+System audit event read endpoints live under `/api/system-events` and require `Authorization: Bearer <accessToken>`. The authenticated user must be active **and carry the `admin` role**; non-admin authenticated users receive `403 forbidden` with the `Admin role required.` envelope.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/system-events` | Return recent system audit events as `{ "events": [...], "limit": 20 }` |
+
+`GET /api/system-events` supports `limit` (default `20`, min `1`, max `100`). The endpoint is read-only and only exposes events already written by audit producers such as auth sign-up/sign-in and project create/update/archive flows. The `events` array is non-nullable; an empty result returns `[]`.
+
+Each event includes `id`, `eventType`, `message`, `metadata`, and `createdAt`. `metadata` is returned as a safe JSON object from audit writers; non-object metadata is converted to an empty object rather than a string or unsafe internal value.
+
+## CRUD API Conventions
+
+List-style endpoints share a small set of conventions so the dashboard frontends and generated TypeScript types stay predictable:
+
+- **Query parameters**: `page` (default `1`, min `1`), `pageSize` (default `20`, min `1`, max `100`), and `search` (trimmed; empty string treated as no filter). Resource-specific filters (e.g. `role`, `status`) are added per endpoint.
+- **Response envelope**: `{ "<items>": [...], "page": 1, "pageSize": 20, "total": N }`. The items array is non-nullable — empty pages return `[]`, never `null`.
+- **Pagination helper**: parsing, defaulting, and bounds checking go through `internal/http/pagination.Normalize`. New list services should call it instead of re-deriving page/offset/search rules.
+- **Resource detail endpoints**: use `GET /api/<resource>/{id}` with a UUID path param. Invalid UUIDs return `422 validation_failed`; missing resources return `404 not_found`. Path-param parsing goes through `internal/http/pathparam.ParseUUID`.
+- **Owner-scoped resources**: services that scope rows to the current user (e.g. `projects`) take the authenticated user's id from the auth layer, parse it as a UUID at the service boundary, and pass it to every store query so isolation is enforced in SQL — not at the handler edge.
+- **OpenAPI is the contract**: every endpoint is registered through Huma so that `openapi/openapi.json` and `openapi/typescript/schema.ts` (regenerated via `make openapi` / `make openapi-types`) stay the single source of truth for frontend types.
+
+## Local Starter Auth Flow
+
+Use this shortest path to connect the wow-dashboard starter to the Go API for local login and registration:
+
+1. Start local PostgreSQL:
+   ```sh
+   make compose-up
+   ```
+2. Apply migrations and seed the demo account:
+   ```sh
+   make local-setup
+   ```
+3. Start the API:
+   ```sh
+   make dev
+   ```
+4. Optionally verify the API auth flow:
+   ```sh
+   make smoke-auth
+   ```
+5. In your wow-dashboard starter's `.env.local`, point the starter at this API:
+   ```sh
+   NEXT_PUBLIC_SERVER_URL=http://localhost:7272
+   ```
+6. Start the starter and log in with:
+   ```txt
+   demo@minimals.cc
+   @2Minimal
+   ```
+
+`make seed` is idempotent: it creates the demo user when missing and updates the password hash, display name, status, and role when the account already exists.
+
+Default local database URL:
+
+```txt
+postgres://spec:spec@localhost:5432/wow_dashboard_api?sslmode=disable
+```
+
+`make smoke-auth` expects the demo user to be seeded first; `make local-setup` handles migrations and seed data for the local Docker Compose database. The smoke checks cover `GET /healthz`, `GET /readyz`, `POST /api/auth/sign-in`, refresh cookie issuance, `GET /api/auth/me`, `POST /api/auth/refresh` with refresh cookie rotation, old refresh cookie rejection, `POST /api/auth/sign-out`, refresh cookie clearing, and refresh rejection after sign-out. It uses `BASE_URL` (or legacy `SMOKE_AUTH_BASE_URL`), `SMOKE_AUTH_EMAIL`, and `SMOKE_AUTH_PASSWORD` overrides when set.
+
+`make smoke-local` is the one-command local black-box acceptance path: it starts local PostgreSQL, runs migrations and seed data, launches `go run ./cmd/api` with the local database URL, waits up to 30 seconds for `http://localhost:7272/healthz`, runs the Newman collection, and stops only the API process that it started. It leaves PostgreSQL running so it does not disrupt a local database you are reusing. API output is written to `tmp/smoke-local-api.log`. To point this command at a different disposable database, set `SMOKE_LOCAL_DATABASE_URL` or `LOCAL_DATABASE_URL`; do not use the generic `DATABASE_URL` environment variable to drive `smoke-local`.
+
+`make postman-test` runs only the Postman collection in `postman/wow-dashboard-api.postman_collection.json` with Newman via `npx --yes newman`; no global Postman or Newman install is required. Use it when the API is already running, including when you started it with `make dev`, `go run ./cmd/api`, Docker, or another terminal. Override defaults with `POSTMAN_BASE_URL`, `POSTMAN_EMAIL`, and `POSTMAN_PASSWORD`. The collection is a black-box smoke/acceptance check for the current HTTP API and does not replace the Go test suite. Its non-admin users authorization case signs up a timestamped disposable `role=user` account, so run it against disposable local data or use `make local-reset` when you want to clean up.
+
+## Verification
+
+Run all checks (formatting, vet, SQLC drift, tests, OpenAPI JSON drift, and generated TypeScript type drift):
+
+```sh
+make check
+```
+
+Individual targets are also available:
+
+| Target                | Description                                        |
+|-----------------------|----------------------------------------------------|
+| `make fmt`            | Auto-format Go source files                        |
+| `make fmt-check`      | Fail if any files are unformatted                   |
+| `make test`           | Run unit tests                                     |
+| `make test-race`      | Run unit tests with the race detector               |
+| `make test-integration` | Run integration-tagged tests with Testcontainers and a 300s timeout |
+| `make vet`            | Run `go vet`                                       |
+| `make sqlc`           | Regenerate type-safe SQL query wrappers via SQLC   |
+| `make sqlc-check`     | Verify if committed SQLC generated code drifted    |
+| `make compose-up`     | Start local PostgreSQL with Docker Compose          |
+| `make compose-down`   | Stop local PostgreSQL Compose services              |
+| `make local-setup`    | Start/wait for local PostgreSQL, run migrations, seed demo auth user |
+| `make local-reset`    | Delete local PostgreSQL volume, recreate DB, migrate, and seed |
+| `make smoke-auth`     | Run the local auth smoke test against the API        |
+| `make postman-test`   | Run Newman black-box smoke tests against a running API |
+| `make smoke-local`    | Start local deps/API, run Newman smoke tests, then stop the API |
+| `make migrate-up`     | Run goose migrations up (requires local DATABASE_URL)|
+| `make migrate-down`   | Run goose migrations down (requires local DATABASE_URL)|
+| `make seed`           | Create or update the local demo auth user           |
+| `make openapi`        | Regenerate `openapi/openapi.json`                   |
+| `make openapi-check`  | Regenerate and fail if the committed file drifted   |
+| `make openapi-types`  | Regenerate TypeScript types from `openapi/openapi.json` |
+| `make openapi-types-check` | Regenerate and fail if committed TypeScript types drifted |
+
+## Database Migrations & Codegen
+
+This project uses `goose` for schema migrations and `sqlc` for type-safe query generation, managed natively by the Go toolchain (via `go tool`).
+
+### Schema Migrations
+All database schema changes must be written as Goose SQL migration files inside the `migrations/` directory:
+- Apply migrations locally: `DATABASE_URL=postgres://... make migrate-up`
+- Roll back migrations: `DATABASE_URL=postgres://... make migrate-down`
+- Seed the local demo auth user after migrations: `DATABASE_URL=postgres://... make seed`
+
+For deployment preflight checks, production safety policy, and the `00007` project-name unique index runbook, see [`docs/deployment-migration-notes.md`](docs/deployment-migration-notes.md).
+
+### Query Codegen
+All SQL queries live in `internal/store/sql/` and are compiled into Go code inside `internal/store/query/` via SQLC:
+- Regenerate query wrappers: `make sqlc`
+- Manual modifications to the generated `internal/store/query/` package are prohibited.
+- CI/CD will fail if the committed query wrappers are out of sync with the SQL files.
+
+## OpenAPI
+
+A static OpenAPI 3.1 spec is generated from the route registry and committed to `openapi/openapi.json` so frontend clients can generate types without running the server.
+
+Regenerate after any route or schema change:
+
+```sh
+make openapi
+```
+
+CI will fail if the committed spec is out of date.
+
+### Frontend Contract Consumption
+
+The backend commits two frontend-facing contract artifacts:
+
+- `openapi/openapi.json` — the OpenAPI 3.1 source of truth exported from Huma route registration.
+- `openapi/typescript/schema.ts` — generated TypeScript types for frontend consumers.
+
+Regenerate both after any API route, request body, response body, or error contract change:
+
+```sh
+make openapi
+make openapi-types
+```
+
+`make check` runs `make openapi-check` and `make openapi-types-check`, so API contract drift fails CI.
+
+The TypeScript generator defaults to the pinned `openapi-typescript` package through Bun when available, with an `npx` fallback. You can override it when needed:
+
+```sh
+OPENAPI_TYPESCRIPT="npx --yes openapi-typescript@7.13.0" make openapi-types
+```
+
+The wow-dashboard and Vite starters should treat these artifacts as the contract source for API client types. Prefer copying or generating from `openapi/typescript/schema.ts`, or running the same generator against `openapi/openapi.json`, instead of hand-writing duplicate request and response interfaces in the frontend.
+
+> **Note:** The core business service layer (`internal/auth/service`) backs the HTTP auth endpoints and provides registration (`SignUp`), credentials validation with timing attack mitigation (`SignIn`), and session checks (`CurrentUser`).
+
+## Password Hashing
+
+Password hashing uses **Argon2id** via the `internal/auth/password` package with OWASP-baseline parameters (19 MiB memory, 2 iterations, parallelism 1). All password hashing and verification must go through `password.Hash` and `password.Verify` — never store or compare passwords by other means.
+
+## JWT Authentication
+
+JWT access token management is handled via the `internal/auth/token` package. It provides symmetric HS256-signed tokens using `github.com/golang-jwt/jwt/v5`.
+
+Key features:
+- **HS256 Only**: Enforces symmetric HMAC-SHA256 signature verification.
+- **Access Token Issuance**: Issued via `IssueAccessToken(userID string)` with essential registered claims (`sub`, `iss`, `aud`, `iat`, `nbf`, `exp`).
+- **Access Token Verification**: Verified via `VerifyAccessToken(raw string)` which strictly validates the signature, issuer, audience, expiration, and `iat` (issued-at) claims.
+- **Custom Clock Support**: Supports clock injection (`WithClock`) for deterministic, sleep-free testing of token expiry.
+- **Security Invariants**:
+  - The signing secret must be at least 32 characters long.
+  - Using the default development secret in production environment (`ENV=production`) is strictly blocked at startup.
+  - Parsing and verification errors do not leak raw token values, secrets, or internal parser details.
+
+## Docker
+
+Build a production image:
+
+```sh
+docker build -t wow-dashboard-api:local .
+```
+
+Run the container (adjust environment variables for your deployment):
+
+```sh
+docker run -d \
+  --name wow-dashboard-api \
+  -p 7272:7272 \
+  -e ENV=production \
+  -e 'DATABASE_URL=postgres://user:pass@host:5432/dbname?sslmode=require' \
+  -e JWT_ACCESS_SECRET=prod-token-signing-key-9f7c2a8b4e6d1c0f \
+  -e CORS_ALLOWED_ORIGINS=https://app.example.com \
+  -e REFRESH_TOKEN_COOKIE_SECURE=true \
+  wow-dashboard-api:local
+```
+
+The Dockerfile uses a multi-stage build with `CGO_ENABLED=0` for a static binary and runs as a non-root user on `distroless/static-debian12:nonroot`. Port 7272 is exposed by default.
+
+### Required Production Environment Variables
+
+When `ENV=production`, the application validates configuration at startup and will refuse to start with unsafe defaults. At minimum, set:
+
+| Variable | Notes |
+|----------|-------|
+| `ENV` | `production` |
+| `DATABASE_URL` | Required; must not be empty |
+| `JWT_ACCESS_SECRET` | At least 32 characters; must not contain placeholder substrings (`change-me`, `changeme`, `dev-only`, `example`, `secret`; case-insensitive) |
+| `CORS_ALLOWED_ORIGINS` | Exact `https://` origins only; no wildcards or loopback |
+| `REFRESH_TOKEN_COOKIE_SECURE` | Must be `true` (auto-defaults to `true` if unset in production) |
+
+### Health Checks in Containers
+
+- **Liveness probe**: `GET /healthz` — returns `200` with `{"status":"ok"}`; no dependencies checked.
+- **Readiness probe**: `GET /readyz` — returns `200` with `{"status":"ready"}` after confirming PostgreSQL connectivity; returns `503` when the database is unreachable.
+
+In Kubernetes or Docker Compose, configure `/healthz` as the liveness probe and `/readyz` as the readiness probe. Do not use `/readyz` as a liveness probe — a temporary database outage should stop new traffic, not force a restart loop.
+
+### Database Migrations
+
+The production container does not include migration tooling. Run migrations as a separate step before deploying the API, for example:
+
+```sh
+export DATABASE_URL='postgres://...'
+go tool goose -dir migrations postgres "$DATABASE_URL" up
+```
+
+Or run migrations in an init container or CI job using a separate goose binary. Do not assume the API container will auto-migrate.
+
+Before running production or shared-database migrations, review the deployment migration notes in [`docs/deployment-migration-notes.md`](docs/deployment-migration-notes.md).
+
+## CI
+
+GitHub Actions uses layered checks so pull requests stay stable while deeper black-box smoke coverage remains available on demand:
+
+| Layer | Command | When it runs | Purpose |
+|-------|---------|--------------|---------|
+| Main CI gate | `make check` | Pushes to `main` and pull requests | Formatting, vet, SQLC drift, Go tests, integration tests, OpenAPI JSON drift, and generated TypeScript type drift |
+| Image smoke | `docker build -t wow-dashboard-api:ci .` | Pushes to `main` and pull requests | Verifies the production Docker image still builds; the image is not pushed |
+| Local black-box acceptance | `make smoke-local` | Manual GitHub Actions dispatch or local developer run | Starts Docker Compose PostgreSQL, migrates/seeds the local database, runs the API, executes Newman, then stops the API |
+| Existing API collection | `make postman-test` | Local/manual when an API is already running | Runs the Postman/Newman collection against the configured `POSTMAN_BASE_URL` |
+
+The default PR/push workflow is [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The local smoke harness is intentionally separate in [`.github/workflows/smoke-local.yml`](.github/workflows/smoke-local.yml) and can be run from the GitHub Actions **Local Smoke** workflow via **Run workflow**.
