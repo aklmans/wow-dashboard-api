@@ -55,6 +55,10 @@ type Config struct {
 	// Redis; empty keeps the per-instance in-memory limiter.
 	RedisURL string `env:"REDIS_URL" envDefault:""`
 
+	// OTelExporterEndpoint is the OTLP/HTTP collector URL for distributed
+	// tracing; empty leaves tracing as a no-op.
+	OTelExporterEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:""`
+
 	// JWT authentication configuration.
 	JWTAccessSecret          string `env:"JWT_ACCESS_SECRET" envDefault:"dev-only-change-me-min-32-characters"`
 	JWTIssuer                string `env:"JWT_ISSUER" envDefault:"wow-dashboard-api"`

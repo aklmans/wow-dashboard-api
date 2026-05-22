@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aklmans/wow-dashboard-api/internal/config"
+	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -58,6 +59,9 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 	poolCfg.MinConns = int32(cfg.DBMinConns)
 	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime()
 	poolCfg.MaxConnIdleTime = cfg.DBMaxConnIdleTime()
+
+	// Trace database queries; the tracer is a no-op until tracing is enabled.
+	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

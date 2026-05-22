@@ -484,6 +484,10 @@ In Kubernetes or Docker Compose, configure `/healthz` as the liveness probe and 
 
 `GET /metrics` exposes Prometheus metrics — `http_requests_total` and `http_request_duration_seconds` (labeled by method, matched route, and status) plus the standard Go runtime and process collectors. The route label uses the matched Chi pattern (e.g. `/api/users/{id}`), so cardinality stays bounded. The endpoint is unauthenticated; restrict it at the network or ingress layer if the deployment is internet-facing.
 
+### Tracing
+
+The service is instrumented with OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP/HTTP collector URL (e.g. `http://localhost:4318`) to export traces; leave it unset and tracing is a no-op with negligible overhead — no collector required. Each HTTP request becomes a server span named by its matched route (`GET /api/users/{id}`), and database queries are recorded as child spans. Incoming W3C `traceparent` headers are honored, so traces join up across services.
+
 ### Database Migrations
 
 The production container ships no migration tooling — run migrations as a

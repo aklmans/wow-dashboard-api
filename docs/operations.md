@@ -179,7 +179,9 @@ make openapi-types
 
 Future evolution items, not blockers for the current baseline:
 
-- Distributed tracing. (Prometheus metrics are exposed at `/metrics`.)
+- A bundled observability stack (collector, dashboards). The app exposes
+  Prometheus metrics at `/metrics` and exports OpenTelemetry traces, but
+  running the collector and dashboards is left to the deployment.
 - External secret-manager integration.
 - Distributed locks and job queues.
 - An attribute-based access-control (ABAC) policy engine. Role-based access

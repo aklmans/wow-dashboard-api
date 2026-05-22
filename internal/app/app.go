@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/token"
@@ -23,6 +24,7 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/http/handlers"
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
 	"github.com/aklmans/wow-dashboard-api/internal/logging"
+	"github.com/aklmans/wow-dashboard-api/internal/observability"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
 	rolesservice "github.com/aklmans/wow-dashboard-api/internal/roles/service"
 	"github.com/aklmans/wow-dashboard-api/internal/store"
@@ -87,6 +89,21 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	logger := logging.NewLogger(cfg, os.Stdout)
 	slog.SetDefault(logger)
 
+	// Distributed tracing. No-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+	traceShutdown, err := observability.SetupTracing(ctx, cfg.AppName, cfg.OTelExporterEndpoint)
+	if err != nil {
+		logger.Warn("tracing setup failed; continuing without tracing", "error", err)
+	} else if cfg.OTelExporterEndpoint != "" {
+		logger.Info("Distributed tracing enabled", "endpoint", cfg.OTelExporterEndpoint)
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := traceShutdown(flushCtx); err != nil {
+			logger.Error("tracing shutdown failed", "error", err)
+		}
+	}()
+
 	router := chi.NewRouter()
 
 	// Base Standard Middlewares
@@ -95,6 +112,9 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Prometheus HTTP instrumentation, early so it times the whole request.
 	metrics := httpmiddleware.NewMetrics()
 	router.Use(metrics.Middleware())
+
+	// Name the tracing span by the matched route once Chi has routed.
+	router.Use(httpmiddleware.TraceRoute())
 
 	router.Use(httpmiddleware.RequestLogger(logger))
 	router.Use(middleware.Recoverer)
@@ -189,7 +209,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
-		Handler:      router,
+		Handler:      otelhttp.NewHandler(router, "http.server"),
 		ReadTimeout:  cfg.ReadTimeout(),
 		WriteTimeout: cfg.WriteTimeout(),
 		IdleTimeout:  cfg.IdleTimeout(),
