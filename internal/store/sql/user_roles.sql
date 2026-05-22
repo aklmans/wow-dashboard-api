@@ -28,4 +28,4 @@ WITH added AS (
 )
 DELETE FROM user_roles
 WHERE user_roles.user_id = @user_id
-  AND user_roles.role_id <> ALL (@role_ids::uuid[]);
+  AND user_roles.role_id <> ALL (COALESCE(@role_ids::uuid[], ARRAY[]::uuid[]));

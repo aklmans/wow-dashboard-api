@@ -96,7 +96,7 @@ WITH added AS (
 )
 DELETE FROM user_roles
 WHERE user_roles.user_id = $1
-  AND user_roles.role_id <> ALL ($2::uuid[])
+  AND user_roles.role_id <> ALL (COALESCE($2::uuid[], ARRAY[]::uuid[]))
 `
 
 type ReplaceUserRolesParams struct {

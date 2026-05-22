@@ -213,7 +213,7 @@ WITH added AS (
 )
 DELETE FROM role_permissions
 WHERE role_permissions.role_id = $1
-  AND role_permissions.permission <> ALL ($2::text[])
+  AND role_permissions.permission <> ALL (COALESCE($2::text[], ARRAY[]::text[]))
 `
 
 type ReplaceRolePermissionsParams struct {

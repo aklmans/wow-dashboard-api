@@ -109,7 +109,7 @@ func TestRoleStoreIntegration(t *testing.T) {
 	// Once the assignment is removed the role deletes cleanly.
 	if err := queries.ReplaceUserRoles(ctx, query.ReplaceUserRolesParams{
 		UserID:  pgtype.UUID{Bytes: userID, Valid: true},
-		RoleIds: nil,
+		RoleIds: []pgtype.UUID{},
 	}); err != nil {
 		t.Fatalf("ReplaceUserRoles failed: %v", err)
 	}

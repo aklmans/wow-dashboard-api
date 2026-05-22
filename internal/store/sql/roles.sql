@@ -63,7 +63,7 @@ WITH added AS (
 )
 DELETE FROM role_permissions
 WHERE role_permissions.role_id = @role_id
-  AND role_permissions.permission <> ALL (@permissions::text[]);
+  AND role_permissions.permission <> ALL (COALESCE(@permissions::text[], ARRAY[]::text[]));
 
 -- name: DeleteRole :execrows
 DELETE FROM roles
