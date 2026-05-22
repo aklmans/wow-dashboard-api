@@ -1,0 +1,41 @@
+name: Local Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-local:
+    name: Local Smoke Harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Verify Docker Compose
+        run: docker compose version
+
+      - name: Run local smoke harness
+        run: make smoke-local
+
+      - name: Stop local services
+        if: always()
+        run: make compose-down
