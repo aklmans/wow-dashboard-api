@@ -298,7 +298,6 @@ func mustCreateUser(t *testing.T, ctx context.Context, queries *query.Queries, e
 		DisplayName:  displayName,
 		PasswordHash: hash,
 		Status:       "active",
-		Role:         "user",
 		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		UpdatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	}); err != nil {

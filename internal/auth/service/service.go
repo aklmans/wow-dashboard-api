@@ -39,14 +39,20 @@ const (
 	maxPasswordLength = 4096
 )
 
-// PublicUser defines the client-facing user presentation.
-// It never exposes password hashes or other sensitive internal states.
+// defaultRoleName is the role assigned to every newly registered user.
+const defaultRoleName = "user"
+
+// PublicUser defines the client-facing user presentation. It never exposes
+// password hashes or other sensitive internal state. Roles and Permissions
+// are populated by CurrentUser; sign-in/sign-up leave them empty (clients
+// fetch the resolved set from /api/auth/me).
 type PublicUser struct {
-	ID          string `json:"id"`
-	Email       string `json:"email"`
-	DisplayName string `json:"displayName"`
-	Status      string `json:"status,omitempty"`
-	Role        string `json:"role"`
+	ID          string   `json:"id"`
+	Email       string   `json:"email"`
+	DisplayName string   `json:"displayName"`
+	Status      string   `json:"status,omitempty"`
+	Roles       []string `json:"roles,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 // Session represents a successful authentication result containing both the
@@ -76,6 +82,10 @@ type UserStore interface {
 	CreateUser(ctx context.Context, input domain.CreateUserInput) (domain.User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (domain.User, error)
 	GetUserByEmailForAuth(ctx context.Context, email string) (domain.AuthUser, error)
+	GetRoleByName(ctx context.Context, name string) (domain.Role, error)
+	AddUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error
+	GetUserRoles(ctx context.Context, userID uuid.UUID) ([]string, error)
+	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
 }
 
 // RefreshTokenStore defines the persistence port for opaque refresh tokens.
@@ -222,7 +232,6 @@ func (s *Service) SignUp(ctx context.Context, input SignUpInput) (*Session, erro
 		DisplayName:  displayName,
 		PasswordHash: hashedPassword,
 		Status:       domain.UserStatusActive,
-		Role:         domain.UserRoleUser,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -237,7 +246,6 @@ func (s *Service) SignUp(ctx context.Context, input SignUpInput) (*Session, erro
 			s.recordSignUpFailed(ctx, AuditMetadata{
 				Email:  createUserInput.Email,
 				UserID: createUserInput.ID.String(),
-				Role:   string(createUserInput.Role),
 				Reason: AuditReasonInternalError,
 			})
 			return nil, fmt.Errorf("auth: failed to create user session: %w", err)
@@ -246,7 +254,6 @@ func (s *Service) SignUp(ctx context.Context, input SignUpInput) (*Session, erro
 		s.recordSignUpSucceeded(ctx, AuditMetadata{
 			Email:  session.User.Email,
 			UserID: session.User.ID,
-			Role:   session.User.Role,
 		})
 		return session, nil
 	}
@@ -262,12 +269,20 @@ func (s *Service) SignUp(ctx context.Context, input SignUpInput) (*Session, erro
 		return nil, fmt.Errorf("auth: failed to create user: %w", err)
 	}
 
+	if err := assignDefaultRole(ctx, s.store, createdUser.ID); err != nil {
+		s.recordSignUpFailed(ctx, AuditMetadata{
+			Email:  createdUser.Email,
+			UserID: createdUser.ID.String(),
+			Reason: AuditReasonInternalError,
+		})
+		return nil, fmt.Errorf("auth: failed to assign default role: %w", err)
+	}
+
 	session, err := s.issueSession(ctx, createdUser, uuid.Nil)
 	if err != nil {
 		s.recordSignUpFailed(ctx, AuditMetadata{
 			Email:  createdUser.Email,
 			UserID: createdUser.ID.String(),
-			Role:   string(createdUser.Role),
 			Reason: AuditReasonInternalError,
 		})
 		return nil, fmt.Errorf("auth: failed to issue session: %w", err)
@@ -276,9 +291,17 @@ func (s *Service) SignUp(ctx context.Context, input SignUpInput) (*Session, erro
 	s.recordSignUpSucceeded(ctx, AuditMetadata{
 		Email:  session.User.Email,
 		UserID: session.User.ID,
-		Role:   session.User.Role,
 	})
 	return session, nil
+}
+
+// assignDefaultRole grants the newly registered user the default "user" role.
+func assignDefaultRole(ctx context.Context, users UserStore, userID uuid.UUID) error {
+	role, err := users.GetRoleByName(ctx, defaultRoleName)
+	if err != nil {
+		return err
+	}
+	return users.AddUserRole(ctx, userID, role.ID)
 }
 
 func (s *Service) signUpWithUnitOfWork(ctx context.Context, input domain.CreateUserInput) (*Session, error) {
@@ -301,6 +324,10 @@ func (s *Service) signUpWithUnitOfWork(ctx context.Context, input domain.CreateU
 		var err error
 		createdUser, err = deps.Users.CreateUser(ctx, input)
 		if err != nil {
+			return err
+		}
+
+		if err := assignDefaultRole(ctx, deps.Users, createdUser.ID); err != nil {
 			return err
 		}
 
@@ -353,7 +380,6 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		s.recordSignInFailed(ctx, AuditMetadata{
 			Email:  email,
 			UserID: userIDStr,
-			Role:   string(user.Role),
 			Reason: AuditReasonInternalError,
 		})
 		return nil, fmt.Errorf("auth: failed to verify password: %w", err)
@@ -362,7 +388,6 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		s.recordSignInFailed(ctx, AuditMetadata{
 			Email:  email,
 			UserID: userIDStr,
-			Role:   string(user.Role),
 			Reason: AuditReasonInvalidCredentials,
 		})
 		return nil, ErrInvalidCredentials
@@ -376,7 +401,6 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		s.recordSignInFailed(ctx, AuditMetadata{
 			Email:  email,
 			UserID: userIDStr,
-			Role:   string(user.Role),
 			Reason: AuditReasonUserDisabled,
 		})
 		return nil, ErrInvalidCredentials
@@ -387,7 +411,6 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		s.recordSignInFailed(ctx, AuditMetadata{
 			Email:  email,
 			UserID: userIDStr,
-			Role:   string(user.Role),
 			Reason: AuditReasonInternalError,
 		})
 		return nil, fmt.Errorf("auth: failed to issue session: %w", err)
@@ -395,7 +418,6 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 	s.recordSignInSucceeded(ctx, AuditMetadata{
 		Email:  session.User.Email,
 		UserID: session.User.ID,
-		Role:   session.User.Role,
 	})
 	return session, nil
 }
@@ -495,12 +517,24 @@ func (s *Service) CurrentUser(ctx context.Context, rawAccessToken string) (*Publ
 		return nil, ErrUserDisabled
 	}
 
+	// Resolve the user's roles and effective permissions fresh on every call
+	// so a role or permission change takes effect on the next request.
+	roles, err := s.store.GetUserRoles(ctx, parsedUUID)
+	if err != nil {
+		return nil, fmt.Errorf("auth: failed to retrieve user roles: %w", err)
+	}
+	permissions, err := s.store.GetUserPermissions(ctx, parsedUUID)
+	if err != nil {
+		return nil, fmt.Errorf("auth: failed to retrieve user permissions: %w", err)
+	}
+
 	return &PublicUser{
 		ID:          parsedUUID.String(),
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Status:      string(user.Status),
-		Role:        string(user.Role),
+		Roles:       roles,
+		Permissions: permissions,
 	}, nil
 }
 
@@ -562,7 +596,6 @@ func publicUserFromDomain(user domain.User) PublicUser {
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Status:      string(user.Status),
-		Role:        string(user.Role),
 	}
 }
 

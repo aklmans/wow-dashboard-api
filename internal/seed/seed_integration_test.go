@@ -90,15 +90,16 @@ func TestSeedDemoUserIntegration(t *testing.T) {
 	if err := pgID.Scan(first.ID); err != nil {
 		t.Fatalf("failed to scan seeded user ID: %v", err)
 	}
-	if _, err := queries.UpdateUser(ctx, query.UpdateUserParams{
+	if _, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
 		ID:        pgID,
-		Status:    pgtype.Text{String: "disabled", Valid: true},
+		Status:    "disabled",
 		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 	}); err != nil {
 		t.Fatalf("failed to disable seeded user before second seed: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE users SET role = 'user' WHERE id = $1`, pgID); err != nil {
-		t.Fatalf("failed to downgrade seeded user role before second seed: %v", err)
+	// Strip the user's role assignments so the second seed must restore them.
+	if _, err := pool.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, pgID); err != nil {
+		t.Fatalf("failed to clear seeded user roles before second seed: %v", err)
 	}
 
 	second, err := SeedDemoUser(ctx, queries)
@@ -110,6 +111,15 @@ func TestSeedDemoUserIntegration(t *testing.T) {
 		t.Errorf("second seed ID = %q, want same ID %q", second.ID, first.ID)
 	}
 	assertUserCount(t, ctx, queries, 1)
+
+	// The second seed must have re-assigned the admin role cleared above.
+	roles, err := queries.ListUserRoles(ctx, pgID)
+	if err != nil {
+		t.Fatalf("ListUserRoles failed: %v", err)
+	}
+	if len(roles) != 1 || roles[0].Name != "admin" {
+		t.Errorf("seeded user roles = %v, want [admin]", roles)
+	}
 
 	tokenManager, err := token.NewManager(
 		"integration-secret-key-at-least-32-bytes",
@@ -141,8 +151,17 @@ func TestSeedDemoUserIntegration(t *testing.T) {
 	if session.User.DisplayName != DemoDisplayName {
 		t.Errorf("session displayName = %q, want %q", session.User.DisplayName, DemoDisplayName)
 	}
-	if session.User.Role != "admin" {
-		t.Errorf("session role = %q, want admin", session.User.Role)
+
+	// Resolving the profile must surface the admin role and its wildcard permission.
+	profile, err := authSvc.CurrentUser(ctx, session.AccessToken)
+	if err != nil {
+		t.Fatalf("CurrentUser after seed failed: %v", err)
+	}
+	if len(profile.Roles) != 1 || profile.Roles[0] != "admin" {
+		t.Errorf("profile roles = %v, want [admin]", profile.Roles)
+	}
+	if len(profile.Permissions) != 1 || profile.Permissions[0] != "*" {
+		t.Errorf("profile permissions = %v, want [*]", profile.Permissions)
 	}
 }
 

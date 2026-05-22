@@ -66,7 +66,6 @@ func userFromCreateRow(row query.CreateUserRow) (domain.User, error) {
 		Email:       row.Email,
 		DisplayName: row.DisplayName,
 		Status:      domain.UserStatus(row.Status),
-		Role:        domain.UserRole(row.Role),
 		CreatedAt:   createdAt,
 		UpdatedAt:   updatedAt,
 	}, nil
@@ -90,13 +89,12 @@ func userFromGetByIDRow(row query.GetUserByIDRow) (domain.User, error) {
 		Email:       row.Email,
 		DisplayName: row.DisplayName,
 		Status:      domain.UserStatus(row.Status),
-		Role:        domain.UserRole(row.Role),
 		CreatedAt:   createdAt,
 		UpdatedAt:   updatedAt,
 	}, nil
 }
 
-func authUserFromRow(row query.GetUserByEmailForAuthRow) (domain.AuthUser, error) {
+func authUserFromRow(row query.User) (domain.AuthUser, error) {
 	id, err := domainUUID(row.ID)
 	if err != nil {
 		return domain.AuthUser{}, err
@@ -115,7 +113,6 @@ func authUserFromRow(row query.GetUserByEmailForAuthRow) (domain.AuthUser, error
 			Email:       row.Email,
 			DisplayName: row.DisplayName,
 			Status:      domain.UserStatus(row.Status),
-			Role:        domain.UserRole(row.Role),
 			CreatedAt:   createdAt,
 			UpdatedAt:   updatedAt,
 		},

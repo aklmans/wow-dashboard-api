@@ -18,8 +18,8 @@ type AuditMetadata struct {
 	TargetUserID  string   `json:"target_user_id,omitempty"`
 	ActorUserID   string   `json:"actor_user_id,omitempty"`
 	ChangedFields []string `json:"changed_fields,omitempty"`
-	Role          string   `json:"role,omitempty"`
 	Status        string   `json:"status,omitempty"`
+	RoleIDs       []string `json:"role_ids,omitempty"`
 	RequestID     string   `json:"request_id,omitempty"`
 }
 

@@ -100,7 +100,6 @@ func TestAuthHandlers(t *testing.T) {
 					Email:       "demo@minimals.cc",
 					DisplayName: "Demo User",
 					Status:      "active",
-					Role:        "admin",
 				},
 				AccessToken:  "new-access-token",
 				RefreshToken: "new-refresh-token",
@@ -688,8 +687,6 @@ type starterUser struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	DisplayName string `json:"displayName"`
-	Role        string `json:"role"`
-	Status      string `json:"status,omitempty"`
 }
 
 func testSession() *service.Session {
@@ -699,7 +696,6 @@ func testSession() *service.Session {
 			Email:       "demo@minimals.cc",
 			DisplayName: "Demo User",
 			Status:      "active",
-			Role:        "admin",
 		},
 		AccessToken:  "access-token-123",
 		RefreshToken: "refresh-token-123",
@@ -761,12 +757,6 @@ func assertStarterUser(t *testing.T, user starterUser) {
 	}
 	if user.DisplayName != "Demo User" {
 		t.Errorf("user.displayName = %q, want Demo User", user.DisplayName)
-	}
-	if user.Role != "admin" {
-		t.Errorf("user.role = %q, want admin", user.Role)
-	}
-	if user.Status != "" {
-		t.Errorf("user.status = %q, want omitted", user.Status)
 	}
 }
 

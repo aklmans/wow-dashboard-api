@@ -12,60 +12,76 @@ import (
 )
 
 const countUsersPage = `-- name: CountUsersPage :one
-SELECT count(*)::bigint
-FROM users
+SELECT count(DISTINCT u.id)::bigint
+FROM users u
 WHERE (
     $1::text IS NULL
-    OR email ILIKE '%' || $1::text || '%'
-    OR display_name ILIKE '%' || $1::text || '%'
+    OR u.email ILIKE '%' || $1::text || '%'
+    OR u.display_name ILIKE '%' || $1::text || '%'
 )
 AND (
     $2::text IS NULL
-    OR role = $2::text
+    OR u.status = $2::text
 )
 AND (
     $3::text IS NULL
-    OR status = $3::text
+    OR EXISTS (
+        SELECT 1 FROM user_roles ur2
+        JOIN roles r2 ON r2.id = ur2.role_id
+        WHERE ur2.user_id = u.id AND r2.name = $3::text
+    )
 )
 `
 
 type CountUsersPageParams struct {
 	Search pgtype.Text
-	Role   pgtype.Text
 	Status pgtype.Text
+	Role   pgtype.Text
 }
 
 func (q *Queries) CountUsersPage(ctx context.Context, arg CountUsersPageParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countUsersPage, arg.Search, arg.Role, arg.Status)
+	row := q.db.QueryRow(ctx, countUsersPage, arg.Search, arg.Status, arg.Role)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
 }
 
 const listUsersPage = `-- name: ListUsersPage :many
-SELECT id, email, display_name, status, role, created_at, updated_at
-FROM users
+SELECT
+    u.id, u.email, u.display_name, u.status, u.created_at, u.updated_at,
+    COALESCE(
+        array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL),
+        ARRAY[]::text[]
+    )::text[] AS roles
+FROM users u
+LEFT JOIN user_roles ur ON ur.user_id = u.id
+LEFT JOIN roles r ON r.id = ur.role_id
 WHERE (
     $1::text IS NULL
-    OR email ILIKE '%' || $1::text || '%'
-    OR display_name ILIKE '%' || $1::text || '%'
+    OR u.email ILIKE '%' || $1::text || '%'
+    OR u.display_name ILIKE '%' || $1::text || '%'
 )
 AND (
     $2::text IS NULL
-    OR role = $2::text
+    OR u.status = $2::text
 )
 AND (
     $3::text IS NULL
-    OR status = $3::text
+    OR EXISTS (
+        SELECT 1 FROM user_roles ur2
+        JOIN roles r2 ON r2.id = ur2.role_id
+        WHERE ur2.user_id = u.id AND r2.name = $3::text
+    )
 )
-ORDER BY created_at DESC, id DESC
+GROUP BY u.id
+ORDER BY u.created_at DESC, u.id DESC
 LIMIT $5 OFFSET $4
 `
 
 type ListUsersPageParams struct {
 	Search    pgtype.Text
-	Role      pgtype.Text
 	Status    pgtype.Text
+	Role      pgtype.Text
 	OffsetVal int32
 	LimitVal  int32
 }
@@ -75,16 +91,16 @@ type ListUsersPageRow struct {
 	Email       string
 	DisplayName string
 	Status      string
-	Role        string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+	Roles       []string
 }
 
 func (q *Queries) ListUsersPage(ctx context.Context, arg ListUsersPageParams) ([]ListUsersPageRow, error) {
 	rows, err := q.db.Query(ctx, listUsersPage,
 		arg.Search,
-		arg.Role,
 		arg.Status,
+		arg.Role,
 		arg.OffsetVal,
 		arg.LimitVal,
 	)
@@ -100,9 +116,9 @@ func (q *Queries) ListUsersPage(ctx context.Context, arg ListUsersPageParams) ([
 			&i.Email,
 			&i.DisplayName,
 			&i.Status,
-			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Roles,
 		); err != nil {
 			return nil, err
 		}

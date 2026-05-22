@@ -61,10 +61,6 @@ func TestServiceIntegration(t *testing.T) {
 			t.Errorf("expected display name 'John Doe', got %q", session.User.DisplayName)
 		}
 
-		if session.User.Role != "user" {
-			t.Errorf("expected role 'user', got %q", session.User.Role)
-		}
-
 		if session.User.Status != "active" {
 			t.Errorf("expected status 'active', got %q", session.User.Status)
 		}
@@ -173,10 +169,6 @@ func TestServiceIntegration(t *testing.T) {
 		if session.User.Email != "john.doe@example.com" {
 			t.Errorf("expected email 'john.doe@example.com', got %q", session.User.Email)
 		}
-		if session.User.Role != "user" {
-			t.Errorf("expected role 'user', got %q", session.User.Role)
-		}
-
 		// Verify the issued token can be parsed and verified
 		claims, err := tokenManager.VerifyAccessToken(session.AccessToken)
 		if err != nil {
@@ -286,8 +278,11 @@ func TestServiceIntegration(t *testing.T) {
 		if profile.DisplayName != "John Doe" {
 			t.Errorf("expected display name 'John Doe', got %q", profile.DisplayName)
 		}
-		if profile.Role != "user" {
-			t.Errorf("expected role 'user', got %q", profile.Role)
+		if len(profile.Roles) != 1 || profile.Roles[0] != "user" {
+			t.Errorf("expected roles [user], got %v", profile.Roles)
+		}
+		if len(profile.Permissions) != 0 {
+			t.Errorf("expected no permissions for a plain user, got %v", profile.Permissions)
 		}
 	})
 

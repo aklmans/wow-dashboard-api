@@ -16,7 +16,7 @@ import (
 )
 
 func TestProjectMembersHandler(t *testing.T) {
-	authedUser := &authservice.PublicUser{ID: uuid.New().String(), Status: "active", Role: "user"}
+	authedUser := &authservice.PublicUser{ID: uuid.New().String(), Status: "active"}
 	projectID := uuid.New()
 	memberID := uuid.New()
 

@@ -213,7 +213,7 @@ export interface paths {
         };
         /**
          * List system events
-         * @description Returns recent system audit events. Admin role required; non-admin authenticated users receive 403.
+         * @description Returns recent system audit events. Requires the system_events:read permission.
          */
         get: operations["get-system-events"];
         put?: never;
@@ -233,7 +233,7 @@ export interface paths {
         };
         /**
          * List users
-         * @description Returns a paginated list of users. Admin role required; non-admin authenticated users receive 403.
+         * @description Returns a paginated list of users. Requires the users:read permission.
          */
         get: operations["get-users"];
         put?: never;
@@ -253,7 +253,7 @@ export interface paths {
         };
         /**
          * Get user by id
-         * @description Returns a single user by id. Admin role required; non-admin authenticated users receive 403.
+         * @description Returns a single user by id. Requires the users:read permission.
          */
         get: operations["get-user"];
         put?: never;
@@ -262,8 +262,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update user role or status
-         * @description Updates a user's role and/or status. Admin role required. An admin cannot change their own role or status.
+         * Update user status or roles
+         * @description Updates a user's status and/or replaces their role set. Requires the users:manage permission. An admin cannot change their own account.
          */
         patch: operations["patch-user"];
         trace?: never;
@@ -339,8 +339,29 @@ export interface components {
              * @example https://example.com/schemas/AuthMeBody.json
              */
             readonly $schema?: string;
-            /** @description Authenticated user profile */
-            user: components["schemas"]["AuthUser"];
+            /** @description Authenticated user profile with roles and permissions */
+            user: components["schemas"]["AuthMeUser"];
+        };
+        AuthMeUser: {
+            /**
+             * @description User display name
+             * @example Demo User
+             */
+            displayName: string;
+            /**
+             * @description User email address
+             * @example demo@minimals.cc
+             */
+            email: string;
+            /**
+             * @description User identifier
+             * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
+             */
+            id: string;
+            /** @description Effective permission strings granted by the user's roles */
+            permissions: string[];
+            /** @description Names of the roles assigned to the user */
+            roles: string[];
         };
         AuthSessionBody: {
             /**
@@ -383,11 +404,6 @@ export interface components {
              * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
              */
             id: string;
-            /**
-             * @description User role
-             * @example user
-             */
-            role: string;
         };
         CreateProjectInputBody: {
             /**
@@ -780,12 +796,8 @@ export interface components {
              * @example https://example.com/schemas/UpdateUserInputBody.json
              */
             readonly $schema?: string;
-            /**
-             * @description New role; omit to leave unchanged
-             * @example admin
-             * @enum {string}
-             */
-            role?: "user" | "admin";
+            /** @description Replacement set of role ids; omit to leave roles unchanged */
+            roleIds?: string[];
             /**
              * @description New status; omit to leave unchanged
              * @example active
@@ -852,11 +864,8 @@ export interface components {
              * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
              */
             id: string;
-            /**
-             * @description User role
-             * @example admin
-             */
-            role: string;
+            /** @description Names of the roles assigned to the user */
+            roles: string[];
             /**
              * @description User status
              * @example active
@@ -1395,7 +1404,7 @@ export interface operations {
                 pageSize?: number;
                 /** @description Optional email or display name search term */
                 search?: string;
-                /** @description Optional role filter: admin or user */
+                /** @description Optional role name filter */
                 role?: string;
                 /** @description Optional status filter: active or disabled */
                 status?: string;

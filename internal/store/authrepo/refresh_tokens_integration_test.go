@@ -32,7 +32,6 @@ func TestRefreshTokenStoreIntegration(t *testing.T) {
 		DisplayName:  "Refresh User",
 		PasswordHash: hash,
 		Status:       domain.UserStatusActive,
-		Role:         domain.UserRoleUser,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	})

@@ -15,19 +15,11 @@ const (
 	UserStatusDisabled UserStatus = "disabled"
 )
 
-type UserRole string
-
-const (
-	UserRoleAdmin UserRole = "admin"
-	UserRoleUser  UserRole = "user"
-)
-
 type User struct {
 	ID          uuid.UUID
 	Email       string
 	DisplayName string
 	Status      UserStatus
-	Role        UserRole
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -43,9 +35,14 @@ type CreateUserInput struct {
 	DisplayName  string
 	PasswordHash string
 	Status       UserStatus
-	Role         UserRole
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// Role is a named role from the roles table.
+type Role struct {
+	ID   uuid.UUID
+	Name string
 }
 
 type RefreshToken struct {
@@ -74,6 +71,6 @@ var (
 	ErrUserNotFound         = errors.New("auth user store: user not found")
 	ErrEmailAlreadyExists   = errors.New("auth user store: email already exists")
 	ErrInvalidUserStatus    = errors.New("auth user store: invalid user status")
-	ErrInvalidUserRole      = errors.New("auth user store: invalid user role")
+	ErrRoleNotFound         = errors.New("auth user store: role not found")
 	ErrRefreshTokenNotFound = errors.New("auth refresh token store: token not found")
 )

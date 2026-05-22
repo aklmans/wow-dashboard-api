@@ -115,12 +115,60 @@
             "type": "string"
           },
           "user": {
-            "$ref": "#/components/schemas/AuthUser",
-            "description": "Authenticated user profile"
+            "$ref": "#/components/schemas/AuthMeUser",
+            "description": "Authenticated user profile with roles and permissions"
           }
         },
         "required": [
           "user"
+        ],
+        "type": "object"
+      },
+      "AuthMeUser": {
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "description": "User display name",
+            "examples": [
+              "Demo User"
+            ],
+            "type": "string"
+          },
+          "email": {
+            "description": "User email address",
+            "examples": [
+              "demo@minimals.cc"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "User identifier",
+            "examples": [
+              "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+            ],
+            "type": "string"
+          },
+          "permissions": {
+            "description": "Effective permission strings granted by the user's roles",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "roles": {
+            "description": "Names of the roles assigned to the user",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "displayName",
+          "roles",
+          "permissions"
         ],
         "type": "object"
       },
@@ -199,20 +247,12 @@
               "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
             ],
             "type": "string"
-          },
-          "role": {
-            "description": "User role",
-            "examples": [
-              "user"
-            ],
-            "type": "string"
           }
         },
         "required": [
           "id",
           "email",
-          "displayName",
-          "role"
+          "displayName"
         ],
         "type": "object"
       },
@@ -929,16 +969,13 @@
             "readOnly": true,
             "type": "string"
           },
-          "role": {
-            "description": "New role; omit to leave unchanged",
-            "enum": [
-              "user",
-              "admin"
-            ],
-            "examples": [
-              "admin"
-            ],
-            "type": "string"
+          "roleIds": {
+            "description": "Replacement set of role ids; omit to leave roles unchanged",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
           },
           "status": {
             "description": "New status; omit to leave unchanged",
@@ -1057,12 +1094,12 @@
             ],
             "type": "string"
           },
-          "role": {
-            "description": "User role",
-            "examples": [
-              "admin"
-            ],
-            "type": "string"
+          "roles": {
+            "description": "Names of the roles assigned to the user",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "status": {
             "description": "User status",
@@ -1082,7 +1119,7 @@
           "email",
           "displayName",
           "status",
-          "role",
+          "roles",
           "createdAt",
           "updatedAt"
         ],
@@ -2035,7 +2072,7 @@
     },
     "/api/system-events": {
       "get": {
-        "description": "Returns recent system audit events. Admin role required; non-admin authenticated users receive 403.",
+        "description": "Returns recent system audit events. Requires the system_events:read permission.",
         "operationId": "get-system-events",
         "parameters": [
           {
@@ -2098,7 +2135,7 @@
     },
     "/api/users": {
       "get": {
-        "description": "Returns a paginated list of users. Admin role required; non-admin authenticated users receive 403.",
+        "description": "Returns a paginated list of users. Requires the users:read permission.",
         "operationId": "get-users",
         "parameters": [
           {
@@ -2160,12 +2197,12 @@
             }
           },
           {
-            "description": "Optional role filter: admin or user",
+            "description": "Optional role name filter",
             "explode": false,
             "in": "query",
             "name": "role",
             "schema": {
-              "description": "Optional role filter: admin or user",
+              "description": "Optional role name filter",
               "examples": [
                 "admin"
               ],
@@ -2218,7 +2255,7 @@
     },
     "/api/users/{id}": {
       "get": {
-        "description": "Returns a single user by id. Admin role required; non-admin authenticated users receive 403.",
+        "description": "Returns a single user by id. Requires the users:read permission.",
         "operationId": "get-user",
         "parameters": [
           {
@@ -2281,7 +2318,7 @@
         ]
       },
       "patch": {
-        "description": "Updates a user's role and/or status. Admin role required. An admin cannot change their own role or status.",
+        "description": "Updates a user's status and/or replaces their role set. Requires the users:manage permission. An admin cannot change their own account.",
         "operationId": "patch-user",
         "parameters": [
           {
@@ -2351,7 +2388,7 @@
             "$ref": "#/components/responses/APIError"
           }
         },
-        "summary": "Update user role or status",
+        "summary": "Update user status or roles",
         "tags": [
           "Users"
         ]

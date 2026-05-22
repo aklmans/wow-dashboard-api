@@ -182,7 +182,7 @@ Auth sign-up/sign-in success and failure events are written to the `system_event
 | `auth.sign_in.succeeded` | Credential authentication succeeded |
 | `auth.sign_in.failed` | Credential authentication failed |
 
-Audit metadata is a safe JSON object with fields such as `masked_email` (the email reduced to a low-PII form like `d***@example.com`), `user_id`, `role`, `reason`, and `request_id`. Audit writes are best-effort: if recording an event fails, the auth response keeps its original success or failure result and the server logs the audit error.
+Audit metadata is a safe JSON object with fields such as `masked_email` (the email reduced to a low-PII form like `d***@example.com`), `user_id`, `reason`, and `request_id`. Audit writes are best-effort: if recording an event fails, the auth response keeps its original success or failure result and the server logs the audit error.
 
 Local auth endpoint testing requires a PostgreSQL database and `DATABASE_URL` with migrations applied. `cmd/openapi` uses a stub service, so `make openapi` does not require a database connection.
 
@@ -195,17 +195,17 @@ Basic user roles are persisted on the `users` table:
 
 ## Users Endpoints
 
-User management read endpoints live under `/api/users` and require `Authorization: Bearer <accessToken>`. The authenticated user must be active **and carry the `admin` role**; non-admin authenticated users receive `403 forbidden` with the `Admin role required.` envelope.
+User management endpoints live under `/api/users` and require `Authorization: Bearer <accessToken>`. The authenticated user must be active **and hold the `users:read` permission** (and `users:manage` for updates) through one of their roles; users without it receive `403 forbidden` with the `You do not have permission to perform this action.` envelope. `PATCH /api/users/{id}` updates a user's status and/or replaces their role set, and an admin cannot modify their own account.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/users` | Return paginated users as `{ "users": [...], "page": 1, "pageSize": 20, "total": 1 }` |
 | `GET` | `/api/users/{id}` | Return a single user as `{ "user": { ... } }`. `404` when no user has the given id; `422` when `{id}` is not a valid UUID |
-| `PATCH` | `/api/users/{id}` | Update a user's `role` and/or `status`. Returns `200` with `{ "user": { ... } }`; `404` when no user has the given id; `422` for invalid bodies; `403` when an admin targets their own account |
+| `PATCH` | `/api/users/{id}` | Update a user's `status` and/or replace their `roleIds`. Returns `200` with `{ "user": { ... } }`; `404` when no user has the given id; `422` for invalid bodies; `403` when an admin targets their own account |
 
-`GET /api/users` supports `page` (default `1`), `pageSize` (default `20`, max `100`), `search` (matches `email` or `display_name`), `role` (`admin` or `user`), and `status` (`active` or `disabled`). Responses never include `password_hash`.
+`GET /api/users` supports `page` (default `1`), `pageSize` (default `20`, max `100`), `search` (matches `email` or `display_name`), `role` (a role name), and `status` (`active` or `disabled`). Each user is returned with a `roles` array. Responses never include `password_hash`.
 
-`PATCH /api/users/{id}` accepts a partial body with any subset of `role` (`user` or `admin`) and `status` (`active` or `disabled`); at least one field must be provided. An administrator **cannot change their own role or status** — this guarantees the system always retains at least one admin and prevents accidental self-lockout; hand over admin by promoting another user first. Disabling a user takes effect immediately on refresh and within the access-token TTL on bearer requests. A successful update writes a `users.user.updated` system event.
+`PATCH /api/users/{id}` accepts a partial body with any subset of `status` (`active` or `disabled`) and `roleIds` (a non-empty set of role UUIDs that **replaces** the user's roles); at least one field must be provided. An administrator **cannot change their own status or roles** — this guarantees the system always retains at least one admin and prevents accidental self-lockout; hand over admin by assigning the admin role to another user first. Disabling a user takes effect immediately on refresh and within the access-token TTL on bearer requests. A successful update writes a `users.user.updated` system event.
 
 ## Projects Endpoints
 
@@ -253,7 +253,7 @@ Project audit metadata is a safe JSON object with `project_id`, `owner_user_id`,
 
 ## System Events Endpoints
 
-System audit event read endpoints live under `/api/system-events` and require `Authorization: Bearer <accessToken>`. The authenticated user must be active **and carry the `admin` role**; non-admin authenticated users receive `403 forbidden` with the `Admin role required.` envelope.
+System audit event read endpoints live under `/api/system-events` and require `Authorization: Bearer <accessToken>`. The authenticated user must be active **and hold the `system_events:read` permission** through one of their roles; users without it receive `403 forbidden` with the `You do not have permission to perform this action.` envelope.
 
 | Method | Path | Description |
 |--------|------|-------------|

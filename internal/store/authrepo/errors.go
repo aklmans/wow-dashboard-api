@@ -16,7 +16,6 @@ const (
 
 	usersEmailUniqueConstraint = "users_email_unique"
 	usersStatusConstraint      = "users_status_valid"
-	usersRoleConstraint        = "users_role_valid"
 )
 
 func mapStoreError(err error) error {
@@ -35,11 +34,8 @@ func mapStoreError(err error) error {
 				return domain.ErrEmailAlreadyExists
 			}
 		case postgresCheckViolation:
-			switch pgErr.ConstraintName {
-			case usersStatusConstraint:
+			if pgErr.ConstraintName == usersStatusConstraint {
 				return domain.ErrInvalidUserStatus
-			case usersRoleConstraint:
-				return domain.ErrInvalidUserRole
 			}
 		}
 	}

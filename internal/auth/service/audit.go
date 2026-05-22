@@ -28,7 +28,6 @@ type AuditMetadata struct {
 	// masked_email (e.g. "d***@example.com") — never the plaintext address.
 	Email     string `json:"masked_email,omitempty"`
 	UserID    string `json:"user_id,omitempty"`
-	Role      string `json:"role,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
 }

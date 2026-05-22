@@ -189,7 +189,7 @@ Every module must declare one authorization model before implementation:
 
 | Model | Current reference | Rules |
 |-------|-------------------|-------|
-| Admin-only | `users` endpoints and `internal/http/handlers/authz.go` | Require authenticated current user with `role = "admin"` before calling the service. Use a helper such as `requireAdmin`, not ad hoc role checks in each handler branch. |
+| Permission-gated (RBAC) | `users` / `system-events` endpoints, `internal/http/handlers/authz.go`, `internal/auth/rbac` | Register a permission constant in the `rbac` catalog, then gate the handler with `requirePermission(ctx, user, perm)`. The user's effective permissions are resolved from their roles by `auth.CurrentUser`; never branch on role names directly. |
 | Owner-scoped authenticated user | baseline `projects` ownership | Authenticate the user, pass the current user ID into the service, parse it as a UUID at the service boundary, and enforce ownership in every SQL query `WHERE` clause. |
 | Owner + role-based members (shared resource) | `projects` sharing | Layered on owner scope: a `project_members` table grants non-owner `viewer`/`editor` roles. |
 | Public read-only | No current CRUD reference | Must be intentionally documented. Limit to read routes, keep response fields safe for anonymous callers, and still validate path/query params. |

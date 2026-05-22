@@ -119,7 +119,6 @@ func testCreateUserInput(t testing.TB, userID uuid.UUID, email string, now time.
 		DisplayName:  "UOW User",
 		PasswordHash: hash,
 		Status:       domain.UserStatusActive,
-		Role:         domain.UserRoleUser,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

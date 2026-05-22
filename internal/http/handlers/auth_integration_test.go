@@ -113,7 +113,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 
 	var signUpBody authSessionResponse
 	decodeJSON(t, signUpRec, &signUpBody)
-	assertIntegrationUser(t, signUpBody.User, "hello@gmail.com", "Hello Friend", "user")
+	assertIntegrationUser(t, signUpBody.User, "hello@gmail.com", "Hello Friend")
 	if signUpBody.AccessToken == "" {
 		t.Fatal("sign-up accessToken is empty")
 	}
@@ -132,7 +132,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 
 	var signInBody authSessionResponse
 	decodeJSON(t, signInRec, &signInBody)
-	assertIntegrationUser(t, signInBody.User, "hello@gmail.com", "Hello Friend", "user")
+	assertIntegrationUser(t, signInBody.User, "hello@gmail.com", "Hello Friend")
 	if signInBody.AccessToken == "" {
 		t.Fatal("sign-in accessToken is empty")
 	}
@@ -147,7 +147,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 	}
 	var refreshBody authSessionResponse
 	decodeJSON(t, refreshRec, &refreshBody)
-	assertIntegrationUser(t, refreshBody.User, "hello@gmail.com", "Hello Friend", "user")
+	assertIntegrationUser(t, refreshBody.User, "hello@gmail.com", "Hello Friend")
 	if refreshBody.AccessToken == "" {
 		t.Fatal("refresh accessToken is empty")
 	}
@@ -168,7 +168,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 	if err := json.NewDecoder(meRec.Body).Decode(&meBody); err != nil {
 		t.Fatalf("failed to decode me response: %v", err)
 	}
-	assertIntegrationUser(t, meBody.User, "hello@gmail.com", "Hello Friend", "user")
+	assertIntegrationUser(t, meBody.User, "hello@gmail.com", "Hello Friend")
 	if meBody.User.ID != signInBody.User.ID {
 		t.Errorf("me user id = %q, want sign-in user id %q", meBody.User.ID, signInBody.User.ID)
 	}
@@ -180,7 +180,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 	assertClearedRefreshCookie(t, signOutRec)
 }
 
-func assertIntegrationUser(t *testing.T, user starterUser, wantEmail string, wantDisplayName string, wantRole string) {
+func assertIntegrationUser(t *testing.T, user starterUser, wantEmail string, wantDisplayName string) {
 	t.Helper()
 	if user.ID == "" {
 		t.Error("user.id is empty")
@@ -190,11 +190,5 @@ func assertIntegrationUser(t *testing.T, user starterUser, wantEmail string, wan
 	}
 	if user.DisplayName != wantDisplayName {
 		t.Errorf("user.displayName = %q, want %q", user.DisplayName, wantDisplayName)
-	}
-	if user.Role != wantRole {
-		t.Errorf("user.role = %q, want %q", user.Role, wantRole)
-	}
-	if user.Status != "" {
-		t.Errorf("user.status = %q, want omitted", user.Status)
 	}
 }

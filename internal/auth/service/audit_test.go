@@ -39,7 +39,6 @@ func TestAuthAuditRecordsSignUpSuccess(t *testing.T) {
 	metadata := eventMetadata(t, event)
 	assertMetadataValue(t, metadata, "masked_email", "n***@example.com")
 	assertMetadataValue(t, metadata, "user_id", session.User.ID)
-	assertMetadataValue(t, metadata, "role", "user")
 	assertMetadataValue(t, metadata, "request_id", "req-audit-123")
 	assertNoAuditMetadataLeaks(t, event, "secure-password", "password", "password_hash", "raw-access-token-secret", "new.user@example.com")
 }
@@ -103,7 +102,7 @@ func TestAuthAuditRecordsSignInSuccess(t *testing.T) {
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 	audit := &fakeAuditRecorder{}
 	authSvc := service.NewService(&fakeUserStore{
-		authUser: testAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserRoleAdmin, domain.UserStatusActive, "correct-password"),
+		authUser: testAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password"),
 	}, &fakeTokenManager{issuedToken: "raw-access-token-secret"}, service.WithAuditRecorder(audit))
 
 	session, err := authSvc.SignIn(testRequestContext(), service.SignInInput{
@@ -121,7 +120,6 @@ func TestAuthAuditRecordsSignInSuccess(t *testing.T) {
 	metadata := eventMetadata(t, event)
 	assertMetadataValue(t, metadata, "masked_email", "d***@example.com")
 	assertMetadataValue(t, metadata, "user_id", session.User.ID)
-	assertMetadataValue(t, metadata, "role", "admin")
 	assertMetadataValue(t, metadata, "request_id", "req-audit-123")
 	assertNoAuditMetadataLeaks(t, event, "correct-password", "password", "password_hash", "raw-access-token-secret", "demo@example.com")
 }
@@ -238,6 +236,8 @@ type fakeUserStore struct {
 	authUserErr   error
 	user          domain.User
 	userErr       error
+	roles         []string
+	permissions   []string
 }
 
 func (f *fakeUserStore) CreateUser(ctx context.Context, input domain.CreateUserInput) (domain.User, error) {
@@ -249,7 +249,6 @@ func (f *fakeUserStore) CreateUser(ctx context.Context, input domain.CreateUserI
 		Email:       strings.ToLower(input.Email),
 		DisplayName: input.DisplayName,
 		Status:      input.Status,
-		Role:        input.Role,
 		CreatedAt:   input.CreatedAt,
 		UpdatedAt:   input.UpdatedAt,
 	}, nil
@@ -267,6 +266,22 @@ func (f *fakeUserStore) GetUserByEmailForAuth(ctx context.Context, email string)
 		return domain.AuthUser{}, f.authUserErr
 	}
 	return f.authUser, nil
+}
+
+func (f *fakeUserStore) GetRoleByName(ctx context.Context, name string) (domain.Role, error) {
+	return domain.Role{ID: uuid.New(), Name: name}, nil
+}
+
+func (f *fakeUserStore) AddUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error {
+	return nil
+}
+
+func (f *fakeUserStore) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	return f.roles, nil
+}
+
+func (f *fakeUserStore) GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	return f.permissions, nil
 }
 
 type fakeTokenManager struct {
@@ -290,7 +305,7 @@ func (f *fakeTokenManager) VerifyAccessToken(raw string) (*token.Claims, error) 
 	return f.claims, nil
 }
 
-func testAuthUser(t *testing.T, id uuid.UUID, email string, displayName string, role domain.UserRole, status domain.UserStatus, plainPassword string) domain.AuthUser {
+func testAuthUser(t *testing.T, id uuid.UUID, email string, displayName string, status domain.UserStatus, plainPassword string) domain.AuthUser {
 	t.Helper()
 
 	hash, err := password.Hash(plainPassword)
@@ -304,7 +319,6 @@ func testAuthUser(t *testing.T, id uuid.UUID, email string, displayName string, 
 			Email:       email,
 			DisplayName: displayName,
 			Status:      status,
-			Role:        role,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},

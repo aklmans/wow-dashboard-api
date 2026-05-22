@@ -26,7 +26,7 @@ func TestProjectsNonAdminAuthenticatedUserCanListProjects(t *testing.T) {
 	owner := uuid.New()
 	projectsSvc := &fakeProjectsService{listResult: domain.ListProjectsResult{Page: 1, PageSize: 20, Total: 0}}
 	router := newProjectsTestRouter(&fakeUsersAuthService{
-		currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Role: "user"},
+		currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
 	}, projectsSvc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
@@ -88,7 +88,7 @@ func TestProjectsListHandler(t *testing.T) {
 			},
 		}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Role: "user"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects?page=2&pageSize=5&search=demo&status=active", nil)

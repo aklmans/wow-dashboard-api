@@ -83,11 +83,15 @@ Sign-up returns `201`; sign-in, refresh, and me return `200`.
 - `/api/auth/*` and `/api/projects/*` work for any authenticated user. A user
   sees the projects they own plus any shared with them; editing requires owner
   or `editor` access and archiving/member management is owner-only.
-- `/api/users/*` and `/api/system-events` are **admin-only**: the user must be
-  active and carry `role = "admin"`. A non-admin authenticated user gets `403`
-  with `{ "code": "forbidden", "message": "Admin role required." }`.
-- New sign-ups default to `role = "user"` and are promoted in the database.
-  The seeded `demo@minimals.cc` user is already `admin`.
+- `/api/users/*` and `/api/system-events` are **permission-gated**: the user
+  must be active and hold the required permission (`users:read`,
+  `users:manage`, or `system_events:read`) through one of their roles. A user
+  without it gets `403` with
+  `{ "code": "forbidden", "message": "You do not have permission to perform this action." }`.
+- `GET /api/auth/me` returns the user's `roles` and effective `permissions`
+  arrays — use them to render menus and gate UI actions.
+- New sign-ups receive the `user` role. The seeded `demo@minimals.cc` user
+  holds the `admin` role, which carries the `*` (all-permissions) wildcard.
 
 ## Errors
 

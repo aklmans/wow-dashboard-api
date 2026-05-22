@@ -8,10 +8,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrUserNotFound is returned by the store when no user matches the lookup
-// (e.g. by id). It lives in the domain package so store adapters do not
-// need to import the service layer.
-var ErrUserNotFound = errors.New("users: user not found")
+var (
+	// ErrUserNotFound is returned by the store when no user matches the lookup.
+	ErrUserNotFound = errors.New("users: user not found")
+	// ErrRoleNotFound is returned when a role id supplied for assignment does
+	// not exist.
+	ErrRoleNotFound = errors.New("users: role not found")
+)
 
 type UserStatus string
 
@@ -20,19 +23,13 @@ const (
 	UserStatusDisabled UserStatus = "disabled"
 )
 
-type UserRole string
-
-const (
-	UserRoleAdmin UserRole = "admin"
-	UserRoleUser  UserRole = "user"
-)
-
+// User is a user enriched with the names of every role assigned to them.
 type User struct {
 	ID          uuid.UUID
 	Email       string
 	DisplayName string
 	Status      UserStatus
-	Role        UserRole
+	Roles       []string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
@@ -42,7 +39,7 @@ type ListUsersInput struct {
 	PageSize int
 	Offset   int
 	Search   string
-	Role     UserRole
+	Role     string
 	Status   UserStatus
 }
 
@@ -53,12 +50,16 @@ type ListUsersResult struct {
 	Total    int
 }
 
-// UpdateUserInput is the normalized input for an admin user update. Role and
-// Status are pointers so a nil field leaves the corresponding column
-// unchanged; at least one is non-nil by the time it reaches the store.
-type UpdateUserInput struct {
+// SetUserStatusInput is the normalized input for an admin status change.
+type SetUserStatusInput struct {
 	ID        uuid.UUID
-	Role      *UserRole
-	Status    *UserStatus
+	Status    UserStatus
 	UpdatedAt time.Time
+}
+
+// ReplaceUserRolesInput is the normalized input for replacing a user's full
+// set of role assignments.
+type ReplaceUserRolesInput struct {
+	UserID  uuid.UUID
+	RoleIDs []uuid.UUID
 }

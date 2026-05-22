@@ -32,9 +32,12 @@ type DemoUser struct {
 // DemoUserStore is the sqlc query subset needed by the demo seed.
 type DemoUserStore interface {
 	UpsertDemoUser(ctx context.Context, arg query.UpsertDemoUserParams) (query.UpsertDemoUserRow, error)
+	GetRoleByName(ctx context.Context, name string) (query.Role, error)
+	AddUserRole(ctx context.Context, arg query.AddUserRoleParams) error
 }
 
-// SeedDemoUser creates or updates the local starter demo account.
+// SeedDemoUser creates or updates the local starter demo account and grants it
+// the admin role.
 func SeedDemoUser(ctx context.Context, store DemoUserStore) (DemoUser, error) {
 	passwordHash, err := password.Hash(DemoPassword)
 	if err != nil {
@@ -56,7 +59,6 @@ func SeedDemoUser(ctx context.Context, store DemoUserStore) (DemoUser, error) {
 		DisplayName:  DemoDisplayName,
 		PasswordHash: passwordHash,
 		Status:       demoStatus,
-		Role:         demoRole,
 		CreatedAt:    pgNow,
 		UpdatedAt:    pgNow,
 	})
@@ -67,11 +69,22 @@ func SeedDemoUser(ctx context.Context, store DemoUserStore) (DemoUser, error) {
 		return DemoUser{}, fmt.Errorf("seed demo user: returned invalid user id")
 	}
 
+	adminRole, err := store.GetRoleByName(ctx, demoRole)
+	if err != nil {
+		return DemoUser{}, fmt.Errorf("seed demo user: look up %s role: %w", demoRole, err)
+	}
+	if err := store.AddUserRole(ctx, query.AddUserRoleParams{
+		UserID: seeded.ID,
+		RoleID: adminRole.ID,
+	}); err != nil {
+		return DemoUser{}, fmt.Errorf("seed demo user: assign %s role: %w", demoRole, err)
+	}
+
 	return DemoUser{
 		ID:          uuid.UUID(seeded.ID.Bytes).String(),
 		Email:       seeded.Email,
 		DisplayName: seeded.DisplayName,
 		Status:      seeded.Status,
-		Role:        seeded.Role,
+		Role:        demoRole,
 	}, nil
 }

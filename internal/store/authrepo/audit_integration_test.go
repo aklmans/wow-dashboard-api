@@ -22,7 +22,6 @@ func TestSystemEventRecorderIntegration(t *testing.T) {
 		Metadata: authservice.AuditMetadata{
 			Email:     "d***@example.com",
 			UserID:    "00000000-0000-0000-0000-000000000123",
-			Role:      "admin",
 			RequestID: "req-audit-123",
 		},
 	})
@@ -48,7 +47,6 @@ func TestSystemEventRecorderIntegration(t *testing.T) {
 	for key, want := range map[string]string{
 		"masked_email": "d***@example.com",
 		"user_id":      "00000000-0000-0000-0000-000000000123",
-		"role":         "admin",
 		"request_id":   "req-audit-123",
 	} {
 		if got := metadata[key]; got != want {

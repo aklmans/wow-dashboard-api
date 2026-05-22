@@ -19,7 +19,7 @@ var (
 	ErrInvalidInput = errors.New("users: invalid input")
 	ErrNotFound     = errors.New("users: not found")
 	// ErrSelfModification is returned when an admin attempts to change their
-	// own role or status. Disallowing self-changes guarantees the system
+	// own roles or status. Disallowing self-changes guarantees the system
 	// always retains at least one admin and prevents accidental self-lockout.
 	ErrSelfModification = errors.New("users: self modification not allowed")
 )
@@ -35,17 +35,19 @@ type ListUsersInput struct {
 type UserStore interface {
 	ListUsers(ctx context.Context, input domain.ListUsersInput) (domain.ListUsersResult, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (domain.User, error)
-	UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error)
+	SetUserStatus(ctx context.Context, input domain.SetUserStatusInput) error
+	ReplaceUserRoles(ctx context.Context, input domain.ReplaceUserRolesInput) error
 }
 
 // UpdateUserInput is the raw admin update input the handler passes to the
-// service. Role and Status are pointers so an omitted field stays unchanged;
-// at least one must be provided.
+// service. Status and RoleIDs are pointers so an omitted field stays
+// unchanged; at least one must be provided. RoleIDs, when provided, replaces
+// the user's entire role set.
 type UpdateUserInput struct {
 	ActorUserID  string
 	TargetUserID string
-	Role         *string
 	Status       *string
+	RoleIDs      *[]string
 }
 
 type Service struct {
@@ -83,41 +85,28 @@ func (s *Service) ListUsers(ctx context.Context, input ListUsersInput) (domain.L
 	if err != nil {
 		return domain.ListUsersResult{}, err
 	}
-
 	return s.store.ListUsers(ctx, normalized)
 }
 
-// GetUser fetches a single user by string id. The id is trimmed and
-// validated as a UUID at the service boundary; malformed ids return
-// ErrInvalidInput, and a missing row is mapped to ErrNotFound so handlers
-// never see store-specific errors.
+// GetUser fetches a single user, including their role names, by string id.
+// Malformed ids return ErrInvalidInput; a missing row is mapped to ErrNotFound.
 func (s *Service) GetUser(ctx context.Context, id string) (domain.User, error) {
 	if s.store == nil {
 		return domain.User{}, fmt.Errorf("users: store is nil")
 	}
 
-	parsed, err := pathparam.ParseUUID(id, "id")
+	parsed, err := parseUserID(id, "id")
 	if err != nil {
-		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.User{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
-		}
 		return domain.User{}, err
 	}
-
-	user, err := s.store.GetUserByID(ctx, parsed)
-	if err != nil {
-		if errors.Is(err, domain.ErrUserNotFound) {
-			return domain.User{}, ErrNotFound
-		}
-		return domain.User{}, err
-	}
-	return user, nil
+	return s.fetchUser(ctx, parsed)
 }
 
-// UpdateUser applies an admin role/status change to another user. The acting
-// admin cannot target their own account (ErrSelfModification). At least one of
-// role or status must be provided; a missing target surfaces as ErrNotFound.
-// A successful update records a best-effort users.user.updated audit event.
+// UpdateUser applies an admin status change and/or role-set replacement to
+// another user. The acting admin cannot target their own account
+// (ErrSelfModification). At least one of status or roleIds must be provided;
+// a missing target surfaces as ErrNotFound. A successful update records a
+// best-effort users.user.updated audit event.
 func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain.User, error) {
 	if s.store == nil {
 		return domain.User{}, fmt.Errorf("users: store is nil")
@@ -134,47 +123,81 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 	if actorID == targetID {
 		return domain.User{}, ErrSelfModification
 	}
-
-	if input.Role == nil && input.Status == nil {
-		return domain.User{}, fmt.Errorf("%w: at least one of role or status must be provided", ErrInvalidInput)
+	if input.Status == nil && input.RoleIDs == nil {
+		return domain.User{}, fmt.Errorf("%w: at least one of status or roleIds must be provided", ErrInvalidInput)
 	}
 
-	update := domain.UpdateUserInput{ID: targetID}
+	// Confirm the target exists up front so a roles-only update on a missing
+	// user reports ErrNotFound rather than a foreign-key failure.
+	if _, err := s.fetchUser(ctx, targetID); err != nil {
+		return domain.User{}, err
+	}
+
 	var changedFields []string
+	var auditRoleIDs []string
 
-	if input.Role != nil {
-		role, err := normalizeRoleForUpdate(*input.Role)
-		if err != nil {
-			return domain.User{}, err
-		}
-		update.Role = &role
-		changedFields = append(changedFields, "role")
-	}
 	if input.Status != nil {
-		status, err := normalizeStatusForUpdate(*input.Status)
+		status, err := normalizeStatus(*input.Status)
 		if err != nil {
 			return domain.User{}, err
 		}
-		update.Status = &status
+		if err := s.store.SetUserStatus(ctx, domain.SetUserStatusInput{
+			ID:        targetID,
+			Status:    status,
+			UpdatedAt: s.now().UTC().Truncate(time.Microsecond),
+		}); err != nil {
+			if errors.Is(err, domain.ErrUserNotFound) {
+				return domain.User{}, ErrNotFound
+			}
+			return domain.User{}, err
+		}
 		changedFields = append(changedFields, "status")
 	}
-	update.UpdatedAt = s.now().UTC().Truncate(time.Microsecond)
 
-	user, err := s.store.UpdateUser(ctx, update)
+	if input.RoleIDs != nil {
+		roleIDs, err := parseRoleIDs(*input.RoleIDs)
+		if err != nil {
+			return domain.User{}, err
+		}
+		if err := s.store.ReplaceUserRoles(ctx, domain.ReplaceUserRolesInput{
+			UserID:  targetID,
+			RoleIDs: roleIDs,
+		}); err != nil {
+			if errors.Is(err, domain.ErrRoleNotFound) {
+				return domain.User{}, fmt.Errorf("%w: one or more role ids do not exist", ErrInvalidInput)
+			}
+			return domain.User{}, err
+		}
+		changedFields = append(changedFields, "roles")
+		auditRoleIDs = make([]string, len(roleIDs))
+		for i, id := range roleIDs {
+			auditRoleIDs[i] = id.String()
+		}
+	}
+
+	user, err := s.fetchUser(ctx, targetID)
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	s.recordUserUpdated(ctx, AuditMetadata{
+		TargetUserID:  targetID.String(),
+		ActorUserID:   actorID.String(),
+		ChangedFields: changedFields,
+		Status:        string(user.Status),
+		RoleIDs:       auditRoleIDs,
+	})
+	return user, nil
+}
+
+func (s *Service) fetchUser(ctx context.Context, id uuid.UUID) (domain.User, error) {
+	user, err := s.store.GetUserByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, domain.ErrUserNotFound) {
 			return domain.User{}, ErrNotFound
 		}
 		return domain.User{}, err
 	}
-
-	s.recordUserUpdated(ctx, AuditMetadata{
-		TargetUserID:  user.ID.String(),
-		ActorUserID:   actorID.String(),
-		ChangedFields: changedFields,
-		Role:          string(user.Role),
-		Status:        string(user.Status),
-	})
 	return user, nil
 }
 
@@ -187,6 +210,28 @@ func parseUserID(value string, field string) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return parsed, nil
+}
+
+// parseRoleIDs parses, de-duplicates, and validates the role ids for a role
+// replacement. A user must always retain at least one role.
+func parseRoleIDs(raw []string) ([]uuid.UUID, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("%w: at least one role id is required", ErrInvalidInput)
+	}
+	seen := make(map[uuid.UUID]struct{}, len(raw))
+	ids := make([]uuid.UUID, 0, len(raw))
+	for _, r := range raw {
+		id, err := uuid.Parse(strings.TrimSpace(r))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %q is not a valid role id", ErrInvalidInput, r)
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 func normalizeListUsersInput(input ListUsersInput) (domain.ListUsersInput, error) {
@@ -202,11 +247,7 @@ func normalizeListUsersInput(input ListUsersInput) (domain.ListUsersInput, error
 		return domain.ListUsersInput{}, err
 	}
 
-	role, err := normalizeRole(input.Role)
-	if err != nil {
-		return domain.ListUsersInput{}, err
-	}
-	status, err := normalizeStatus(input.Status)
+	status, err := normalizeStatusFilter(input.Status)
 	if err != nil {
 		return domain.ListUsersInput{}, err
 	}
@@ -216,61 +257,31 @@ func normalizeListUsersInput(input ListUsersInput) (domain.ListUsersInput, error
 		PageSize: page.PageSize,
 		Offset:   page.Offset,
 		Search:   page.Search,
-		Role:     role,
-		Status:   status,
+		// The role filter is a free-form role name; an unknown name simply
+		// matches no users, so it needs no enum validation.
+		Role:   strings.TrimSpace(input.Role),
+		Status: status,
 	}, nil
 }
 
-func normalizeRole(value string) (domain.UserRole, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	switch value {
-	case "":
-		return "", nil
-	case string(domain.UserRoleAdmin):
-		return domain.UserRoleAdmin, nil
-	case string(domain.UserRoleUser):
-		return domain.UserRoleUser, nil
-	default:
-		return "", fmt.Errorf("%w: role must be admin or user", ErrInvalidInput)
-	}
-}
-
+// normalizeStatus rejects an empty or unknown status; callers invoke it only
+// when a status value is explicitly provided.
 func normalizeStatus(value string) (domain.UserStatus, error) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	switch value {
-	case "":
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(domain.UserStatusActive):
+		return domain.UserStatusActive, nil
+	case string(domain.UserStatusDisabled):
+		return domain.UserStatusDisabled, nil
+	default:
+		return "", fmt.Errorf("%w: status must be active or disabled", ErrInvalidInput)
+	}
+}
+
+// normalizeStatusFilter allows an empty value (no filter) in addition to the
+// valid statuses.
+func normalizeStatusFilter(value string) (domain.UserStatus, error) {
+	if strings.TrimSpace(value) == "" {
 		return "", nil
-	case string(domain.UserStatusActive):
-		return domain.UserStatusActive, nil
-	case string(domain.UserStatusDisabled):
-		return domain.UserStatusDisabled, nil
-	default:
-		return "", fmt.Errorf("%w: status must be active or disabled", ErrInvalidInput)
 	}
-}
-
-// normalizeRoleForUpdate rejects an empty value; the caller only invokes it
-// when the update body explicitly provides a role field.
-func normalizeRoleForUpdate(value string) (domain.UserRole, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(domain.UserRoleAdmin):
-		return domain.UserRoleAdmin, nil
-	case string(domain.UserRoleUser):
-		return domain.UserRoleUser, nil
-	default:
-		return "", fmt.Errorf("%w: role must be admin or user", ErrInvalidInput)
-	}
-}
-
-// normalizeStatusForUpdate rejects an empty value; the caller only invokes it
-// when the update body explicitly provides a status field.
-func normalizeStatusForUpdate(value string) (domain.UserStatus, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case string(domain.UserStatusActive):
-		return domain.UserStatusActive, nil
-	case string(domain.UserStatusDisabled):
-		return domain.UserStatusDisabled, nil
-	default:
-		return "", fmt.Errorf("%w: status must be active or disabled", ErrInvalidInput)
-	}
+	return normalizeStatus(value)
 }

@@ -12,9 +12,9 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, email, display_name, password_hash, status, role, created_at, updated_at)
-VALUES ($1, lower($2), $3, $4, $5, $6, $7, $8)
-RETURNING id, email, display_name, status, role, created_at, updated_at
+INSERT INTO users (id, email, display_name, password_hash, status, created_at, updated_at)
+VALUES ($1, lower($2), $3, $4, $5, $6, $7)
+RETURNING id, email, display_name, status, created_at, updated_at
 `
 
 type CreateUserParams struct {
@@ -23,7 +23,6 @@ type CreateUserParams struct {
 	DisplayName  string
 	PasswordHash string
 	Status       string
-	Role         string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
@@ -33,7 +32,6 @@ type CreateUserRow struct {
 	Email       string
 	DisplayName string
 	Status      string
-	Role        string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 }
@@ -45,7 +43,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		arg.DisplayName,
 		arg.PasswordHash,
 		arg.Status,
-		arg.Role,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -55,7 +52,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.Email,
 		&i.DisplayName,
 		&i.Status,
-		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -63,7 +59,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, display_name, status, role, created_at, updated_at
+SELECT id, email, display_name, status, created_at, updated_at
 FROM users
 WHERE email = lower($1)
 `
@@ -73,7 +69,6 @@ type GetUserByEmailRow struct {
 	Email       string
 	DisplayName string
 	Status      string
-	Role        string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 }
@@ -86,7 +81,6 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.Email,
 		&i.DisplayName,
 		&i.Status,
-		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -94,32 +88,20 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 }
 
 const getUserByEmailForAuth = `-- name: GetUserByEmailForAuth :one
-SELECT id, email, display_name, password_hash, status, role, created_at, updated_at
+SELECT id, email, display_name, password_hash, status, created_at, updated_at
 FROM users
 WHERE email = lower($1)
 `
 
-type GetUserByEmailForAuthRow struct {
-	ID           pgtype.UUID
-	Email        string
-	DisplayName  string
-	PasswordHash string
-	Status       string
-	Role         string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-}
-
-func (q *Queries) GetUserByEmailForAuth(ctx context.Context, email string) (GetUserByEmailForAuthRow, error) {
+func (q *Queries) GetUserByEmailForAuth(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmailForAuth, email)
-	var i GetUserByEmailForAuthRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.DisplayName,
 		&i.PasswordHash,
 		&i.Status,
-		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -127,7 +109,7 @@ func (q *Queries) GetUserByEmailForAuth(ctx context.Context, email string) (GetU
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, display_name, status, role, created_at, updated_at
+SELECT id, email, display_name, status, created_at, updated_at
 FROM users
 WHERE id = $1
 `
@@ -137,7 +119,6 @@ type GetUserByIDRow struct {
 	Email       string
 	DisplayName string
 	Status      string
-	Role        string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 }
@@ -150,7 +131,6 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 		&i.Email,
 		&i.DisplayName,
 		&i.Status,
-		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -158,7 +138,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, display_name, status, role, created_at, updated_at
+SELECT id, email, display_name, status, created_at, updated_at
 FROM users
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $1
@@ -174,7 +154,6 @@ type ListUsersRow struct {
 	Email       string
 	DisplayName string
 	Status      string
-	Role        string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 }
@@ -193,7 +172,6 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 			&i.Email,
 			&i.DisplayName,
 			&i.Status,
-			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -207,46 +185,36 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUse
 	return items, nil
 }
 
-const updateUser = `-- name: UpdateUser :one
+const updateUserStatus = `-- name: UpdateUserStatus :one
 UPDATE users
-SET role = COALESCE($1, role),
-    status = COALESCE($2, status),
-    updated_at = $3
-WHERE id = $4
-RETURNING id, email, display_name, status, role, created_at, updated_at
+SET status = $1, updated_at = $2
+WHERE id = $3
+RETURNING id, email, display_name, status, created_at, updated_at
 `
 
-type UpdateUserParams struct {
-	Role      pgtype.Text
-	Status    pgtype.Text
+type UpdateUserStatusParams struct {
+	Status    string
 	UpdatedAt pgtype.Timestamptz
 	ID        pgtype.UUID
 }
 
-type UpdateUserRow struct {
+type UpdateUserStatusRow struct {
 	ID          pgtype.UUID
 	Email       string
 	DisplayName string
 	Status      string
-	Role        string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 }
 
-func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateUserRow, error) {
-	row := q.db.QueryRow(ctx, updateUser,
-		arg.Role,
-		arg.Status,
-		arg.UpdatedAt,
-		arg.ID,
-	)
-	var i UpdateUserRow
+func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (UpdateUserStatusRow, error) {
+	row := q.db.QueryRow(ctx, updateUserStatus, arg.Status, arg.UpdatedAt, arg.ID)
+	var i UpdateUserStatusRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.DisplayName,
 		&i.Status,
-		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -254,15 +222,14 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateU
 }
 
 const upsertDemoUser = `-- name: UpsertDemoUser :one
-INSERT INTO users (id, email, display_name, password_hash, status, role, created_at, updated_at)
-VALUES ($1, lower($2), $3, $4, $5, $6, $7, $8)
+INSERT INTO users (id, email, display_name, password_hash, status, created_at, updated_at)
+VALUES ($1, lower($2), $3, $4, $5, $6, $7)
 ON CONFLICT (email) DO UPDATE
 SET display_name = EXCLUDED.display_name,
     password_hash = EXCLUDED.password_hash,
     status = EXCLUDED.status,
-    role = EXCLUDED.role,
     updated_at = EXCLUDED.updated_at
-RETURNING id, email, display_name, status, role, created_at, updated_at
+RETURNING id, email, display_name, status, created_at, updated_at
 `
 
 type UpsertDemoUserParams struct {
@@ -271,7 +238,6 @@ type UpsertDemoUserParams struct {
 	DisplayName  string
 	PasswordHash string
 	Status       string
-	Role         string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
@@ -281,7 +247,6 @@ type UpsertDemoUserRow struct {
 	Email       string
 	DisplayName string
 	Status      string
-	Role        string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 }
@@ -293,7 +258,6 @@ func (q *Queries) UpsertDemoUser(ctx context.Context, arg UpsertDemoUserParams) 
 		arg.DisplayName,
 		arg.PasswordHash,
 		arg.Status,
-		arg.Role,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -303,7 +267,6 @@ func (q *Queries) UpsertDemoUser(ctx context.Context, arg UpsertDemoUserParams) 
 		&i.Email,
 		&i.DisplayName,
 		&i.Status,
-		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

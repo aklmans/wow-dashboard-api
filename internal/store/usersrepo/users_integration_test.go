@@ -5,6 +5,7 @@ package usersrepo_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -28,32 +29,24 @@ func TestUserStoreListUsersIntegration(t *testing.T) {
 	insertUser(t, ctx, queries, "grace@example.com", "Grace Hopper", "user", "active", base.Add(2*time.Minute))
 	insertUser(t, ctx, queries, "linus@example.com", "Linus Disabled", "user", "disabled", base.Add(time.Minute))
 
-	t.Run("list returns public users and total count", func(t *testing.T) {
-		result, err := repo.ListUsers(ctx, domain.ListUsersInput{
-			Page:     1,
-			PageSize: 20,
-		})
+	t.Run("list returns users with roles and total count", func(t *testing.T) {
+		result, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 1, PageSize: 20})
 		if err != nil {
 			t.Fatalf("ListUsers failed: %v", err)
 		}
-
-		if result.Total != 3 {
-			t.Fatalf("total = %d, want 3", result.Total)
-		}
-		if len(result.Users) != 3 {
-			t.Fatalf("len(users) = %d, want 3", len(result.Users))
+		if result.Total != 3 || len(result.Users) != 3 {
+			t.Fatalf("total/len = %d/%d, want 3/3", result.Total, len(result.Users))
 		}
 		if result.Users[0].Email != "ada@example.com" {
 			t.Fatalf("first email = %q, want newest user ada@example.com", result.Users[0].Email)
 		}
+		if !slices.Contains(result.Users[0].Roles, "admin") {
+			t.Fatalf("ada roles = %v, want to contain admin", result.Users[0].Roles)
+		}
 	})
 
 	t.Run("search matches email and display name", func(t *testing.T) {
-		byEmail, err := repo.ListUsers(ctx, domain.ListUsersInput{
-			Page:     1,
-			PageSize: 20,
-			Search:   "GRACE@",
-		})
+		byEmail, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 1, PageSize: 20, Search: "GRACE@"})
 		if err != nil {
 			t.Fatalf("ListUsers search email failed: %v", err)
 		}
@@ -61,11 +54,7 @@ func TestUserStoreListUsersIntegration(t *testing.T) {
 			t.Fatalf("email search result = %#v, want grace only", byEmail)
 		}
 
-		byName, err := repo.ListUsers(ctx, domain.ListUsersInput{
-			Page:     1,
-			PageSize: 20,
-			Search:   "disabled",
-		})
+		byName, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 1, PageSize: 20, Search: "disabled"})
 		if err != nil {
 			t.Fatalf("ListUsers search name failed: %v", err)
 		}
@@ -75,23 +64,15 @@ func TestUserStoreListUsersIntegration(t *testing.T) {
 	})
 
 	t.Run("filters role and status", func(t *testing.T) {
-		admins, err := repo.ListUsers(ctx, domain.ListUsersInput{
-			Page:     1,
-			PageSize: 20,
-			Role:     domain.UserRoleAdmin,
-		})
+		admins, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 1, PageSize: 20, Role: "admin"})
 		if err != nil {
 			t.Fatalf("ListUsers role failed: %v", err)
 		}
-		if admins.Total != 1 || len(admins.Users) != 1 || admins.Users[0].Role != domain.UserRoleAdmin {
+		if admins.Total != 1 || len(admins.Users) != 1 || !slices.Contains(admins.Users[0].Roles, "admin") {
 			t.Fatalf("role filter result = %#v, want one admin", admins)
 		}
 
-		disabled, err := repo.ListUsers(ctx, domain.ListUsersInput{
-			Page:     1,
-			PageSize: 20,
-			Status:   domain.UserStatusDisabled,
-		})
+		disabled, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 1, PageSize: 20, Status: domain.UserStatusDisabled})
 		if err != nil {
 			t.Fatalf("ListUsers status failed: %v", err)
 		}
@@ -101,19 +82,12 @@ func TestUserStoreListUsersIntegration(t *testing.T) {
 	})
 
 	t.Run("pagination returns page and total", func(t *testing.T) {
-		page2, err := repo.ListUsers(ctx, domain.ListUsersInput{
-			Page:     2,
-			PageSize: 1,
-			Offset:   1,
-		})
+		page2, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 2, PageSize: 1, Offset: 1})
 		if err != nil {
 			t.Fatalf("ListUsers page 2 failed: %v", err)
 		}
-		if page2.Total != 3 {
-			t.Fatalf("total = %d, want 3", page2.Total)
-		}
-		if page2.Page != 2 || page2.PageSize != 1 {
-			t.Fatalf("page metadata = %d/%d, want 2/1", page2.Page, page2.PageSize)
+		if page2.Total != 3 || page2.Page != 2 || page2.PageSize != 1 {
+			t.Fatalf("page metadata = total %d page %d/%d, want 3 2/1", page2.Total, page2.Page, page2.PageSize)
 		}
 		if len(page2.Users) != 1 || page2.Users[0].Email != "grace@example.com" {
 			t.Fatalf("page 2 users = %#v, want grace", page2.Users)
@@ -127,39 +101,25 @@ func TestUserStoreGetUserByIDIntegration(t *testing.T) {
 	queries := query.New(pool)
 	repo := usersrepo.NewUserStore(queries)
 
-	hash, err := password.Hash("test-password")
-	if err != nil {
-		t.Fatalf("password.Hash failed: %v", err)
-	}
-
 	created := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
-	id := uuid.New()
-	if _, err := queries.CreateUser(ctx, query.CreateUserParams{
-		ID:           pgUUID(t, id),
-		Email:        "ada@example.com",
-		DisplayName:  "Ada Lovelace",
-		PasswordHash: hash,
-		Status:       "active",
-		Role:         "admin",
-		CreatedAt:    pgTime(created),
-		UpdatedAt:    pgTime(created),
-	}); err != nil {
-		t.Fatalf("CreateUser failed: %v", err)
-	}
+	insertUser(t, ctx, queries, "ada@example.com", "Ada Lovelace", "admin", "active", created)
 
-	t.Run("returns existing user by id", func(t *testing.T) {
+	t.Run("returns existing user with roles", func(t *testing.T) {
+		list, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 1, PageSize: 20})
+		if err != nil {
+			t.Fatalf("ListUsers failed: %v", err)
+		}
+		id := list.Users[0].ID
+
 		got, err := repo.GetUserByID(ctx, id)
 		if err != nil {
 			t.Fatalf("GetUserByID returned error: %v", err)
 		}
-		if got.ID != id {
-			t.Fatalf("id = %s, want %s", got.ID, id)
-		}
-		if got.Email != "ada@example.com" || got.DisplayName != "Ada Lovelace" {
+		if got.ID != id || got.Email != "ada@example.com" || got.DisplayName != "Ada Lovelace" {
 			t.Fatalf("user = %#v, want ada@example.com / Ada Lovelace", got)
 		}
-		if got.Status != domain.UserStatusActive || got.Role != domain.UserRoleAdmin {
-			t.Fatalf("status/role = %s/%s, want active/admin", got.Status, got.Role)
+		if got.Status != domain.UserStatusActive || !slices.Contains(got.Roles, "admin") {
+			t.Fatalf("status/roles = %s/%v, want active and admin", got.Status, got.Roles)
 		}
 		if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
 			t.Fatalf("timestamps zero: %#v", got)
@@ -174,6 +134,7 @@ func TestUserStoreGetUserByIDIntegration(t *testing.T) {
 	})
 }
 
+// insertUser creates a user and assigns the named (already-seeded) role.
 func insertUser(t *testing.T, ctx context.Context, queries *query.Queries, email string, displayName string, role string, status string, createdAt time.Time) {
 	t.Helper()
 
@@ -182,18 +143,25 @@ func insertUser(t *testing.T, ctx context.Context, queries *query.Queries, email
 		t.Fatalf("password.Hash failed: %v", err)
 	}
 
-	_, err = queries.CreateUser(ctx, query.CreateUserParams{
-		ID:           pgUUID(t, uuid.New()),
+	userID := pgUUID(t, uuid.New())
+	if _, err := queries.CreateUser(ctx, query.CreateUserParams{
+		ID:           userID,
 		Email:        email,
 		DisplayName:  displayName,
 		PasswordHash: hash,
 		Status:       status,
-		Role:         role,
 		CreatedAt:    pgTime(createdAt),
 		UpdatedAt:    pgTime(createdAt),
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CreateUser %s failed: %v", email, err)
+	}
+
+	roleRow, err := queries.GetRoleByName(ctx, role)
+	if err != nil {
+		t.Fatalf("GetRoleByName %s failed: %v", role, err)
+	}
+	if err := queries.AddUserRole(ctx, query.AddUserRoleParams{UserID: userID, RoleID: roleRow.ID}); err != nil {
+		t.Fatalf("AddUserRole %s failed: %v", email, err)
 	}
 }
 

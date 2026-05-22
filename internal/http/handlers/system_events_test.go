@@ -36,7 +36,7 @@ func TestSystemEventsHandler(t *testing.T) {
 	t.Run("non-admin authenticated user returns 403", func(t *testing.T) {
 		eventsSvc := &fakeSystemEventsService{}
 		router := newSystemEventsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: "user-123", Status: "active", Role: "user"},
+			currentUser: &authservice.PublicUser{ID: "user-123", Status: "active", Permissions: []string{}},
 		}, eventsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/system-events", nil)
@@ -44,7 +44,7 @@ func TestSystemEventsHandler(t *testing.T) {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 
-		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden, "Admin role required.")
+		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden, noPermissionMessage)
 		if eventsSvc.called {
 			t.Fatal("service was called for non-admin user")
 		}
@@ -53,7 +53,7 @@ func TestSystemEventsHandler(t *testing.T) {
 	t.Run("admin success returns non-null events array", func(t *testing.T) {
 		eventsSvc := &fakeSystemEventsService{}
 		router := newSystemEventsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: "admin-123", Status: "active", Role: "admin"},
+			currentUser: &authservice.PublicUser{ID: "admin-123", Status: "active", Permissions: []string{"*"}},
 		}, eventsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/system-events", nil)
@@ -101,7 +101,7 @@ func TestSystemEventsHandler(t *testing.T) {
 			},
 		}
 		router := newSystemEventsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: "admin-123", Status: "active", Role: "admin"},
+			currentUser: &authservice.PublicUser{ID: "admin-123", Status: "active", Permissions: []string{"*"}},
 		}, eventsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/system-events?limit=5", nil)
@@ -145,7 +145,7 @@ func TestSystemEventsHandler(t *testing.T) {
 
 	t.Run("invalid limit returns validation envelope", func(t *testing.T) {
 		router := newSystemEventsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: "admin-123", Status: "active", Role: "admin"},
+			currentUser: &authservice.PublicUser{ID: "admin-123", Status: "active", Permissions: []string{"*"}},
 		}, &fakeSystemEventsService{err: systemeventsservice.ErrInvalidInput})
 
 		req := httptest.NewRequest(http.MethodGet, "/api/system-events?limit=101", nil)

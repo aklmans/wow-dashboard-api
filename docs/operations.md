@@ -182,5 +182,6 @@ Future evolution items, not blockers for the current baseline:
 - Metrics and distributed tracing.
 - External secret-manager integration.
 - Distributed locks and job queues.
-- Full RBAC or a policy engine.
+- An attribute-based access-control (ABAC) policy engine. Role-based access
+  control with dynamic, database-backed roles is implemented.
 - Refresh-token device/session management UI.

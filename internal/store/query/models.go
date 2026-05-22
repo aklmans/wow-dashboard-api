@@ -38,6 +38,20 @@ type RefreshToken struct {
 	UpdatedAt         pgtype.Timestamptz
 }
 
+type Role struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	IsSystem    bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type RolePermission struct {
+	RoleID     pgtype.UUID
+	Permission string
+}
+
 type SystemEvent struct {
 	ID        pgtype.UUID
 	EventType string
@@ -54,5 +68,9 @@ type User struct {
 	Status       string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
-	Role         string
+}
+
+type UserRole struct {
+	UserID pgtype.UUID
+	RoleID pgtype.UUID
 }

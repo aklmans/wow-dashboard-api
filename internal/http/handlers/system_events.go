@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	"github.com/aklmans/wow-dashboard-api/internal/systemevents/domain"
 	systemeventsservice "github.com/aklmans/wow-dashboard-api/internal/systemevents/service"
@@ -47,7 +48,7 @@ func RegisterSystemEvents(api huma.API, authSvc SystemEventsAuthenticator, event
 		Method:      http.MethodGet,
 		Path:        "/api/system-events",
 		Summary:     "List system events",
-		Description: "Returns recent system audit events. Admin role required; non-admin authenticated users receive 403.",
+		Description: "Returns recent system audit events. Requires the system_events:read permission.",
 		Tags:        []string{"System Events"},
 		Responses: apiErrorResponses(api,
 			http.StatusUnauthorized,
@@ -56,19 +57,7 @@ func RegisterSystemEvents(api huma.API, authSvc SystemEventsAuthenticator, event
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *listSystemEventsInput) (*systemEventsListResponse, error) {
-		rawAccessToken, ok := parseBearerToken(input.Authorization)
-		if !ok {
-			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
-		}
-
-		currentUser, err := authSvc.CurrentUser(ctx, rawAccessToken)
-		if err != nil {
-			return nil, mapAuthError(ctx, err)
-		}
-		if currentUser == nil {
-			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
-		}
-		if err := requireAdmin(ctx, currentUser); err != nil {
+		if _, err := authorizeWithPermission(ctx, authSvc, input.Authorization, rbac.PermissionSystemEventsRead); err != nil {
 			return nil, err
 		}
 

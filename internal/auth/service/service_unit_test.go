@@ -113,8 +113,8 @@ func TestServiceSignUpWithDomainStore(t *testing.T) {
 		if store.created.Status != domain.UserStatusActive {
 			t.Fatalf("created status = %q, want active", store.created.Status)
 		}
-		if store.created.Role != domain.UserRoleUser {
-			t.Fatalf("created role = %q, want user", store.created.Role)
+		if len(store.addedRoles) != 1 {
+			t.Fatalf("default role assignments = %d, want 1", len(store.addedRoles))
 		}
 		if store.created.ID == uuid.Nil {
 			t.Fatal("created ID is nil")
@@ -125,8 +125,8 @@ func TestServiceSignUpWithDomainStore(t *testing.T) {
 		if session.User.Email != "new.user@example.com" {
 			t.Fatalf("session email = %q, want normalized email", session.User.Email)
 		}
-		if session.User.Role != "user" || session.User.Status != "active" {
-			t.Fatalf("session user role/status = %q/%q, want user/active", session.User.Role, session.User.Status)
+		if session.User.Status != "active" {
+			t.Fatalf("session user status = %q, want active", session.User.Status)
 		}
 		if session.AccessToken != "access-token" {
 			t.Fatalf("access token = %q, want access-token", session.AccessToken)
@@ -181,7 +181,7 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		store := &unitUserStore{
-			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserRoleAdmin, domain.UserStatusActive, "correct-password"),
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password"),
 		}
 		refreshStore := &unitRefreshTokenStore{}
 		authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"},
@@ -197,8 +197,8 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 		if store.authLookupEmail != "demo@example.com" {
 			t.Fatalf("lookup email = %q, want normalized email", store.authLookupEmail)
 		}
-		if session.User.ID != userID.String() || session.User.Role != "admin" {
-			t.Fatalf("session user = %#v, want admin user %s", session.User, userID)
+		if session.User.ID != userID.String() {
+			t.Fatalf("session user = %#v, want user %s", session.User, userID)
 		}
 		if session.RefreshToken == "" {
 			t.Fatal("refresh token is empty")
@@ -226,7 +226,7 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 
 	t.Run("wrong password", func(t *testing.T) {
 		store := &unitUserStore{
-			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserRoleUser, domain.UserStatusActive, "correct-password"),
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password"),
 		}
 		authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"})
 
@@ -243,7 +243,7 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 		// A disabled account must return the same error as a wrong password so
 		// sign-in cannot be used to enumerate which accounts exist.
 		store := &unitUserStore{
-			authUser: testDomainAuthUser(t, userID, "disabled@example.com", "Disabled User", domain.UserRoleUser, domain.UserStatusDisabled, "correct-password"),
+			authUser: testDomainAuthUser(t, userID, "disabled@example.com", "Disabled User", domain.UserStatusDisabled, "correct-password"),
 		}
 		authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"})
 
@@ -267,8 +267,9 @@ func TestServiceCurrentUserWithDomainStore(t *testing.T) {
 				Email:       "demo@example.com",
 				DisplayName: "Demo User",
 				Status:      domain.UserStatusActive,
-				Role:        domain.UserRoleAdmin,
 			},
+			roles:       []string{"admin"},
+			permissions: []string{"*"},
 		}
 		authSvc := service.NewService(store, &fakeTokenManager{
 			claims: testClaims(userID.String()),
@@ -278,8 +279,14 @@ func TestServiceCurrentUserWithDomainStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CurrentUser returned error: %v", err)
 		}
-		if user.ID != userID.String() || user.Email != "demo@example.com" || user.Role != "admin" {
-			t.Fatalf("current user = %#v, want demo admin", user)
+		if user.ID != userID.String() || user.Email != "demo@example.com" {
+			t.Fatalf("current user = %#v, want demo user", user)
+		}
+		if len(user.Roles) != 1 || user.Roles[0] != "admin" {
+			t.Fatalf("current user roles = %v, want [admin]", user.Roles)
+		}
+		if len(user.Permissions) != 1 || user.Permissions[0] != "*" {
+			t.Fatalf("current user permissions = %v, want [*]", user.Permissions)
 		}
 		if store.userLookupID != userID {
 			t.Fatalf("lookup ID = %s, want %s", store.userLookupID, userID)
@@ -320,7 +327,6 @@ func TestServiceRefreshWithDomainStores(t *testing.T) {
 				Email:       "demo@example.com",
 				DisplayName: "Demo User",
 				Status:      domain.UserStatusActive,
-				Role:        domain.UserRoleAdmin,
 			},
 		}
 		refreshStore := &unitRefreshTokenStore{
@@ -419,7 +425,6 @@ func TestServiceRefreshWithDomainStores(t *testing.T) {
 				Email:       "disabled@example.com",
 				DisplayName: "Disabled User",
 				Status:      domain.UserStatusDisabled,
-				Role:        domain.UserRoleUser,
 			},
 		}, &fakeTokenManager{issuedToken: "access-token"},
 			service.WithRefreshTokenStore(&unitRefreshTokenStore{
@@ -491,6 +496,9 @@ type unitUserStore struct {
 	user            domain.User
 	userErr         error
 	userLookupID    uuid.UUID
+	roles           []string
+	permissions     []string
+	addedRoles      []uuid.UUID
 }
 
 func (s *unitUserStore) CreateUser(ctx context.Context, input domain.CreateUserInput) (domain.User, error) {
@@ -504,7 +512,6 @@ func (s *unitUserStore) CreateUser(ctx context.Context, input domain.CreateUserI
 		Email:       input.Email,
 		DisplayName: input.DisplayName,
 		Status:      input.Status,
-		Role:        input.Role,
 		CreatedAt:   input.CreatedAt,
 		UpdatedAt:   input.UpdatedAt,
 	}, nil
@@ -524,6 +531,23 @@ func (s *unitUserStore) GetUserByEmailForAuth(ctx context.Context, email string)
 		return domain.AuthUser{}, s.authUserErr
 	}
 	return s.authUser, nil
+}
+
+func (s *unitUserStore) GetRoleByName(ctx context.Context, name string) (domain.Role, error) {
+	return domain.Role{ID: uuid.New(), Name: name}, nil
+}
+
+func (s *unitUserStore) AddUserRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) error {
+	s.addedRoles = append(s.addedRoles, roleID)
+	return nil
+}
+
+func (s *unitUserStore) GetUserRoles(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	return s.roles, nil
+}
+
+func (s *unitUserStore) GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	return s.permissions, nil
 }
 
 type unitRefreshTokenStore struct {
@@ -612,7 +636,7 @@ func refreshTokenFromInput(input domain.CreateRefreshTokenInput) domain.RefreshT
 	}
 }
 
-func testDomainAuthUser(t *testing.T, id uuid.UUID, email string, displayName string, role domain.UserRole, status domain.UserStatus, plainPassword string) domain.AuthUser {
+func testDomainAuthUser(t *testing.T, id uuid.UUID, email string, displayName string, status domain.UserStatus, plainPassword string) domain.AuthUser {
 	t.Helper()
 	hash, err := password.Hash(plainPassword)
 	if err != nil {
@@ -625,7 +649,6 @@ func testDomainAuthUser(t *testing.T, id uuid.UUID, email string, displayName st
 			Email:       email,
 			DisplayName: displayName,
 			Status:      status,
-			Role:        role,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},

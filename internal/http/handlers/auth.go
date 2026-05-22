@@ -26,7 +26,16 @@ type authUser struct {
 	ID          string `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
 	Email       string `json:"email" example:"demo@minimals.cc" doc:"User email address"`
 	DisplayName string `json:"displayName" example:"Demo User" doc:"User display name"`
-	Role        string `json:"role" example:"user" doc:"User role"`
+}
+
+// authMeUser extends the basic profile with the resolved roles and effective
+// permissions a frontend uses to render menus and gate actions.
+type authMeUser struct {
+	ID          string   `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
+	Email       string   `json:"email" example:"demo@minimals.cc" doc:"User email address"`
+	DisplayName string   `json:"displayName" example:"Demo User" doc:"User display name"`
+	Roles       []string `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
+	Permissions []string `json:"permissions" nullable:"false" doc:"Effective permission strings granted by the user's roles"`
 }
 
 type authSessionBody struct {
@@ -49,7 +58,7 @@ type authSuccessResponse struct {
 }
 
 type authMeBody struct {
-	User authUser `json:"user" doc:"Authenticated user profile"`
+	User authMeUser `json:"user" doc:"Authenticated user profile with roles and permissions"`
 }
 
 type authMeResponse struct {
@@ -227,7 +236,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		if err != nil {
 			return nil, mapAuthError(ctx, err)
 		}
-		return &authMeResponse{Body: authMeBody{User: publicUserResponse(*user)}}, nil
+		return &authMeResponse{Body: authMeBody{User: meUserResponse(*user)}}, nil
 	})
 }
 
@@ -249,7 +258,24 @@ func publicUserResponse(user service.PublicUser) authUser {
 		ID:          user.ID,
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
-		Role:        user.Role,
+	}
+}
+
+func meUserResponse(user service.PublicUser) authMeUser {
+	roles := user.Roles
+	if roles == nil {
+		roles = []string{}
+	}
+	permissions := user.Permissions
+	if permissions == nil {
+		permissions = []string{}
+	}
+	return authMeUser{
+		ID:          user.ID,
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+		Roles:       roles,
+		Permissions: permissions,
 	}
 }
 

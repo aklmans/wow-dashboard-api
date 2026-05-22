@@ -42,7 +42,6 @@ func TestUserStoreIntegration(t *testing.T) {
 		DisplayName:  "Alice Example",
 		PasswordHash: hash,
 		Status:       domain.UserStatusActive,
-		Role:         domain.UserRoleAdmin,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	})
@@ -55,8 +54,8 @@ func TestUserStoreIntegration(t *testing.T) {
 	if created.Email != "alice@example.com" {
 		t.Fatalf("created email = %q, want lowercase email", created.Email)
 	}
-	if created.Role != domain.UserRoleAdmin || created.Status != domain.UserStatusActive {
-		t.Fatalf("created role/status = %q/%q, want admin/active", created.Role, created.Status)
+	if created.Status != domain.UserStatusActive {
+		t.Fatalf("created status = %q, want active", created.Status)
 	}
 
 	_, err = repo.CreateUser(ctx, domain.CreateUserInput{
@@ -65,7 +64,6 @@ func TestUserStoreIntegration(t *testing.T) {
 		DisplayName:  "Alice Duplicate",
 		PasswordHash: hash,
 		Status:       domain.UserStatusActive,
-		Role:         domain.UserRoleUser,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	})
@@ -97,7 +95,6 @@ func TestUserStoreIntegration(t *testing.T) {
 		DisplayName:  "Invalid Status",
 		PasswordHash: hash,
 		Status:       domain.UserStatus("banned"),
-		Role:         domain.UserRoleUser,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	})
@@ -105,18 +102,31 @@ func TestUserStoreIntegration(t *testing.T) {
 		t.Fatalf("invalid status error = %v, want ErrInvalidUserStatus", err)
 	}
 
-	_, err = repo.CreateUser(ctx, domain.CreateUserInput{
-		ID:           uuid.New(),
-		Email:        "invalid-role@example.com",
-		DisplayName:  "Invalid Role",
-		PasswordHash: hash,
-		Status:       domain.UserStatusActive,
-		Role:         domain.UserRole("owner"),
-		CreatedAt:    now,
-		UpdatedAt:    now,
-	})
-	if !errors.Is(err, domain.ErrInvalidUserRole) {
-		t.Fatalf("invalid role error = %v, want ErrInvalidUserRole", err)
+	// Role resolution: a freshly created user has no roles until one is
+	// assigned. After granting the seeded admin role, the RBAC lookups should
+	// return that role and its wildcard permission.
+	if roles, err := repo.GetUserRoles(ctx, userID); err != nil || len(roles) != 0 {
+		t.Fatalf("GetUserRoles before assignment = %v, %v; want empty", roles, err)
+	}
+
+	adminRole, err := repo.GetRoleByName(ctx, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName(admin) failed: %v", err)
+	}
+	if _, err := repo.GetRoleByName(ctx, "no-such-role"); !errors.Is(err, domain.ErrRoleNotFound) {
+		t.Fatalf("GetRoleByName(missing) error = %v, want ErrRoleNotFound", err)
+	}
+	if err := repo.AddUserRole(ctx, userID, adminRole.ID); err != nil {
+		t.Fatalf("AddUserRole failed: %v", err)
+	}
+
+	roles, err := repo.GetUserRoles(ctx, userID)
+	if err != nil || len(roles) != 1 || roles[0] != "admin" {
+		t.Fatalf("GetUserRoles after assignment = %v, %v; want [admin]", roles, err)
+	}
+	perms, err := repo.GetUserPermissions(ctx, userID)
+	if err != nil || len(perms) != 1 || perms[0] != "*" {
+		t.Fatalf("GetUserPermissions = %v, %v; want [*]", perms, err)
 	}
 }
 
