@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	"github.com/aklmans/wow-dashboard-api/internal/projects/domain"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
@@ -160,7 +161,7 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 		Method:        http.MethodPost,
 		Path:          "/api/projects",
 		Summary:       "Create project",
-		Description:   "Creates a new project owned by the authenticated user.",
+		Description:   "Creates a new project owned by the authenticated user. Requires the projects:create permission.",
 		Tags:          []string{"Projects"},
 		DefaultStatus: http.StatusCreated,
 		Responses: apiErrorResponses(api,
@@ -172,9 +173,9 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *createProjectInput) (*projectCreatedResponse, error) {
-		currentUser, err := authenticateProjects(ctx, authSvc, input.Authorization)
-		if err != nil {
-			return nil, err
+		currentUser, authErr := authorizeWithPermission(ctx, authSvc, input.Authorization, rbac.PermissionProjectsCreate)
+		if authErr != nil {
+			return nil, authErr
 		}
 
 		project, err := projectsSvc.CreateProject(ctx, projectservice.CreateProjectInput{

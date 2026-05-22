@@ -1777,7 +1777,7 @@
         ]
       },
       "post": {
-        "description": "Creates a new project owned by the authenticated user.",
+        "description": "Creates a new project owned by the authenticated user. Requires the projects:create permission.",
         "operationId": "post-projects",
         "parameters": [
           {

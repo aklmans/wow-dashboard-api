@@ -199,13 +199,14 @@ Permissions are a fixed, code-defined catalog (`internal/auth/rbac`) — a permi
 | `roles:read` | List roles and the assignable-permission catalog |
 | `roles:manage` | Create, update, and delete roles |
 | `system_events:read` | Read the system audit log |
+| `projects:create` | Create new projects |
 
 Roles are **dynamic and database-backed** (`roles`, `role_permissions`, and `user_roles` tables): an admin composes custom roles from the catalog through the [Roles endpoints](#roles-endpoints). Two **system roles** are built in and immutable through the API:
 
 | Role | Description |
 |------|-------------|
 | `admin` | Holds the reserved `*` wildcard, which grants every permission — including ones added in future releases |
-| `user` | Default role assigned to new sign-ups; grants no administrative permissions |
+| `user` | Default role assigned to new sign-ups; grants `projects:create` but no administrative permissions |
 
 Each handler gates itself with a `requirePermission` check; a caller missing the required permission receives `403 forbidden`. `GET /api/auth/me` returns the caller's `roles` and resolved `permissions` so a frontend can render menus and gate actions — but the server always re-checks independently and never trusts the client. Roles and permissions are resolved fresh on every request, so a change takes effect on the user's next call.
 
@@ -248,7 +249,7 @@ Project management endpoints live under `/api/projects` and require `Authorizati
 |--------|------|-------------|
 | `GET` | `/api/projects` | Return paginated projects the user owns or is a member of, as `{ "projects": [...], "page": 1, "pageSize": 20, "total": 1 }` |
 | `GET` | `/api/projects/{id}` | Return a single project as `{ "project": { ... } }`. Available to the owner and any member; `404` when the user has no access; `422` when `{id}` is not a valid UUID |
-| `POST` | `/api/projects` | Create a project owned by the current user. Returns `201` with `{ "project": { ... } }`; `409 conflict` on a duplicate owner-scoped name; `422` for invalid bodies |
+| `POST` | `/api/projects` | Create a project owned by the current user. Requires the `projects:create` permission. Returns `201` with `{ "project": { ... } }`; `409 conflict` on a duplicate owner-scoped name; `422` for invalid bodies |
 | `PATCH` | `/api/projects/{id}` | Partially update a project. Owner or `editor` member only; a `viewer` receives `403`. Returns `200` with `{ "project": { ... } }`; `404` when the user has no access; `409 conflict` on a duplicate name; `422` for invalid bodies |
 | `DELETE` | `/api/projects/{id}` | Archive a project. **Owner only** — a non-owner member receives `403`. Returns `200` with `{ "project": { ... } }` carrying `status: "archived"`; `404` when the user has no access |
 

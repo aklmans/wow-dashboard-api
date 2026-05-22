@@ -18,6 +18,7 @@ const (
 	PermissionRolesRead        Permission = "roles:read"
 	PermissionRolesManage      Permission = "roles:manage"
 	PermissionSystemEventsRead Permission = "system_events:read"
+	PermissionProjectsCreate   Permission = "projects:create"
 )
 
 // Catalog is every assignable permission in a stable order. PermissionAll is
@@ -30,6 +31,7 @@ var Catalog = []Permission{
 	PermissionRolesRead,
 	PermissionRolesManage,
 	PermissionSystemEventsRead,
+	PermissionProjectsCreate,
 }
 
 // IsAssignable reports whether p is a real catalog permission that may be

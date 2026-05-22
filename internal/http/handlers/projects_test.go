@@ -26,7 +26,7 @@ func TestProjectsNonAdminAuthenticatedUserCanListProjects(t *testing.T) {
 	owner := uuid.New()
 	projectsSvc := &fakeProjectsService{listResult: domain.ListProjectsResult{Page: 1, PageSize: 20, Total: 0}}
 	router := newProjectsTestRouter(&fakeUsersAuthService{
-		currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+		currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 	}, projectsSvc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
@@ -88,7 +88,7 @@ func TestProjectsListHandler(t *testing.T) {
 			},
 		}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects?page=2&pageSize=5&search=demo&status=active", nil)
@@ -124,7 +124,7 @@ func TestProjectsListHandler(t *testing.T) {
 
 	t.Run("service rejection returns validation envelope", func(t *testing.T) {
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: uuid.New().String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: uuid.New().String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, &fakeProjectsService{listErr: projectservice.ErrInvalidInput})
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects?pageSize=50", nil)
@@ -138,7 +138,7 @@ func TestProjectsListHandler(t *testing.T) {
 
 	t.Run("page size over maximum is rejected at the schema edge", func(t *testing.T) {
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: uuid.New().String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: uuid.New().String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, &fakeProjectsService{})
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects?pageSize=101", nil)
@@ -168,7 +168,7 @@ func TestProjectsDetailHandler(t *testing.T) {
 	t.Run("invalid uuid returns validation envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/not-a-uuid", nil)
@@ -186,7 +186,7 @@ func TestProjectsDetailHandler(t *testing.T) {
 	t.Run("missing project returns 404", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{getErr: projectservice.ErrNotFound}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+uuid.New().String(), nil)
@@ -210,7 +210,7 @@ func TestProjectsDetailHandler(t *testing.T) {
 			UpdatedAt:   createdAt.Add(time.Minute),
 		}}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID.String(), nil)
@@ -248,7 +248,7 @@ func TestProjectsCreateHandler(t *testing.T) {
 	t.Run("invalid body returns validation envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{createErr: projectservice.ErrInvalidInput}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPost, "/api/projects",
@@ -265,7 +265,7 @@ func TestProjectsCreateHandler(t *testing.T) {
 	t.Run("name conflict returns conflict envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{createErr: projectservice.ErrNameConflict}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPost, "/api/projects",
@@ -291,7 +291,7 @@ func TestProjectsCreateHandler(t *testing.T) {
 		}
 		projectsSvc := &fakeProjectsService{createResult: created}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPost, "/api/projects",
@@ -317,6 +317,25 @@ func TestProjectsCreateHandler(t *testing.T) {
 			t.Fatalf("project id = %q", body.Project.ID)
 		}
 	})
+
+	t.Run("without projects:create permission returns 403", func(t *testing.T) {
+		projectsSvc := &fakeProjectsService{}
+		router := newProjectsTestRouter(&fakeUsersAuthService{
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{}},
+		}, projectsSvc)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/projects",
+			strings.NewReader(`{"name":"Demo"}`))
+		req.Header.Set("Authorization", "Bearer access-token")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden, noPermissionMessage)
+		if projectsSvc.createInput.Name != "" {
+			t.Fatal("service was called for a user without projects:create")
+		}
+	})
 }
 
 func TestProjectsUpdateHandler(t *testing.T) {
@@ -338,7 +357,7 @@ func TestProjectsUpdateHandler(t *testing.T) {
 	t.Run("invalid uuid returns validation envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPatch, "/api/projects/not-a-uuid",
@@ -358,7 +377,7 @@ func TestProjectsUpdateHandler(t *testing.T) {
 	t.Run("missing project returns 404", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{updateErr: projectservice.ErrNotFound}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+uuid.New().String(),
@@ -374,7 +393,7 @@ func TestProjectsUpdateHandler(t *testing.T) {
 	t.Run("empty body returns validation envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{updateErr: projectservice.ErrInvalidInput}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+uuid.New().String(),
@@ -391,7 +410,7 @@ func TestProjectsUpdateHandler(t *testing.T) {
 	t.Run("invalid name returns validation envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{updateErr: projectservice.ErrInvalidInput}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+uuid.New().String(),
@@ -408,7 +427,7 @@ func TestProjectsUpdateHandler(t *testing.T) {
 	t.Run("name conflict returns conflict envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{updateErr: projectservice.ErrNameConflict}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+uuid.New().String(),
@@ -435,7 +454,7 @@ func TestProjectsUpdateHandler(t *testing.T) {
 		}
 		projectsSvc := &fakeProjectsService{updateResult: updated}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodPatch, "/api/projects/"+projectID.String(),
@@ -490,7 +509,7 @@ func TestProjectsArchiveHandler(t *testing.T) {
 	t.Run("invalid uuid returns validation envelope", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/projects/not-a-uuid", nil)
@@ -508,7 +527,7 @@ func TestProjectsArchiveHandler(t *testing.T) {
 	t.Run("missing project returns 404", func(t *testing.T) {
 		projectsSvc := &fakeProjectsService{archiveErr: projectservice.ErrNotFound}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+uuid.New().String(), nil)
@@ -532,7 +551,7 @@ func TestProjectsArchiveHandler(t *testing.T) {
 		}
 		projectsSvc := &fakeProjectsService{archiveResult: archived}
 		router := newProjectsTestRouter(&fakeUsersAuthService{
-			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active"},
+			currentUser: &authservice.PublicUser{ID: owner.String(), Status: "active", Permissions: []string{"projects:create"}},
 		}, projectsSvc)
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID.String(), nil)

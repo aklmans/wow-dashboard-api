@@ -184,7 +184,7 @@ func TestPermissionsListHandler(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	want := map[string]bool{"users:read": false, "users:manage": false, "roles:read": false, "roles:manage": false, "system_events:read": false}
+	want := map[string]bool{"users:read": false, "users:manage": false, "roles:read": false, "roles:manage": false, "system_events:read": false, "projects:create": false}
 	for _, p := range body.Permissions {
 		if _, ok := want[p]; !ok {
 			t.Fatalf("unexpected permission %q in catalog", p)

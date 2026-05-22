@@ -139,7 +139,7 @@ export interface paths {
         put?: never;
         /**
          * Create project
-         * @description Creates a new project owned by the authenticated user.
+         * @description Creates a new project owned by the authenticated user. Requires the projects:create permission.
          */
         post: operations["post-projects"];
         delete?: never;
