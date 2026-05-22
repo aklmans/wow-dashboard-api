@@ -297,6 +297,60 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 	})
 }
 
+func TestServiceChangePassword(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	t.Run("success updates the hash and revokes every session", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
+		}
+		refreshStore := &unitRefreshTokenStore{}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "new-password-123"); err != nil {
+			t.Fatalf("ChangePassword returned error: %v", err)
+		}
+		if store.updatedPasswordHash == "" || strings.Contains(store.updatedPasswordHash, "new-password-123") {
+			t.Fatalf("password hash was not stored safely: %q", store.updatedPasswordHash)
+		}
+		if refreshStore.revokedAllForUser != userID {
+			t.Fatalf("revokedAllForUser = %s, want %s", refreshStore.revokedAllForUser, userID)
+		}
+	})
+
+	t.Run("wrong current password is rejected", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
+		}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())})
+
+		if err := authSvc.ChangePassword(context.Background(), "raw-token", "wrong-password", "new-password-123"); !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Fatalf("ChangePassword error = %v, want ErrInvalidCredentials", err)
+		}
+		if store.updatedPasswordHash != "" {
+			t.Fatal("password was updated despite a wrong current password")
+		}
+	})
+
+	t.Run("invalid token is rejected", func(t *testing.T) {
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{verifyErr: errors.New("bad token")})
+		if err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "new-password-123"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("ChangePassword error = %v, want ErrInvalidToken", err)
+		}
+	})
+
+	t.Run("short new password is rejected", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
+		}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())})
+		if err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "short"); !errors.Is(err, service.ErrInvalidInput) {
+			t.Fatalf("ChangePassword error = %v, want ErrInvalidInput", err)
+		}
+	})
+}
+
 func TestServiceCurrentUserWithDomainStore(t *testing.T) {
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 
@@ -543,6 +597,7 @@ type unitUserStore struct {
 	registerFailureCalls int
 	registerLockedResult bool
 	clearFailuresCalls   int
+	updatedPasswordHash  string
 }
 
 func (s *unitUserStore) CreateUser(ctx context.Context, input domain.CreateUserInput) (domain.User, error) {
@@ -604,19 +659,32 @@ func (s *unitUserStore) ClearLoginFailures(ctx context.Context, userID uuid.UUID
 	return nil
 }
 
+func (s *unitUserStore) GetUserByIDForAuth(ctx context.Context, id uuid.UUID) (domain.AuthUser, error) {
+	if s.authUserErr != nil {
+		return domain.AuthUser{}, s.authUserErr
+	}
+	return s.authUser, nil
+}
+
+func (s *unitUserStore) UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string, updatedAt time.Time) error {
+	s.updatedPasswordHash = passwordHash
+	return nil
+}
+
 type unitRefreshTokenStore struct {
-	created       domain.CreateRefreshTokenInput
-	createErr     error
-	token         domain.RefreshToken
-	getErr        error
-	lookupHash    string
-	rotatedOldID  uuid.UUID
-	rotatedInput  domain.CreateRefreshTokenInput
-	rotateErr     error
-	revokedHash   string
-	revokeErr     error
-	revokedFamily uuid.UUID
-	revokeFamErr  error
+	created           domain.CreateRefreshTokenInput
+	createErr         error
+	token             domain.RefreshToken
+	getErr            error
+	lookupHash        string
+	rotatedOldID      uuid.UUID
+	rotatedInput      domain.CreateRefreshTokenInput
+	rotateErr         error
+	revokedHash       string
+	revokeErr         error
+	revokedFamily     uuid.UUID
+	revokeFamErr      error
+	revokedAllForUser uuid.UUID
 }
 
 func (s *unitRefreshTokenStore) CreateRefreshToken(ctx context.Context, input domain.CreateRefreshTokenInput) (domain.RefreshToken, error) {
@@ -652,6 +720,11 @@ func (s *unitRefreshTokenStore) RevokeRefreshTokenByHash(ctx context.Context, to
 func (s *unitRefreshTokenStore) RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID, revokedAt time.Time) error {
 	s.revokedFamily = familyID
 	return s.revokeFamErr
+}
+
+func (s *unitRefreshTokenStore) RevokeAllForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error {
+	s.revokedAllForUser = userID
+	return nil
 }
 
 type unitOfWork struct {

@@ -100,3 +100,16 @@ func (s *RefreshTokenStore) RevokeRefreshTokenFamily(ctx context.Context, family
 	}
 	return nil
 }
+
+// RevokeAllForUser revokes every active refresh token belonging to a user —
+// used to end all of that user's sessions, e.g. after a password change.
+func (s *RefreshTokenStore) RevokeAllForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error {
+	err := s.queries.RevokeAllUserRefreshTokens(ctx, query.RevokeAllUserRefreshTokensParams{
+		UserID:    pgUUID(userID),
+		RevokedAt: pgTimestamp(revokedAt),
+	})
+	if err != nil {
+		return mapRefreshTokenError(err)
+	}
+	return nil
+}

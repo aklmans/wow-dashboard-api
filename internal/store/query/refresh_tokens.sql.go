@@ -112,6 +112,25 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (
 	return i, err
 }
 
+const revokeAllUserRefreshTokens = `-- name: RevokeAllUserRefreshTokens :exec
+UPDATE refresh_tokens
+SET
+    revoked_at = $1,
+    updated_at = $1
+WHERE user_id = $2
+  AND revoked_at IS NULL
+`
+
+type RevokeAllUserRefreshTokensParams struct {
+	RevokedAt pgtype.Timestamptz
+	UserID    pgtype.UUID
+}
+
+func (q *Queries) RevokeAllUserRefreshTokens(ctx context.Context, arg RevokeAllUserRefreshTokensParams) error {
+	_, err := q.db.Exec(ctx, revokeAllUserRefreshTokens, arg.RevokedAt, arg.UserID)
+	return err
+}
+
 const revokeRefreshTokenByHash = `-- name: RevokeRefreshTokenByHash :exec
 UPDATE refresh_tokens
 SET

@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change password
+         * @description Changes the signed-in user's password after verifying the current one, then revokes every refresh token so all sessions must re-authenticate.
+         */
+        post: operations["post-auth-change-password"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -476,6 +496,18 @@ export interface components {
              * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
              */
             id: string;
+        };
+        ChangePasswordInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ChangePasswordInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description The user's current password */
+            currentPassword: string;
+            /** @description The new password (minimum 8 characters) */
+            newPassword: string;
         };
         CreateProjectInputBody: {
             /**
@@ -1108,6 +1140,38 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    "post-auth-change-password": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
     "get-auth-me": {
         parameters: {
             query?: never;

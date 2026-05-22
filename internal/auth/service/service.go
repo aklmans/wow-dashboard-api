@@ -95,6 +95,8 @@ type UserStore interface {
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]string, error)
 	RegisterLoginFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockUntil time.Time, now time.Time) (bool, error)
 	ClearLoginFailures(ctx context.Context, userID uuid.UUID, now time.Time) error
+	GetUserByIDForAuth(ctx context.Context, id uuid.UUID) (domain.AuthUser, error)
+	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string, updatedAt time.Time) error
 }
 
 // RefreshTokenStore defines the persistence port for opaque refresh tokens.
@@ -104,6 +106,7 @@ type RefreshTokenStore interface {
 	RotateRefreshToken(ctx context.Context, oldTokenID uuid.UUID, input domain.CreateRefreshTokenInput, revokedAt time.Time) (domain.RefreshToken, error)
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string, revokedAt time.Time) error
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID, revokedAt time.Time) error
+	RevokeAllForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error
 }
 
 // WorkDeps contains transaction-scoped stores for a unit of work.
@@ -572,6 +575,70 @@ func (s *Service) CurrentUser(ctx context.Context, rawAccessToken string) (*Publ
 		Roles:       roles,
 		Permissions: permissions,
 	}, nil
+}
+
+// ChangePassword verifies a signed-in user's current password and replaces it
+// with a new one. Every refresh token for the user is then revoked so other
+// sessions must re-authenticate; the caller's current session keeps its
+// (short-lived) access token until it expires.
+func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, currentPassword string, newPassword string) error {
+	claims, err := s.tokenManager.VerifyAccessToken(rawAccessToken)
+	if err != nil {
+		return ErrInvalidToken
+	}
+	userID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return fmt.Errorf("%w: subject is not a valid UUID", ErrInvalidToken)
+	}
+
+	// Reject over-long inputs before any hashing work, and enforce the same
+	// length policy as sign-up on the new password.
+	if len(currentPassword) > maxPasswordLength || len(newPassword) > maxPasswordLength {
+		return fmt.Errorf("%w: password must not exceed %d characters", ErrInvalidInput, maxPasswordLength)
+	}
+	if len(newPassword) < minPasswordLength {
+		return fmt.Errorf("%w: password must be at least %d characters", ErrInvalidInput, minPasswordLength)
+	}
+
+	user, err := s.store.GetUserByIDForAuth(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return ErrInvalidToken
+		}
+		return fmt.Errorf("auth: failed to retrieve user: %w", err)
+	}
+	if user.Status == domain.UserStatusDisabled {
+		return ErrUserDisabled
+	}
+
+	match, err := password.Verify(currentPassword, user.PasswordHash)
+	if err != nil {
+		return fmt.Errorf("auth: failed to verify current password: %w", err)
+	}
+	if !match {
+		return ErrInvalidCredentials
+	}
+
+	newHash, err := password.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("auth: failed to hash password: %w", err)
+	}
+
+	now := s.now().UTC().Truncate(time.Microsecond)
+	if err := s.store.UpdateUserPassword(ctx, userID, newHash, now); err != nil {
+		return fmt.Errorf("auth: failed to update password: %w", err)
+	}
+
+	// Revoke every refresh token so a compromised session cannot survive a
+	// password change. This is best-effort — the password is already changed.
+	if s.refreshTokenStore != nil {
+		if err := s.refreshTokenStore.RevokeAllForUser(ctx, userID, now); err != nil {
+			slog.ErrorContext(ctx, "failed to revoke refresh tokens after password change", "error", err)
+		}
+	}
+
+	s.recordPasswordChanged(ctx, AuditMetadata{UserID: userID.String()})
+	return nil
 }
 
 func (s *Service) issueSession(ctx context.Context, user domain.User, familyID uuid.UUID) (*Session, error) {

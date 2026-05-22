@@ -169,6 +169,7 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 | `POST` | `/api/auth/sign-in` | Authenticate credentials, return `{ "user": ..., "accessToken": ... }`, and set the HttpOnly refresh cookie |
 | `POST` | `/api/auth/refresh` | Rotate the refresh cookie and return `{ "user": ..., "accessToken": ... }` |
 | `POST` | `/api/auth/sign-out` | Revoke the current refresh token when present and clear the refresh cookie |
+| `POST` | `/api/auth/change-password` | Verify the current password and set a new one for the bearer-token user; revokes every refresh token and clears the cookie |
 | `GET` | `/api/auth/me` | Return `{ "user": ... }` — including the caller's `roles` and effective `permissions` — for `Authorization: Bearer <accessToken>` |
 
 `sign-up` and `sign-in` are protected by an in-memory, per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header.

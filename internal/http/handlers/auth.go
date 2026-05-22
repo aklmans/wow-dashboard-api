@@ -20,6 +20,7 @@ type AuthService interface {
 	Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error)
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
+	ChangePassword(ctx context.Context, rawAccessToken string, currentPassword string, newPassword string) error
 }
 
 type authUser struct {
@@ -83,6 +84,14 @@ type signInInput struct {
 
 type meInput struct {
 	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
+}
+
+type changePasswordInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
+	Body          struct {
+		CurrentPassword string `json:"currentPassword" minLength:"1" doc:"The user's current password"`
+		NewPassword     string `json:"newPassword" minLength:"8" maxLength:"4096" doc:"The new password (minimum 8 characters)"`
+	}
 }
 
 type refreshInput struct {
@@ -208,6 +217,36 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			}
 		}
 
+		return &authSuccessResponse{
+			SetCookie: []http.Cookie{clearRefreshCookie(refreshCookie)},
+			Body:      authSuccessBody{Success: true},
+		}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-change-password",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/change-password",
+		Summary:     "Change password",
+		Description: "Changes the signed-in user's password after verifying the current one, then revokes every refresh token so all sessions must re-authenticate.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusForbidden,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *changePasswordInput) (*authSuccessResponse, error) {
+		rawAccessToken, ok := parseBearerToken(input.Authorization)
+		if !ok {
+			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+		}
+
+		if err := authSvc.ChangePassword(ctx, rawAccessToken, input.Body.CurrentPassword, input.Body.NewPassword); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+
+		// The change revoked every refresh token, so clear the now-dead cookie.
 		return &authSuccessResponse{
 			SetCookie: []http.Cookie{clearRefreshCookie(refreshCookie)},
 			Body:      authSuccessBody{Success: true},

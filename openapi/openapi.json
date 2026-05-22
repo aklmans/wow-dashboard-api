@@ -256,6 +256,36 @@
         ],
         "type": "object"
       },
+      "ChangePasswordInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ChangePasswordInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "currentPassword": {
+            "description": "The user's current password",
+            "minLength": 1,
+            "type": "string"
+          },
+          "newPassword": {
+            "description": "The new password (minimum 8 characters)",
+            "maxLength": 4096,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "type": "object"
+      },
       "CreateProjectInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1377,6 +1407,71 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/auth/change-password": {
+      "post": {
+        "description": "Changes the signed-in user's password after verifying the current one, then revokes every refresh token so all sessions must re-authenticate.",
+        "operationId": "post-auth-change-password",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSuccessBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Change password",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/api/auth/me": {
       "get": {
         "description": "Returns the profile for the bearer access token.",

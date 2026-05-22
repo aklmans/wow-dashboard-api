@@ -29,6 +29,17 @@ SELECT id, email, display_name, password_hash, status, created_at, updated_at,
 FROM users
 WHERE email = lower(@email);
 
+-- name: GetUserByIDForAuth :one
+SELECT id, email, display_name, password_hash, status, created_at, updated_at,
+       failed_login_count, locked_until
+FROM users
+WHERE id = @id;
+
+-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = @password_hash, updated_at = @updated_at
+WHERE id = @id;
+
 -- name: ListUsers :many
 SELECT id, email, display_name, status, created_at, updated_at
 FROM users

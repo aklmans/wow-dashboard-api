@@ -531,6 +531,11 @@ type fakeAuthService struct {
 	currentUser      *service.PublicUser
 	currentUserErr   error
 
+	changePasswordToken   string
+	changePasswordCurrent string
+	changePasswordNew     string
+	changePasswordErr     error
+
 	refreshToken   string
 	refreshSession *service.Session
 	refreshErr     error
@@ -561,6 +566,13 @@ func (f *fakeAuthService) CurrentUser(ctx context.Context, rawAccessToken string
 		return nil, f.currentUserErr
 	}
 	return f.currentUser, nil
+}
+
+func (f *fakeAuthService) ChangePassword(ctx context.Context, rawAccessToken string, currentPassword string, newPassword string) error {
+	f.changePasswordToken = rawAccessToken
+	f.changePasswordCurrent = currentPassword
+	f.changePasswordNew = newPassword
+	return f.changePasswordErr
 }
 
 func (f *fakeAuthService) Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error) {
@@ -838,4 +850,50 @@ func containsString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestChangePasswordHandler(t *testing.T) {
+	const body = `{"currentPassword":"old-password","newPassword":"new-password-123"}`
+
+	t.Run("success returns 200 and forwards the input", func(t *testing.T) {
+		authSvc := &fakeAuthService{}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer access-token")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if authSvc.changePasswordToken != "access-token" {
+			t.Fatalf("forwarded token = %q, want access-token", authSvc.changePasswordToken)
+		}
+		if authSvc.changePasswordCurrent != "old-password" || authSvc.changePasswordNew != "new-password-123" {
+			t.Fatalf("forwarded passwords = %q / %q", authSvc.changePasswordCurrent, authSvc.changePasswordNew)
+		}
+	})
+
+	t.Run("missing authorization returns 401", func(t *testing.T) {
+		router := newAuthTestRouter(&fakeAuthService{})
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized,
+			"Authorization token missing or invalid.")
+	})
+
+	t.Run("wrong current password maps to 401", func(t *testing.T) {
+		authSvc := &fakeAuthService{changePasswordErr: service.ErrInvalidCredentials}
+		router := newAuthTestRouter(authSvc)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer access-token")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized, "Invalid email or password.")
+	})
 }

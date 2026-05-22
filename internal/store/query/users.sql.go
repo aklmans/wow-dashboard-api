@@ -157,6 +157,30 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 	return i, err
 }
 
+const getUserByIDForAuth = `-- name: GetUserByIDForAuth :one
+SELECT id, email, display_name, password_hash, status, created_at, updated_at,
+       failed_login_count, locked_until
+FROM users
+WHERE id = $1
+`
+
+func (q *Queries) GetUserByIDForAuth(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByIDForAuth, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FailedLoginCount,
+		&i.LockedUntil,
+	)
+	return i, err
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT id, email, display_name, status, created_at, updated_at
 FROM users
@@ -239,6 +263,23 @@ func (q *Queries) RegisterLoginFailure(ctx context.Context, arg RegisterLoginFai
 	var locked_until pgtype.Timestamptz
 	err := row.Scan(&locked_until)
 	return locked_until, err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $1, updated_at = $2
+WHERE id = $3
+`
+
+type UpdateUserPasswordParams struct {
+	PasswordHash string
+	UpdatedAt    pgtype.Timestamptz
+	ID           pgtype.UUID
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.PasswordHash, arg.UpdatedAt, arg.ID)
+	return err
 }
 
 const updateUserStatus = `-- name: UpdateUserStatus :one

@@ -104,3 +104,11 @@ SET
     updated_at = @revoked_at
 WHERE family_id = @family_id
   AND revoked_at IS NULL;
+
+-- name: RevokeAllUserRefreshTokens :exec
+UPDATE refresh_tokens
+SET
+    revoked_at = @revoked_at,
+    updated_at = @revoked_at
+WHERE user_id = @user_id
+  AND revoked_at IS NULL;

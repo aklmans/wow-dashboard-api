@@ -292,6 +292,17 @@ func (f *fakeUserStore) ClearLoginFailures(ctx context.Context, userID uuid.UUID
 	return nil
 }
 
+func (f *fakeUserStore) GetUserByIDForAuth(ctx context.Context, id uuid.UUID) (domain.AuthUser, error) {
+	if f.authUserErr != nil {
+		return domain.AuthUser{}, f.authUserErr
+	}
+	return f.authUser, nil
+}
+
+func (f *fakeUserStore) UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string, updatedAt time.Time) error {
+	return nil
+}
+
 type fakeTokenManager struct {
 	issuedToken string
 	issueErr    error

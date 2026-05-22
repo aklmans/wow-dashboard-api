@@ -148,3 +148,29 @@ func (s *UserStore) ClearLoginFailures(ctx context.Context, userID uuid.UUID, no
 	}
 	return nil
 }
+
+// GetUserByIDForAuth fetches the full auth record, including the password
+// hash, by user id. A missing user surfaces as domain.ErrUserNotFound.
+func (s *UserStore) GetUserByIDForAuth(ctx context.Context, id uuid.UUID) (domain.AuthUser, error) {
+	row, err := s.queries.GetUserByIDForAuth(ctx, pgUUID(id))
+	if err != nil {
+		return domain.AuthUser{}, mapStoreError(err)
+	}
+	user, err := authUserFromRow(row)
+	if err != nil {
+		return domain.AuthUser{}, fmt.Errorf("authrepo: convert auth user: %w", err)
+	}
+	return user, nil
+}
+
+// UpdateUserPassword sets a user's password hash.
+func (s *UserStore) UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string, now time.Time) error {
+	if err := s.queries.UpdateUserPassword(ctx, query.UpdateUserPasswordParams{
+		ID:           pgUUID(userID),
+		PasswordHash: passwordHash,
+		UpdatedAt:    pgTimestamp(now),
+	}); err != nil {
+		return mapStoreError(err)
+	}
+	return nil
+}

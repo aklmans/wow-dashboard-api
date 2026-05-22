@@ -13,6 +13,7 @@ const (
 	EventAuthSignUpFailed    = "auth.sign_up.failed"
 	EventAuthSignInSucceeded = "auth.sign_in.succeeded"
 	EventAuthSignInFailed    = "auth.sign_in.failed"
+	EventAuthPasswordChanged = "auth.password.changed"
 
 	AuditReasonInvalidInput       = "invalid_input"
 	AuditReasonEmailAlreadyExists = "email_already_exists"
@@ -105,6 +106,14 @@ func (s *Service) recordSignInFailed(ctx context.Context, metadata AuditMetadata
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventAuthSignInFailed,
 		Message:   "Auth sign-in failed.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordPasswordChanged(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthPasswordChanged,
+		Message:   "Auth password changed.",
 		Metadata:  metadata,
 	})
 }
