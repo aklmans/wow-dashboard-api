@@ -17,9 +17,15 @@ VALUES (@user_id, @role_id)
 ON CONFLICT (user_id, role_id) DO NOTHING;
 
 -- name: ReplaceUserRoles :exec
-WITH cleared AS (
-    DELETE FROM user_roles WHERE user_id = @user_id
+-- Insert the new assignments first, then delete the ones no longer in the
+-- set. A data-modifying CTE shares one snapshot, so a DELETE-then-INSERT would
+-- not see its own deletes and would collide on rows common to both sets.
+WITH added AS (
+    INSERT INTO user_roles (user_id, role_id)
+    SELECT @user_id, rid
+    FROM unnest(@role_ids::uuid[]) AS rid
+    ON CONFLICT (user_id, role_id) DO NOTHING
 )
-INSERT INTO user_roles (user_id, role_id)
-SELECT @user_id, rid
-FROM unnest(@role_ids::uuid[]) AS rid;
+DELETE FROM user_roles
+WHERE user_roles.user_id = @user_id
+  AND user_roles.role_id <> ALL (@role_ids::uuid[]);

@@ -178,3 +178,63 @@ func pgUUID(t *testing.T, id uuid.UUID) pgtype.UUID {
 func pgTime(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
 }
+
+// TestUserStoreReplaceUserRolesIntegration covers the replace path, including
+// a replacement set that overlaps the user's current roles — the case a naive
+// delete-then-insert in one statement would fail with a primary-key collision.
+func TestUserStoreReplaceUserRolesIntegration(t *testing.T) {
+	ctx := context.Background()
+	pool := storetest.NewPostgresPool(t, ctx, "test_usersrepo_replace_roles_db", "../../../migrations")
+	queries := query.New(pool)
+	repo := usersrepo.NewUserStore(queries)
+
+	insertUser(t, ctx, queries, "roled@example.com", "Roled User", "user", "active", time.Now())
+	page, err := repo.ListUsers(ctx, domain.ListUsersInput{Page: 1, PageSize: 20})
+	if err != nil || len(page.Users) != 1 {
+		t.Fatalf("ListUsers = %#v, %v; want one user", page, err)
+	}
+	userID := page.Users[0].ID
+
+	adminRole, err := queries.GetRoleByName(ctx, "admin")
+	if err != nil {
+		t.Fatalf("GetRoleByName(admin) failed: %v", err)
+	}
+	userRole, err := queries.GetRoleByName(ctx, "user")
+	if err != nil {
+		t.Fatalf("GetRoleByName(user) failed: %v", err)
+	}
+	adminID := uuid.UUID(adminRole.ID.Bytes)
+	userRoleID := uuid.UUID(userRole.ID.Bytes)
+
+	// Replace {user} with {user, admin}: "user" overlaps the current set.
+	if err := repo.ReplaceUserRoles(ctx, domain.ReplaceUserRolesInput{
+		UserID:  userID,
+		RoleIDs: []uuid.UUID{userRoleID, adminID},
+	}); err != nil {
+		t.Fatalf("ReplaceUserRoles (overlapping set) failed: %v", err)
+	}
+	got, err := repo.GetUserByID(ctx, userID)
+	if err != nil || len(got.Roles) != 2 {
+		t.Fatalf("roles after overlapping replace = %v, %v; want admin and user", got.Roles, err)
+	}
+
+	// Shrink to {admin} only.
+	if err := repo.ReplaceUserRoles(ctx, domain.ReplaceUserRolesInput{
+		UserID:  userID,
+		RoleIDs: []uuid.UUID{adminID},
+	}); err != nil {
+		t.Fatalf("ReplaceUserRoles (shrink) failed: %v", err)
+	}
+	got, err = repo.GetUserByID(ctx, userID)
+	if err != nil || len(got.Roles) != 1 || got.Roles[0] != "admin" {
+		t.Fatalf("roles after shrink = %v, %v; want [admin]", got.Roles, err)
+	}
+
+	// A non-existent role id is rejected without changing the assignments.
+	if err := repo.ReplaceUserRoles(ctx, domain.ReplaceUserRolesInput{
+		UserID:  userID,
+		RoleIDs: []uuid.UUID{uuid.New()},
+	}); !errors.Is(err, domain.ErrRoleNotFound) {
+		t.Fatalf("ReplaceUserRoles with unknown role err = %v, want ErrRoleNotFound", err)
+	}
+}

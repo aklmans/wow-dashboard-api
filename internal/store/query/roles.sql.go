@@ -205,12 +205,15 @@ func (q *Queries) ListRoles(ctx context.Context) ([]ListRolesRow, error) {
 }
 
 const replaceRolePermissions = `-- name: ReplaceRolePermissions :exec
-WITH cleared AS (
-    DELETE FROM role_permissions WHERE role_id = $1
+WITH added AS (
+    INSERT INTO role_permissions (role_id, permission)
+    SELECT $1, p
+    FROM unnest($2::text[]) AS p
+    ON CONFLICT (role_id, permission) DO NOTHING
 )
-INSERT INTO role_permissions (role_id, permission)
-SELECT $1, p
-FROM unnest($2::text[]) AS p
+DELETE FROM role_permissions
+WHERE role_permissions.role_id = $1
+  AND role_permissions.permission <> ALL ($2::text[])
 `
 
 type ReplaceRolePermissionsParams struct {
@@ -218,6 +221,9 @@ type ReplaceRolePermissionsParams struct {
 	Permissions []string
 }
 
+// Insert the new permissions first, then delete the ones no longer in the
+// set. A data-modifying CTE shares one snapshot, so a DELETE-then-INSERT would
+// not see its own deletes and would collide on permissions common to both sets.
 func (q *Queries) ReplaceRolePermissions(ctx context.Context, arg ReplaceRolePermissionsParams) error {
 	_, err := q.db.Exec(ctx, replaceRolePermissions, arg.RoleID, arg.Permissions)
 	return err

@@ -88,12 +88,15 @@ func (q *Queries) ListUserRoles(ctx context.Context, userID pgtype.UUID) ([]List
 }
 
 const replaceUserRoles = `-- name: ReplaceUserRoles :exec
-WITH cleared AS (
-    DELETE FROM user_roles WHERE user_id = $1
+WITH added AS (
+    INSERT INTO user_roles (user_id, role_id)
+    SELECT $1, rid
+    FROM unnest($2::uuid[]) AS rid
+    ON CONFLICT (user_id, role_id) DO NOTHING
 )
-INSERT INTO user_roles (user_id, role_id)
-SELECT $1, rid
-FROM unnest($2::uuid[]) AS rid
+DELETE FROM user_roles
+WHERE user_roles.user_id = $1
+  AND user_roles.role_id <> ALL ($2::uuid[])
 `
 
 type ReplaceUserRolesParams struct {
@@ -101,6 +104,9 @@ type ReplaceUserRolesParams struct {
 	RoleIds []pgtype.UUID
 }
 
+// Insert the new assignments first, then delete the ones no longer in the
+// set. A data-modifying CTE shares one snapshot, so a DELETE-then-INSERT would
+// not see its own deletes and would collide on rows common to both sets.
 func (q *Queries) ReplaceUserRoles(ctx context.Context, arg ReplaceUserRolesParams) error {
 	_, err := q.db.Exec(ctx, replaceUserRoles, arg.UserID, arg.RoleIds)
 	return err

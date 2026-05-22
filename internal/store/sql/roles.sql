@@ -52,12 +52,18 @@ SET name = COALESCE(sqlc.narg('name'), name),
 WHERE id = @id;
 
 -- name: ReplaceRolePermissions :exec
-WITH cleared AS (
-    DELETE FROM role_permissions WHERE role_id = @role_id
+-- Insert the new permissions first, then delete the ones no longer in the
+-- set. A data-modifying CTE shares one snapshot, so a DELETE-then-INSERT would
+-- not see its own deletes and would collide on permissions common to both sets.
+WITH added AS (
+    INSERT INTO role_permissions (role_id, permission)
+    SELECT @role_id, p
+    FROM unnest(@permissions::text[]) AS p
+    ON CONFLICT (role_id, permission) DO NOTHING
 )
-INSERT INTO role_permissions (role_id, permission)
-SELECT @role_id, p
-FROM unnest(@permissions::text[]) AS p;
+DELETE FROM role_permissions
+WHERE role_permissions.role_id = @role_id
+  AND role_permissions.permission <> ALL (@permissions::text[]);
 
 -- name: DeleteRole :execrows
 DELETE FROM roles
