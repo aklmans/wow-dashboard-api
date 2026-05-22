@@ -1,0 +1,115 @@
+# OS / filesystem
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.test.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.enc
+
+# Go build outputs
+/bin/
+/build/
+/dist/
+/tmp/
+tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.prof
+*.coverprofile
+coverage.out
+coverage.*
+
+# Go local workspace and dependency cache
+vendor/
+go.work
+go.work.sum
+
+# Air live reload
+.air.log
+build-errors.log
+
+# Logs and runtime state
+logs/
+*.log
+*.pid
+*.seed
+*.sqlite
+*.sqlite3
+*.db
+
+# Database / Docker local volumes
+.data/
+data/
+docker-data/
+postgres-data/
+.pgdata/
+
+# Node/Bun tooling sometimes used for generated clients or docs
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.next/
+
+# Agent and AI tool local state
+# Keep shared guidance/config tracked: AGENTS.md, CLAUDE.md, .air.toml,
+# .env.example, docs/**, and intentionally committed tool config files.
+.codex/*
+!.codex/
+!.codex/README.md
+!.codex/environments/
+!.codex/environments/**
+.codex/cache/
+.codex/logs/
+.codex/tmp/
+.codex/sessions/
+.claude/settings.local.json
+.claude/**/*.local.json
+.claude/logs/
+.claude/shell-snapshots/
+.opencode/
+.opencode-*/
+.junie/cache/
+.junie/logs/
+.junie/tmp/
+.superpowers/
+.agents/cache/
+.agents/tmp/
+.agents/logs/
+.agents/state/
+
+# Generated archives / local exports
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.bak
+*.backup
+
+# Keep these important project files tracked if present
+!.air.toml
+!AGENTS.md
+!CLAUDE.md
+!.env.example

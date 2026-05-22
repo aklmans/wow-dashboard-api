@@ -1,0 +1,80 @@
+#:schema https://json.schemastore.org/any.json
+
+# Air config for the Spec D-D API Go service.
+# Air is for local development only, not production hot deploy.
+
+root = "."
+tmp_dir = "tmp"
+
+# Load local env values during development. Missing files are ignored by Air.
+env_files = [".env", ".env.local"]
+
+[build]
+  # Keep the build target aligned with the planned project layout in AGENTS.md.
+  cmd = "go build -gcflags='all=-N -l' -o ./tmp/wow-dashboard-api ./cmd/api"
+
+  # Air now recommends entrypoint over bin for running the built binary.
+  bin = "tmp/wow-dashboard-api"
+  entrypoint = ["./tmp/wow-dashboard-api"]
+  args_bin = []
+  full_bin = ""
+
+  # Hooks are intentionally empty; add sqlc/migration generation here only if needed.
+  pre_cmd = []
+  post_cmd = []
+
+  # Rebuild when code, API contracts, migrations, config, or templates change.
+  include_ext = ["go", "sql", "toml", "yaml", "yml", "json", "env", "tpl", "tmpl", "html"]
+  include_dir = []
+  include_file = [".env", ".env.local"]
+
+  # Keep generated/build/vendor/editor/frontend output out of the watcher.
+  exclude_dir = ["tmp", "vendor", ".git", ".idea", ".vscode", "node_modules", "dist", "build", "coverage"]
+  exclude_file = []
+  exclude_regex = ['_test\.go', '^docs/plans/.*\.md$']
+  exclude_unchanged = true
+  follow_symlink = false
+  ignore_dangerous_root_dir = false
+
+  # fsnotify is preferred on macOS. Switch to poll=true if file events are unreliable in Docker/VMs.
+  poll = false
+  poll_interval = 500
+
+  delay = 500
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = 500
+  rerun = false
+  rerun_delay = 500
+  log = "build-errors.log"
+
+[build.windows]
+  cmd = "go build -gcflags='all=-N -l' -o ./tmp/wow-dashboard-api.exe ./cmd/api"
+  bin = 'tmp\wow-dashboard-api.exe'
+  entrypoint = ['tmp\wow-dashboard-api.exe']
+
+[log]
+  time = true
+  main_only = false
+  silent = false
+
+[color]
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[misc]
+  clean_on_exit = false
+  startup_banner = "Spec D-D API dev server"
+
+[screen]
+  clear_on_rebuild = true
+  keep_scroll = true
+
+[proxy]
+  # Browser live reload proxy is useful for HTML apps, but this project is an API service.
+  enabled = false
+  proxy_port = 8090
+  app_port = 8080
+  app_start_timeout = 5000
