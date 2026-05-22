@@ -49,6 +49,7 @@ func (q *Queries) CountUsersPage(ctx context.Context, arg CountUsersPageParams) 
 const listUsersPage = `-- name: ListUsersPage :many
 SELECT
     u.id, u.email, u.display_name, u.status, u.created_at, u.updated_at,
+    u.email_verified_at, u.avatar_url, u.phone, u.job_title, u.company, u.last_login_at,
     COALESCE(
         array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL),
         ARRAY[]::text[]
@@ -87,13 +88,19 @@ type ListUsersPageParams struct {
 }
 
 type ListUsersPageRow struct {
-	ID          pgtype.UUID
-	Email       string
-	DisplayName string
-	Status      string
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-	Roles       []string
+	ID              pgtype.UUID
+	Email           string
+	DisplayName     string
+	Status          string
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+	EmailVerifiedAt pgtype.Timestamptz
+	AvatarUrl       pgtype.Text
+	Phone           pgtype.Text
+	JobTitle        pgtype.Text
+	Company         pgtype.Text
+	LastLoginAt     pgtype.Timestamptz
+	Roles           []string
 }
 
 func (q *Queries) ListUsersPage(ctx context.Context, arg ListUsersPageParams) ([]ListUsersPageRow, error) {
@@ -118,6 +125,12 @@ func (q *Queries) ListUsersPage(ctx context.Context, arg ListUsersPageParams) ([
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EmailVerifiedAt,
+			&i.AvatarUrl,
+			&i.Phone,
+			&i.JobTitle,
+			&i.Company,
+			&i.LastLoginAt,
 			&i.Roles,
 		); err != nil {
 			return nil, err

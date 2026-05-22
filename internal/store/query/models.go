@@ -81,6 +81,11 @@ type User struct {
 	FailedLoginCount int32
 	LockedUntil      pgtype.Timestamptz
 	EmailVerifiedAt  pgtype.Timestamptz
+	AvatarUrl        pgtype.Text
+	Phone            pgtype.Text
+	JobTitle         pgtype.Text
+	Company          pgtype.Text
+	LastLoginAt      pgtype.Timestamptz
 }
 
 type UserRole struct {

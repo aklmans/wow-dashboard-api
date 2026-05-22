@@ -46,13 +46,19 @@ type usersListBody struct {
 }
 
 type usersListItem struct {
-	ID          string    `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
-	Email       string    `json:"email" example:"demo@minimals.cc" doc:"User email address"`
-	DisplayName string    `json:"displayName" example:"Demo User" doc:"User display name"`
-	Status      string    `json:"status" example:"active" doc:"User status"`
-	Roles       []string  `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
-	CreatedAt   time.Time `json:"createdAt" doc:"Creation timestamp"`
-	UpdatedAt   time.Time `json:"updatedAt" doc:"Last update timestamp"`
+	ID            string     `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
+	Email         string     `json:"email" example:"demo@minimals.cc" doc:"User email address"`
+	DisplayName   string     `json:"displayName" example:"Demo User" doc:"User display name"`
+	Status        string     `json:"status" example:"active" doc:"User status"`
+	Roles         []string   `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
+	AvatarURL     string     `json:"avatarUrl" example:"" doc:"User avatar image URL; empty when unset"`
+	Phone         string     `json:"phone" example:"" doc:"User phone number; empty when unset"`
+	JobTitle      string     `json:"jobTitle" example:"" doc:"User job title; empty when unset"`
+	Company       string     `json:"company" example:"" doc:"User company; empty when unset"`
+	EmailVerified bool       `json:"emailVerified" example:"false" doc:"Whether the user's email is verified"`
+	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty" doc:"Last successful sign-in time; null if the user has never signed in"`
+	CreatedAt     time.Time  `json:"createdAt" doc:"Creation timestamp"`
+	UpdatedAt     time.Time  `json:"updatedAt" doc:"Last update timestamp"`
 }
 
 type getUserInput struct {
@@ -64,8 +70,12 @@ type updateUserInput struct {
 	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
 	ID            string `path:"id" format:"uuid" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User UUID"`
 	Body          struct {
-		Status  *string   `json:"status,omitempty" enum:"active,disabled" example:"active" doc:"New status; omit to leave unchanged"`
-		RoleIDs *[]string `json:"roleIds,omitempty" minItems:"1" doc:"Replacement set of role ids; omit to leave roles unchanged"`
+		Status    *string   `json:"status,omitempty" enum:"active,disabled" example:"active" doc:"New status; omit to leave unchanged"`
+		RoleIDs   *[]string `json:"roleIds,omitempty" minItems:"1" doc:"Replacement set of role ids; omit to leave roles unchanged"`
+		AvatarURL *string   `json:"avatarUrl,omitempty" maxLength:"256" doc:"New avatar URL; omit to leave unchanged"`
+		Phone     *string   `json:"phone,omitempty" maxLength:"256" doc:"New phone number; omit to leave unchanged"`
+		JobTitle  *string   `json:"jobTitle,omitempty" maxLength:"256" doc:"New job title; omit to leave unchanged"`
+		Company   *string   `json:"company,omitempty" maxLength:"256" doc:"New company; omit to leave unchanged"`
 	}
 }
 
@@ -163,6 +173,10 @@ func RegisterUsers(api huma.API, authSvc UsersAuthenticator, usersSvc UsersServi
 			TargetUserID: input.ID,
 			Status:       input.Body.Status,
 			RoleIDs:      input.Body.RoleIDs,
+			AvatarURL:    input.Body.AvatarURL,
+			Phone:        input.Body.Phone,
+			JobTitle:     input.Body.JobTitle,
+			Company:      input.Body.Company,
 		})
 		if err != nil {
 			return nil, mapUsersError(ctx, err)
@@ -230,12 +244,18 @@ func usersListItemFromDomain(user domain.User) usersListItem {
 		roles = []string{}
 	}
 	return usersListItem{
-		ID:          user.ID.String(),
-		Email:       user.Email,
-		DisplayName: user.DisplayName,
-		Status:      string(user.Status),
-		Roles:       roles,
-		CreatedAt:   user.CreatedAt,
-		UpdatedAt:   user.UpdatedAt,
+		ID:            user.ID.String(),
+		Email:         user.Email,
+		DisplayName:   user.DisplayName,
+		Status:        string(user.Status),
+		Roles:         roles,
+		AvatarURL:     user.AvatarURL,
+		Phone:         user.Phone,
+		JobTitle:      user.JobTitle,
+		Company:       user.Company,
+		EmailVerified: user.EmailVerified,
+		LastLoginAt:   user.LastLoginAt,
+		CreatedAt:     user.CreatedAt,
+		UpdatedAt:     user.UpdatedAt,
 	}
 }

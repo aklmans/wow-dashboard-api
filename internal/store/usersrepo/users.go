@@ -115,13 +115,18 @@ func (s *UserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput
 		return domain.User{}, fmt.Errorf("usersrepo: load user: %w", err)
 	}
 
-	if input.Status != nil {
-		if _, err := q.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
+	if input.Status != nil || input.AvatarURL != nil || input.Phone != nil ||
+		input.JobTitle != nil || input.Company != nil {
+		if err := q.UpdateUserFields(ctx, query.UpdateUserFieldsParams{
 			ID:        pgUUIDFromDomain(input.ID),
-			Status:    string(*input.Status),
+			Status:    pgStatusPtr(input.Status),
+			AvatarUrl: pgTextPtr(input.AvatarURL),
+			Phone:     pgTextPtr(input.Phone),
+			JobTitle:  pgTextPtr(input.JobTitle),
+			Company:   pgTextPtr(input.Company),
 			UpdatedAt: pgTimestamp(input.UpdatedAt),
 		}); err != nil {
-			return domain.User{}, fmt.Errorf("usersrepo: update user status: %w", err)
+			return domain.User{}, fmt.Errorf("usersrepo: update user fields: %w", err)
 		}
 	}
 

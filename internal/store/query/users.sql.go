@@ -13,7 +13,10 @@ import (
 
 const clearLoginFailures = `-- name: ClearLoginFailures :exec
 UPDATE users
-SET failed_login_count = 0, locked_until = NULL, updated_at = $1
+SET failed_login_count = 0,
+    locked_until = NULL,
+    last_login_at = $1,
+    updated_at = $1
 WHERE id = $2
 `
 
@@ -22,7 +25,8 @@ type ClearLoginFailuresParams struct {
 	ID        pgtype.UUID
 }
 
-// Clears the failure counter and any lock after a successful sign-in.
+// Clears the failure counter and lock, and records the sign-in time, after a
+// successful sign-in.
 func (q *Queries) ClearLoginFailures(ctx context.Context, arg ClearLoginFailuresParams) error {
 	_, err := q.db.Exec(ctx, clearLoginFailures, arg.UpdatedAt, arg.ID)
 	return err
@@ -106,7 +110,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 
 const getUserByEmailForAuth = `-- name: GetUserByEmailForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until, email_verified_at
+       failed_login_count, locked_until, email_verified_at,
+       avatar_url, phone, job_title, company, last_login_at
 FROM users
 WHERE email = lower($1)
 `
@@ -125,12 +130,18 @@ func (q *Queries) GetUserByEmailForAuth(ctx context.Context, email string) (User
 		&i.FailedLoginCount,
 		&i.LockedUntil,
 		&i.EmailVerifiedAt,
+		&i.AvatarUrl,
+		&i.Phone,
+		&i.JobTitle,
+		&i.Company,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, display_name, status, created_at, updated_at, email_verified_at
+SELECT id, email, display_name, status, created_at, updated_at, email_verified_at,
+       avatar_url, phone, job_title, company, last_login_at
 FROM users
 WHERE id = $1
 `
@@ -143,6 +154,11 @@ type GetUserByIDRow struct {
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
 	EmailVerifiedAt pgtype.Timestamptz
+	AvatarUrl       pgtype.Text
+	Phone           pgtype.Text
+	JobTitle        pgtype.Text
+	Company         pgtype.Text
+	LastLoginAt     pgtype.Timestamptz
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDRow, error) {
@@ -156,13 +172,19 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.EmailVerifiedAt,
+		&i.AvatarUrl,
+		&i.Phone,
+		&i.JobTitle,
+		&i.Company,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
 
 const getUserByIDForAuth = `-- name: GetUserByIDForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until, email_verified_at
+       failed_login_count, locked_until, email_verified_at,
+       avatar_url, phone, job_title, company, last_login_at
 FROM users
 WHERE id = $1
 `
@@ -181,6 +203,11 @@ func (q *Queries) GetUserByIDForAuth(ctx context.Context, id pgtype.UUID) (User,
 		&i.FailedLoginCount,
 		&i.LockedUntil,
 		&i.EmailVerifiedAt,
+		&i.AvatarUrl,
+		&i.Phone,
+		&i.JobTitle,
+		&i.Company,
+		&i.LastLoginAt,
 	)
 	return i, err
 }
@@ -286,6 +313,43 @@ func (q *Queries) SetEmailVerified(ctx context.Context, arg SetEmailVerifiedPara
 	return err
 }
 
+const updateUserFields = `-- name: UpdateUserFields :exec
+UPDATE users
+SET status = COALESCE($1::text, status),
+    avatar_url = COALESCE($2::text, avatar_url),
+    phone = COALESCE($3::text, phone),
+    job_title = COALESCE($4::text, job_title),
+    company = COALESCE($5::text, company),
+    updated_at = $6
+WHERE id = $7
+`
+
+type UpdateUserFieldsParams struct {
+	Status    pgtype.Text
+	AvatarUrl pgtype.Text
+	Phone     pgtype.Text
+	JobTitle  pgtype.Text
+	Company   pgtype.Text
+	UpdatedAt pgtype.Timestamptz
+	ID        pgtype.UUID
+}
+
+// Applies an admin status and/or profile-field update. Each field uses a
+// nullable arg: NULL leaves the column unchanged, a value (including ”)
+// overwrites it.
+func (q *Queries) UpdateUserFields(ctx context.Context, arg UpdateUserFieldsParams) error {
+	_, err := q.db.Exec(ctx, updateUserFields,
+		arg.Status,
+		arg.AvatarUrl,
+		arg.Phone,
+		arg.JobTitle,
+		arg.Company,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
 const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users
 SET password_hash = $1, updated_at = $2
@@ -301,42 +365,6 @@ type UpdateUserPasswordParams struct {
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateUserPassword, arg.PasswordHash, arg.UpdatedAt, arg.ID)
 	return err
-}
-
-const updateUserStatus = `-- name: UpdateUserStatus :one
-UPDATE users
-SET status = $1, updated_at = $2
-WHERE id = $3
-RETURNING id, email, display_name, status, created_at, updated_at
-`
-
-type UpdateUserStatusParams struct {
-	Status    string
-	UpdatedAt pgtype.Timestamptz
-	ID        pgtype.UUID
-}
-
-type UpdateUserStatusRow struct {
-	ID          pgtype.UUID
-	Email       string
-	DisplayName string
-	Status      string
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-}
-
-func (q *Queries) UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) (UpdateUserStatusRow, error) {
-	row := q.db.QueryRow(ctx, updateUserStatus, arg.Status, arg.UpdatedAt, arg.ID)
-	var i UpdateUserStatusRow
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.DisplayName,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const upsertDemoUser = `-- name: UpsertDemoUser :one

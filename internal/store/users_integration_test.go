@@ -200,38 +200,54 @@ func TestUsersIntegration(t *testing.T) {
 		}
 	})
 
-	// --- UpdateUserStatus (public projection) ---
-	t.Run("UpdateUserStatus", func(t *testing.T) {
+	// --- UpdateUserFields (status + profile, narg semantics) ---
+	t.Run("UpdateUserFields", func(t *testing.T) {
 		alice, err := queries.GetUserByEmail(ctx, "alice@example.com")
 		if err != nil {
 			t.Fatalf("GetUserByEmail failed: %v", err)
 		}
 
-		updated, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
+		if err := queries.UpdateUserFields(ctx, query.UpdateUserFieldsParams{
 			ID:        alice.ID,
-			Status:    "disabled",
+			Status:    pgtype.Text{String: "disabled", Valid: true},
+			JobTitle:  pgtype.Text{String: "Engineer", Valid: true},
 			UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		})
+		}); err != nil {
+			t.Fatalf("UpdateUserFields (disable) failed: %v", err)
+		}
+
+		updated, err := queries.GetUserByID(ctx, alice.ID)
 		if err != nil {
-			t.Fatalf("UpdateUserStatus (disable) failed: %v", err)
+			t.Fatalf("GetUserByID failed: %v", err)
 		}
 		if updated.Status != "disabled" {
 			t.Errorf("expected status 'disabled', got %q", updated.Status)
+		}
+		if updated.JobTitle.String != "Engineer" {
+			t.Errorf("expected job_title 'Engineer', got %q", updated.JobTitle.String)
 		}
 		if !updated.UpdatedAt.Time.After(alice.UpdatedAt.Time) {
 			t.Error("expected updated_at to be refreshed after the update")
 		}
 
-		restored, err := queries.UpdateUserStatus(ctx, query.UpdateUserStatusParams{
+		// A nil narg leaves the column unchanged: restore status without
+		// passing job_title.
+		if err := queries.UpdateUserFields(ctx, query.UpdateUserFieldsParams{
 			ID:        alice.ID,
-			Status:    "active",
+			Status:    pgtype.Text{String: "active", Valid: true},
 			UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
-		})
+		}); err != nil {
+			t.Fatalf("UpdateUserFields (restore) failed: %v", err)
+		}
+		restored, err := queries.GetUserByID(ctx, alice.ID)
 		if err != nil {
-			t.Fatalf("UpdateUserStatus (restore) failed: %v", err)
+			t.Fatalf("GetUserByID failed: %v", err)
 		}
 		if restored.Status != "active" {
 			t.Errorf("restored status = %q, want active", restored.Status)
+		}
+		if restored.JobTitle.String != "Engineer" {
+			t.Errorf("job_title should be unchanged by a nil narg, got %q", restored.JobTitle.String)
 		}
 	})
 

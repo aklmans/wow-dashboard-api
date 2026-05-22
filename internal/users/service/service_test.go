@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -167,6 +168,59 @@ func TestServiceUpdateUserReplacesRoles(t *testing.T) {
 	}
 	if store.updateInput.Status != nil {
 		t.Fatalf("update status = %v, want nil for a roles-only update", store.updateInput.Status)
+	}
+}
+
+func TestServiceUpdateUserChangesProfileFields(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID}}
+	svc := service.NewService(store)
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  actorID.String(),
+		TargetUserID: targetID.String(),
+		Phone:        strptr("  +1 555 0100  "),
+		JobTitle:     strptr("Engineer"),
+		Company:      strptr("Acme"),
+		AvatarURL:    strptr("https://cdn.example.com/a.png"),
+	}); err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	// Profile fields are trimmed and forwarded to the store.
+	if store.updateInput.Phone == nil || *store.updateInput.Phone != "+1 555 0100" {
+		t.Fatalf("update Phone = %v, want trimmed value", store.updateInput.Phone)
+	}
+	if store.updateInput.JobTitle == nil || *store.updateInput.JobTitle != "Engineer" {
+		t.Fatalf("update JobTitle = %v, want Engineer", store.updateInput.JobTitle)
+	}
+	if store.updateInput.Company == nil || *store.updateInput.Company != "Acme" {
+		t.Fatalf("update Company = %v, want Acme", store.updateInput.Company)
+	}
+	if store.updateInput.AvatarURL == nil {
+		t.Fatal("update AvatarURL was not forwarded to the store")
+	}
+	// A field that was not provided stays nil.
+	if store.updateInput.Status != nil {
+		t.Fatalf("update Status = %v, want nil for a profile-only update", store.updateInput.Status)
+	}
+}
+
+func TestServiceUpdateUserRejectsOverlongProfileField(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	store := &fakeUserStore{}
+	svc := service.NewService(store)
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  actorID.String(),
+		TargetUserID: targetID.String(),
+		JobTitle:     strptr(strings.Repeat("x", 257)),
+	}); !errors.Is(err, service.ErrInvalidInput) {
+		t.Fatalf("UpdateUser error = %v, want ErrInvalidInput", err)
+	}
+	if store.updateCalled {
+		t.Fatal("store.UpdateUser was called despite an invalid profile field")
 	}
 }
 

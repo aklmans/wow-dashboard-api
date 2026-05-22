@@ -47,6 +47,10 @@ type UpdateUserInput struct {
 	TargetUserID string
 	Status       *string
 	RoleIDs      *[]string
+	AvatarURL    *string
+	Phone        *string
+	JobTitle     *string
+	Company      *string
 }
 
 type Service struct {
@@ -122,8 +126,9 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 	if actorID == targetID {
 		return domain.User{}, ErrSelfModification
 	}
-	if input.Status == nil && input.RoleIDs == nil {
-		return domain.User{}, fmt.Errorf("%w: at least one of status or roleIds must be provided", ErrInvalidInput)
+	if input.Status == nil && input.RoleIDs == nil && input.AvatarURL == nil &&
+		input.Phone == nil && input.JobTitle == nil && input.Company == nil {
+		return domain.User{}, fmt.Errorf("%w: at least one field must be provided", ErrInvalidInput)
 	}
 
 	// Normalize and validate every field up front so a malformed input never
@@ -152,6 +157,26 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		auditRoleIDs = make([]string, len(roleIDs))
 		for i, id := range roleIDs {
 			auditRoleIDs[i] = id.String()
+		}
+	}
+
+	for _, field := range []struct {
+		name  string
+		raw   *string
+		apply func(*string)
+	}{
+		{"avatarUrl", input.AvatarURL, func(v *string) { update.AvatarURL = v }},
+		{"phone", input.Phone, func(v *string) { update.Phone = v }},
+		{"jobTitle", input.JobTitle, func(v *string) { update.JobTitle = v }},
+		{"company", input.Company, func(v *string) { update.Company = v }},
+	} {
+		normalized, err := normalizeProfileField(field.name, field.raw)
+		if err != nil {
+			return domain.User{}, err
+		}
+		if normalized != nil {
+			field.apply(normalized)
+			changedFields = append(changedFields, field.name)
 		}
 	}
 
@@ -270,4 +295,20 @@ func normalizeStatusFilter(value string) (domain.UserStatus, error) {
 		return "", nil
 	}
 	return normalizeStatus(value)
+}
+
+// normalizeProfileField trims an optional profile field and enforces a length
+// cap. A nil pointer is returned unchanged so an omitted field stays omitted;
+// a provided value (including an empty string, which clears the field) is
+// trimmed and bounds-checked.
+func normalizeProfileField(name string, value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	const maxProfileFieldLen = 256
+	trimmed := strings.TrimSpace(*value)
+	if len(trimmed) > maxProfileFieldLen {
+		return nil, fmt.Errorf("%w: %s must be %d characters or fewer", ErrInvalidInput, name, maxProfileFieldLen)
+	}
+	return &trimmed, nil
 }

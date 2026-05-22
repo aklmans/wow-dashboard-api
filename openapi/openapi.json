@@ -1307,6 +1307,26 @@
             "readOnly": true,
             "type": "string"
           },
+          "avatarUrl": {
+            "description": "New avatar URL; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "company": {
+            "description": "New company; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "jobTitle": {
+            "description": "New job title; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "phone": {
+            "description": "New phone number; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          },
           "roleIds": {
             "description": "Replacement set of role ids; omit to leave roles unchanged",
             "items": {
@@ -1406,6 +1426,20 @@
       "UsersListItem": {
         "additionalProperties": false,
         "properties": {
+          "avatarUrl": {
+            "description": "User avatar image URL; empty when unset",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "company": {
+            "description": "User company; empty when unset",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
           "createdAt": {
             "description": "Creation timestamp",
             "format": "date-time",
@@ -1425,10 +1459,36 @@
             ],
             "type": "string"
           },
+          "emailVerified": {
+            "description": "Whether the user's email is verified",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "id": {
             "description": "User identifier",
             "examples": [
               "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+            ],
+            "type": "string"
+          },
+          "jobTitle": {
+            "description": "User job title; empty when unset",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "lastLoginAt": {
+            "description": "Last successful sign-in time; null if the user has never signed in",
+            "format": "date-time",
+            "type": "string"
+          },
+          "phone": {
+            "description": "User phone number; empty when unset",
+            "examples": [
+              ""
             ],
             "type": "string"
           },
@@ -1458,6 +1518,11 @@
           "displayName",
           "status",
           "roles",
+          "avatarUrl",
+          "phone",
+          "jobTitle",
+          "company",
+          "emailVerified",
           "createdAt",
           "updatedAt"
         ],

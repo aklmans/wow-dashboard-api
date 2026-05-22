@@ -14,7 +14,8 @@ SET display_name = EXCLUDED.display_name,
 RETURNING id, email, display_name, status, created_at, updated_at;
 
 -- name: GetUserByID :one
-SELECT id, email, display_name, status, created_at, updated_at, email_verified_at
+SELECT id, email, display_name, status, created_at, updated_at, email_verified_at,
+       avatar_url, phone, job_title, company, last_login_at
 FROM users
 WHERE id = @id;
 
@@ -25,13 +26,15 @@ WHERE email = lower(@email);
 
 -- name: GetUserByEmailForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until, email_verified_at
+       failed_login_count, locked_until, email_verified_at,
+       avatar_url, phone, job_title, company, last_login_at
 FROM users
 WHERE email = lower(@email);
 
 -- name: GetUserByIDForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
-       failed_login_count, locked_until, email_verified_at
+       failed_login_count, locked_until, email_verified_at,
+       avatar_url, phone, job_title, company, last_login_at
 FROM users
 WHERE id = @id;
 
@@ -51,11 +54,18 @@ FROM users
 ORDER BY created_at DESC
 LIMIT @limit_val OFFSET @offset_val;
 
--- name: UpdateUserStatus :one
+-- name: UpdateUserFields :exec
+-- Applies an admin status and/or profile-field update. Each field uses a
+-- nullable arg: NULL leaves the column unchanged, a value (including '')
+-- overwrites it.
 UPDATE users
-SET status = @status, updated_at = @updated_at
-WHERE id = @id
-RETURNING id, email, display_name, status, created_at, updated_at;
+SET status = COALESCE(sqlc.narg('status')::text, status),
+    avatar_url = COALESCE(sqlc.narg('avatar_url')::text, avatar_url),
+    phone = COALESCE(sqlc.narg('phone')::text, phone),
+    job_title = COALESCE(sqlc.narg('job_title')::text, job_title),
+    company = COALESCE(sqlc.narg('company')::text, company),
+    updated_at = @updated_at
+WHERE id = @id;
 
 -- name: RegisterLoginFailure :one
 -- Records a failed sign-in. On reaching @max_attempts the counter resets and
@@ -74,7 +84,11 @@ WHERE id = @id
 RETURNING locked_until;
 
 -- name: ClearLoginFailures :exec
--- Clears the failure counter and any lock after a successful sign-in.
+-- Clears the failure counter and lock, and records the sign-in time, after a
+-- successful sign-in.
 UPDATE users
-SET failed_login_count = 0, locked_until = NULL, updated_at = @updated_at
+SET failed_login_count = 0,
+    locked_until = NULL,
+    last_login_at = @updated_at,
+    updated_at = @updated_at
 WHERE id = @id;

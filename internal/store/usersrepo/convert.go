@@ -52,6 +52,43 @@ func domainTimestamp(t pgtype.Timestamptz) (time.Time, error) {
 	return t.Time, nil
 }
 
+// domainTimestampPtr maps a nullable timestamp to a *time.Time, used for
+// optional columns such as last_login_at.
+func domainTimestampPtr(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	v := t.Time
+	return &v
+}
+
+// pgTextValue maps a nullable text column to a plain string, treating NULL as
+// the empty string.
+func pgTextValue(t pgtype.Text) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.String
+}
+
+// pgTextPtr maps an optional update field to a nullable text arg: a nil
+// pointer leaves the column unchanged, a non-nil pointer (including "")
+// overwrites it.
+func pgTextPtr(value *string) pgtype.Text {
+	if value == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *value, Valid: true}
+}
+
+// pgStatusPtr maps an optional status update to a nullable text arg.
+func pgStatusPtr(status *domain.UserStatus) pgtype.Text {
+	if status == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: string(*status), Valid: true}
+}
+
 func userFromListRow(row query.ListUsersPageRow) (domain.User, error) {
 	id, err := domainUUID(row.ID)
 	if err != nil {
@@ -70,13 +107,19 @@ func userFromListRow(row query.ListUsersPageRow) (domain.User, error) {
 		roles = []string{}
 	}
 	return domain.User{
-		ID:          id,
-		Email:       row.Email,
-		DisplayName: row.DisplayName,
-		Status:      domain.UserStatus(row.Status),
-		Roles:       roles,
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
+		ID:            id,
+		Email:         row.Email,
+		DisplayName:   row.DisplayName,
+		Status:        domain.UserStatus(row.Status),
+		Roles:         roles,
+		AvatarURL:     pgTextValue(row.AvatarUrl),
+		Phone:         pgTextValue(row.Phone),
+		JobTitle:      pgTextValue(row.JobTitle),
+		Company:       pgTextValue(row.Company),
+		EmailVerified: row.EmailVerifiedAt.Valid,
+		LastLoginAt:   domainTimestampPtr(row.LastLoginAt),
+		CreatedAt:     createdAt,
+		UpdatedAt:     updatedAt,
 	}, nil
 }
 
@@ -96,12 +139,18 @@ func userFromDetailRow(row query.GetUserByIDRow) (domain.User, error) {
 		return domain.User{}, err
 	}
 	return domain.User{
-		ID:          id,
-		Email:       row.Email,
-		DisplayName: row.DisplayName,
-		Status:      domain.UserStatus(row.Status),
-		Roles:       []string{},
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
+		ID:            id,
+		Email:         row.Email,
+		DisplayName:   row.DisplayName,
+		Status:        domain.UserStatus(row.Status),
+		Roles:         []string{},
+		AvatarURL:     pgTextValue(row.AvatarUrl),
+		Phone:         pgTextValue(row.Phone),
+		JobTitle:      pgTextValue(row.JobTitle),
+		Company:       pgTextValue(row.Company),
+		EmailVerified: row.EmailVerifiedAt.Valid,
+		LastLoginAt:   domainTimestampPtr(row.LastLoginAt),
+		CreatedAt:     createdAt,
+		UpdatedAt:     updatedAt,
 	}, nil
 }

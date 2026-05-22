@@ -1,6 +1,7 @@
 -- name: ListUsersPage :many
 SELECT
     u.id, u.email, u.display_name, u.status, u.created_at, u.updated_at,
+    u.email_verified_at, u.avatar_url, u.phone, u.job_title, u.company, u.last_login_at,
     COALESCE(
         array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL),
         ARRAY[]::text[]

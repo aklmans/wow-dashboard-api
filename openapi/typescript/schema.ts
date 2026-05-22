@@ -1128,6 +1128,14 @@ export interface components {
              * @example https://example.com/schemas/UpdateUserInputBody.json
              */
             readonly $schema?: string;
+            /** @description New avatar URL; omit to leave unchanged */
+            avatarUrl?: string;
+            /** @description New company; omit to leave unchanged */
+            company?: string;
+            /** @description New job title; omit to leave unchanged */
+            jobTitle?: string;
+            /** @description New phone number; omit to leave unchanged */
+            phone?: string;
             /** @description Replacement set of role ids; omit to leave roles unchanged */
             roleIds?: string[];
             /**
@@ -1177,6 +1185,16 @@ export interface components {
         };
         UsersListItem: {
             /**
+             * @description User avatar image URL; empty when unset
+             * @example
+             */
+            avatarUrl: string;
+            /**
+             * @description User company; empty when unset
+             * @example
+             */
+            company: string;
+            /**
              * Format: date-time
              * @description Creation timestamp
              */
@@ -1192,10 +1210,30 @@ export interface components {
              */
             email: string;
             /**
+             * @description Whether the user's email is verified
+             * @example false
+             */
+            emailVerified: boolean;
+            /**
              * @description User identifier
              * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
              */
             id: string;
+            /**
+             * @description User job title; empty when unset
+             * @example
+             */
+            jobTitle: string;
+            /**
+             * Format: date-time
+             * @description Last successful sign-in time; null if the user has never signed in
+             */
+            lastLoginAt?: string;
+            /**
+             * @description User phone number; empty when unset
+             * @example
+             */
+            phone: string;
             /** @description Names of the roles assigned to the user */
             roles: string[];
             /**

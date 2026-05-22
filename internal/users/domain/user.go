@@ -23,15 +23,23 @@ const (
 	UserStatusDisabled UserStatus = "disabled"
 )
 
-// User is a user enriched with the names of every role assigned to them.
+// User is a user enriched with the names of every role assigned to them and
+// their profile fields. AvatarURL, Phone, JobTitle, and Company are empty when
+// unset; LastLoginAt is nil until the user's first successful sign-in.
 type User struct {
-	ID          uuid.UUID
-	Email       string
-	DisplayName string
-	Status      UserStatus
-	Roles       []string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            uuid.UUID
+	Email         string
+	DisplayName   string
+	Status        UserStatus
+	Roles         []string
+	AvatarURL     string
+	Phone         string
+	JobTitle      string
+	Company       string
+	EmailVerified bool
+	LastLoginAt   *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type ListUsersInput struct {
@@ -58,5 +66,9 @@ type UpdateUserInput struct {
 	ID        uuid.UUID
 	Status    *UserStatus
 	RoleIDs   []uuid.UUID
+	AvatarURL *string
+	Phone     *string
+	JobTitle  *string
+	Company   *string
 	UpdatedAt time.Time
 }
