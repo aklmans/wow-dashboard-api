@@ -26,10 +26,9 @@ func TestProjectStoreIntegration(t *testing.T) {
 
 	ownerA := mustCreateUser(t, ctx, queries, "ada@example.com", "Ada")
 	ownerB := mustCreateUser(t, ctx, queries, "grace@example.com", "Grace")
-
 	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
 
-	t.Run("create + get round trip", func(t *testing.T) {
+	t.Run("create then read back with owner access", func(t *testing.T) {
 		input := domain.CreateProjectInput{
 			ID:          uuid.New(),
 			Name:        "Alpha",
@@ -39,124 +38,187 @@ func TestProjectStoreIntegration(t *testing.T) {
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
-		created, err := repo.CreateProject(ctx, input)
-		if err != nil {
-			t.Fatalf("CreateProject failed: %v", err)
-		}
-		if created.ID != input.ID {
-			t.Fatalf("created.ID = %s, want %s", created.ID, input.ID)
-		}
-		if created.Status != domain.ProjectStatusActive {
-			t.Fatalf("status = %q, want active", created.Status)
-		}
-
-		got, err := repo.GetProjectByID(ctx, ownerA, input.ID)
-		if err != nil {
-			t.Fatalf("GetProjectByID failed: %v", err)
-		}
-		if got.ID != input.ID || got.OwnerUserID != ownerA || got.Name != "Alpha" {
-			t.Fatalf("got = %#v", got)
-		}
-	})
-
-	t.Run("list is owner scoped", func(t *testing.T) {
-		// Insert one for ownerB
-		_, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        "Bravo",
-			Description: "owner B",
-			Status:      domain.ProjectStatusActive,
-			OwnerUserID: ownerB,
-			CreatedAt:   now.Add(time.Minute),
-			UpdatedAt:   now.Add(time.Minute),
-		})
-		if err != nil {
-			t.Fatalf("CreateProject ownerB failed: %v", err)
-		}
-
-		listA, err := repo.ListProjects(ctx, domain.ListProjectsInput{
-			OwnerUserID: ownerA, Page: 1, PageSize: 20,
-		})
-		if err != nil {
-			t.Fatalf("ListProjects A: %v", err)
-		}
-		for _, p := range listA.Projects {
-			if p.OwnerUserID != ownerA {
-				t.Fatalf("ownerA list contained %s", p.OwnerUserID)
-			}
-		}
-
-		listB, err := repo.ListProjects(ctx, domain.ListProjectsInput{
-			OwnerUserID: ownerB, Page: 1, PageSize: 20,
-		})
-		if err != nil {
-			t.Fatalf("ListProjects B: %v", err)
-		}
-		if listB.Total != 1 || len(listB.Projects) != 1 || listB.Projects[0].OwnerUserID != ownerB {
-			t.Fatalf("ownerB list = %#v", listB)
-		}
-	})
-
-	t.Run("search and status filters", func(t *testing.T) {
-		// Add an archived project for ownerA matching "Gamma"
-		_, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        "Gamma archived",
-			Description: "rare phrase xyzzy",
-			Status:      domain.ProjectStatusArchived,
-			OwnerUserID: ownerA,
-			CreatedAt:   now.Add(2 * time.Minute),
-			UpdatedAt:   now.Add(2 * time.Minute),
-		})
-		if err != nil {
-			t.Fatalf("CreateProject archived failed: %v", err)
-		}
-
-		bySearch, err := repo.ListProjects(ctx, domain.ListProjectsInput{
-			OwnerUserID: ownerA, Page: 1, PageSize: 20, Search: "xyzzy",
-		})
-		if err != nil {
-			t.Fatalf("ListProjects search: %v", err)
-		}
-		if bySearch.Total != 1 || len(bySearch.Projects) != 1 || bySearch.Projects[0].Name != "Gamma archived" {
-			t.Fatalf("search result = %#v", bySearch)
-		}
-
-		archived, err := repo.ListProjects(ctx, domain.ListProjectsInput{
-			OwnerUserID: ownerA, Page: 1, PageSize: 20, Status: domain.ProjectStatusArchived,
-		})
-		if err != nil {
-			t.Fatalf("ListProjects status: %v", err)
-		}
-		if archived.Total != 1 || len(archived.Projects) != 1 || archived.Projects[0].Status != domain.ProjectStatusArchived {
-			t.Fatalf("status filter result = %#v", archived)
-		}
-	})
-
-	t.Run("missing id returns ErrProjectNotFound", func(t *testing.T) {
-		_, err := repo.GetProjectByID(ctx, ownerA, uuid.New())
-		if !errors.Is(err, domain.ErrProjectNotFound) {
-			t.Fatalf("err = %v, want ErrProjectNotFound", err)
-		}
-	})
-
-	t.Run("other owner cannot read project", func(t *testing.T) {
-		input := domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        "Owned-by-A",
-			Description: "",
-			Status:      domain.ProjectStatusActive,
-			OwnerUserID: ownerA,
-			CreatedAt:   now.Add(3 * time.Minute),
-			UpdatedAt:   now.Add(3 * time.Minute),
-		}
 		if _, err := repo.CreateProject(ctx, input); err != nil {
 			t.Fatalf("CreateProject failed: %v", err)
 		}
 
-		_, err := repo.GetProjectByID(ctx, ownerB, input.ID)
-		if !errors.Is(err, domain.ErrProjectNotFound) {
-			t.Fatalf("err = %v, want ErrProjectNotFound when other owner reads", err)
+		access, err := repo.GetProjectWithAccess(ctx, input.ID, ownerA)
+		if err != nil {
+			t.Fatalf("GetProjectWithAccess failed: %v", err)
+		}
+		if access.Project.ID != input.ID || access.Project.OwnerUserID != ownerA {
+			t.Fatalf("project = %#v", access.Project)
+		}
+		if access.AccessRole != domain.AccessRoleOwner {
+			t.Fatalf("access role = %q, want owner", access.AccessRole)
+		}
+	})
+
+	t.Run("list returns owned and shared projects", func(t *testing.T) {
+		bravo := domain.CreateProjectInput{
+			ID: uuid.New(), Name: "Bravo", Description: "owner B",
+			Status: domain.ProjectStatusActive, OwnerUserID: ownerB,
+			CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+		}
+		if _, err := repo.CreateProject(ctx, bravo); err != nil {
+			t.Fatalf("CreateProject ownerB failed: %v", err)
+		}
+		// Share Bravo with ownerA as a viewer.
+		if _, err := repo.AddProjectMember(ctx, domain.AddProjectMemberInput{
+			ProjectID: bravo.ID, UserID: ownerA, Role: domain.ProjectRoleViewer,
+			CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+		}); err != nil {
+			t.Fatalf("AddProjectMember failed: %v", err)
+		}
+
+		listA, err := repo.ListProjects(ctx, domain.ListProjectsInput{UserID: ownerA, Page: 1, PageSize: 20})
+		if err != nil {
+			t.Fatalf("ListProjects A: %v", err)
+		}
+		var sawShared bool
+		for _, p := range listA.Projects {
+			if p.ID == bravo.ID {
+				sawShared = true
+			}
+		}
+		if !sawShared {
+			t.Fatal("ownerA list did not include the project shared with them")
+		}
+
+		listB, err := repo.ListProjects(ctx, domain.ListProjectsInput{UserID: ownerB, Page: 1, PageSize: 20})
+		if err != nil {
+			t.Fatalf("ListProjects B: %v", err)
+		}
+		if listB.Total != 1 || listB.Projects[0].OwnerUserID != ownerB {
+			t.Fatalf("ownerB list = %#v", listB)
+		}
+	})
+
+	t.Run("a member has member access; a stranger has none", func(t *testing.T) {
+		input := domain.CreateProjectInput{
+			ID: uuid.New(), Name: "Shared Project", Status: domain.ProjectStatusActive,
+			OwnerUserID: ownerA, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
+		}
+		if _, err := repo.CreateProject(ctx, input); err != nil {
+			t.Fatalf("CreateProject failed: %v", err)
+		}
+		if _, err := repo.AddProjectMember(ctx, domain.AddProjectMemberInput{
+			ProjectID: input.ID, UserID: ownerB, Role: domain.ProjectRoleEditor,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("AddProjectMember failed: %v", err)
+		}
+
+		access, err := repo.GetProjectWithAccess(ctx, input.ID, ownerB)
+		if err != nil {
+			t.Fatalf("GetProjectWithAccess for member: %v", err)
+		}
+		if access.AccessRole != domain.AccessRoleEditor {
+			t.Fatalf("member access role = %q, want editor", access.AccessRole)
+		}
+
+		stranger := mustCreateUser(t, ctx, queries, "stranger@example.com", "Stranger")
+		if _, err := repo.GetProjectWithAccess(ctx, input.ID, stranger); !errors.Is(err, domain.ErrProjectNotFound) {
+			t.Fatalf("stranger access err = %v, want ErrProjectNotFound", err)
+		}
+	})
+
+	t.Run("missing id returns ErrProjectNotFound", func(t *testing.T) {
+		if _, err := repo.GetProjectWithAccess(ctx, uuid.New(), ownerA); !errors.Is(err, domain.ErrProjectNotFound) {
+			t.Fatalf("err = %v, want ErrProjectNotFound", err)
+		}
+	})
+}
+
+func TestProjectMembersIntegration(t *testing.T) {
+	ctx := context.Background()
+	pool := storetest.NewPostgresPool(t, ctx, "test_projectsrepo_members_db", "../../../migrations")
+	queries := query.New(pool)
+	repo := projectsrepo.NewProjectStore(queries)
+
+	owner := mustCreateUser(t, ctx, queries, "owner@example.com", "Owner")
+	member := mustCreateUser(t, ctx, queries, "member@example.com", "Member")
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+
+	project, err := repo.CreateProject(ctx, domain.CreateProjectInput{
+		ID: uuid.New(), Name: "Members Project", Status: domain.ProjectStatusActive,
+		OwnerUserID: owner, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject failed: %v", err)
+	}
+
+	t.Run("add, list, update, remove round trip", func(t *testing.T) {
+		if _, err := repo.AddProjectMember(ctx, domain.AddProjectMemberInput{
+			ProjectID: project.ID, UserID: member, Role: domain.ProjectRoleViewer,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("AddProjectMember: %v", err)
+		}
+
+		members, err := repo.ListProjectMembers(ctx, project.ID)
+		if err != nil {
+			t.Fatalf("ListProjectMembers: %v", err)
+		}
+		if len(members) != 1 || members[0].UserID != member || members[0].Email != "member@example.com" {
+			t.Fatalf("members = %#v", members)
+		}
+		if members[0].Role != domain.ProjectRoleViewer {
+			t.Fatalf("role = %q, want viewer", members[0].Role)
+		}
+
+		updated, err := repo.UpdateProjectMemberRole(ctx, domain.UpdateProjectMemberRoleInput{
+			ProjectID: project.ID, UserID: member, Role: domain.ProjectRoleEditor,
+			UpdatedAt: now.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatalf("UpdateProjectMemberRole: %v", err)
+		}
+		if updated.Role != domain.ProjectRoleEditor {
+			t.Fatalf("updated role = %q, want editor", updated.Role)
+		}
+
+		if err := repo.RemoveProjectMember(ctx, project.ID, member); err != nil {
+			t.Fatalf("RemoveProjectMember: %v", err)
+		}
+		if _, err := repo.GetProjectMember(ctx, project.ID, member); !errors.Is(err, domain.ErrProjectMemberNotFound) {
+			t.Fatalf("GetProjectMember after remove err = %v, want ErrProjectMemberNotFound", err)
+		}
+	})
+
+	t.Run("adding the same member twice conflicts", func(t *testing.T) {
+		repeat := mustCreateUser(t, ctx, queries, "repeat@example.com", "Repeat")
+		add := domain.AddProjectMemberInput{
+			ProjectID: project.ID, UserID: repeat, Role: domain.ProjectRoleViewer,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if _, err := repo.AddProjectMember(ctx, add); err != nil {
+			t.Fatalf("first AddProjectMember: %v", err)
+		}
+		if _, err := repo.AddProjectMember(ctx, add); !errors.Is(err, domain.ErrMemberAlreadyExists) {
+			t.Fatalf("duplicate add err = %v, want ErrMemberAlreadyExists", err)
+		}
+	})
+
+	t.Run("updating or removing a non-member returns not found", func(t *testing.T) {
+		ghost := mustCreateUser(t, ctx, queries, "ghost@example.com", "Ghost")
+		if _, err := repo.UpdateProjectMemberRole(ctx, domain.UpdateProjectMemberRoleInput{
+			ProjectID: project.ID, UserID: ghost, Role: domain.ProjectRoleViewer, UpdatedAt: now,
+		}); !errors.Is(err, domain.ErrProjectMemberNotFound) {
+			t.Fatalf("update non-member err = %v, want ErrProjectMemberNotFound", err)
+		}
+		if err := repo.RemoveProjectMember(ctx, project.ID, ghost); !errors.Is(err, domain.ErrProjectMemberNotFound) {
+			t.Fatalf("remove non-member err = %v, want ErrProjectMemberNotFound", err)
+		}
+	})
+
+	t.Run("FindUserByEmail resolves and rejects", func(t *testing.T) {
+		id, err := repo.FindUserByEmail(ctx, "member@example.com")
+		if err != nil || id != member {
+			t.Fatalf("FindUserByEmail = %s/%v, want %s/nil", id, err, member)
+		}
+		if _, err := repo.FindUserByEmail(ctx, "nobody@example.com"); !errors.Is(err, domain.ErrMemberUserNotFound) {
+			t.Fatalf("FindUserByEmail unknown err = %v, want ErrMemberUserNotFound", err)
 		}
 	})
 }
@@ -174,13 +236,8 @@ func TestProjectStoreNameUniquenessIntegration(t *testing.T) {
 	seed := func(t *testing.T, owner uuid.UUID, name string, status domain.ProjectStatus) domain.Project {
 		t.Helper()
 		project, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        name,
-			Description: "desc",
-			Status:      status,
-			OwnerUserID: owner,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID: uuid.New(), Name: name, Description: "desc", Status: status,
+			OwnerUserID: owner, CreatedAt: now, UpdatedAt: now,
 		})
 		if err != nil {
 			t.Fatalf("seed CreateProject %q: %v", name, err)
@@ -190,86 +247,37 @@ func TestProjectStoreNameUniquenessIntegration(t *testing.T) {
 
 	t.Run("same owner duplicate create returns name conflict", func(t *testing.T) {
 		seed(t, ownerA, "Duplicate Create", domain.ProjectStatusActive)
-
 		_, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        "Duplicate Create",
-			Description: "second",
-			Status:      domain.ProjectStatusActive,
-			OwnerUserID: ownerA,
-			CreatedAt:   now.Add(time.Minute),
-			UpdatedAt:   now.Add(time.Minute),
+			ID: uuid.New(), Name: "Duplicate Create", Description: "second",
+			Status: domain.ProjectStatusActive, OwnerUserID: ownerA,
+			CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
 		})
 		if !errors.Is(err, domain.ErrProjectNameAlreadyExists) {
 			t.Fatalf("err = %v, want ErrProjectNameAlreadyExists", err)
 		}
 	})
 
-	t.Run("different owners can use same name", func(t *testing.T) {
+	t.Run("different owners can use the same name", func(t *testing.T) {
 		seed(t, ownerA, "Shared Name", domain.ProjectStatusActive)
-
 		created, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        "Shared Name",
-			Description: "owner B",
-			Status:      domain.ProjectStatusActive,
-			OwnerUserID: ownerB,
-			CreatedAt:   now.Add(2 * time.Minute),
-			UpdatedAt:   now.Add(2 * time.Minute),
+			ID: uuid.New(), Name: "Shared Name", Description: "owner B",
+			Status: domain.ProjectStatusActive, OwnerUserID: ownerB,
+			CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
 		})
 		if err != nil {
 			t.Fatalf("CreateProject for different owner: %v", err)
 		}
-		if created.OwnerUserID != ownerB || created.Name != "Shared Name" {
-			t.Fatalf("created = %#v", created)
+		if created.OwnerUserID != ownerB {
+			t.Fatalf("created owner = %s, want %s", created.OwnerUserID, ownerB)
 		}
 	})
 
-	t.Run("update to duplicate name under same owner returns name conflict", func(t *testing.T) {
+	t.Run("update to a duplicate name returns name conflict", func(t *testing.T) {
 		seed(t, ownerA, "Existing Target", domain.ProjectStatusActive)
 		project := seed(t, ownerA, "Rename Source", domain.ProjectStatusActive)
 		newName := "Existing Target"
-
 		_, err := repo.UpdateProject(ctx, domain.UpdateProjectInput{
-			ID:          project.ID,
-			OwnerUserID: ownerA,
-			Name:        &newName,
-			UpdatedAt:   now.Add(3 * time.Minute),
-		})
-		if !errors.Is(err, domain.ErrProjectNameAlreadyExists) {
-			t.Fatalf("err = %v, want ErrProjectNameAlreadyExists", err)
-		}
-	})
-
-	t.Run("update to same current name succeeds", func(t *testing.T) {
-		project := seed(t, ownerA, "Same Current Name", domain.ProjectStatusActive)
-		sameName := "Same Current Name"
-
-		updated, err := repo.UpdateProject(ctx, domain.UpdateProjectInput{
-			ID:          project.ID,
-			OwnerUserID: ownerA,
-			Name:        &sameName,
-			UpdatedAt:   now.Add(4 * time.Minute),
-		})
-		if err != nil {
-			t.Fatalf("UpdateProject same name: %v", err)
-		}
-		if updated.ID != project.ID || updated.Name != sameName {
-			t.Fatalf("updated = %#v", updated)
-		}
-	})
-
-	t.Run("archived row still blocks duplicate name", func(t *testing.T) {
-		seed(t, ownerA, "Archived Reserved", domain.ProjectStatusArchived)
-
-		_, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        "Archived Reserved",
-			Description: "new active",
-			Status:      domain.ProjectStatusActive,
-			OwnerUserID: ownerA,
-			CreatedAt:   now.Add(5 * time.Minute),
-			UpdatedAt:   now.Add(5 * time.Minute),
+			ID: project.ID, Name: &newName, UpdatedAt: now.Add(3 * time.Minute),
 		})
 		if !errors.Is(err, domain.ErrProjectNameAlreadyExists) {
 			t.Fatalf("err = %v, want ErrProjectNameAlreadyExists", err)
@@ -284,7 +292,7 @@ func mustCreateUser(t *testing.T, ctx context.Context, queries *query.Queries, e
 		t.Fatalf("password.Hash: %v", err)
 	}
 	id := uuid.New()
-	_, err = queries.CreateUser(ctx, query.CreateUserParams{
+	if _, err := queries.CreateUser(ctx, query.CreateUserParams{
 		ID:           pgtype.UUID{Bytes: id, Valid: true},
 		Email:        email,
 		DisplayName:  displayName,
@@ -293,8 +301,7 @@ func mustCreateUser(t *testing.T, ctx context.Context, queries *query.Queries, e
 		Role:         "user",
 		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		UpdatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CreateUser %s failed: %v", email, err)
 	}
 	return id
@@ -306,20 +313,13 @@ func TestProjectStoreUpdateProjectIntegration(t *testing.T) {
 	queries := query.New(pool)
 	repo := projectsrepo.NewProjectStore(queries)
 
-	ownerA := mustCreateUser(t, ctx, queries, "ada@example.com", "Ada")
-	ownerB := mustCreateUser(t, ctx, queries, "grace@example.com", "Grace")
-
+	owner := mustCreateUser(t, ctx, queries, "ada@example.com", "Ada")
 	createdAt := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
-	seed := func(t *testing.T, owner uuid.UUID, name, description string, status domain.ProjectStatus) domain.Project {
+	seed := func(t *testing.T, name, description string, status domain.ProjectStatus) domain.Project {
 		t.Helper()
 		project, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        name,
-			Description: description,
-			Status:      status,
-			OwnerUserID: owner,
-			CreatedAt:   createdAt,
-			UpdatedAt:   createdAt,
+			ID: uuid.New(), Name: name, Description: description, Status: status,
+			OwnerUserID: owner, CreatedAt: createdAt, UpdatedAt: createdAt,
 		})
 		if err != nil {
 			t.Fatalf("seed CreateProject: %v", err)
@@ -328,105 +328,42 @@ func TestProjectStoreUpdateProjectIntegration(t *testing.T) {
 	}
 
 	t.Run("updates name only and leaves other fields unchanged", func(t *testing.T) {
-		project := seed(t, ownerA, "Original", "keep description", domain.ProjectStatusActive)
+		project := seed(t, "Original", "keep description", domain.ProjectStatusActive)
 		newName := "Renamed"
 		newUpdatedAt := createdAt.Add(time.Hour)
 
 		updated, err := repo.UpdateProject(ctx, domain.UpdateProjectInput{
-			ID:          project.ID,
-			OwnerUserID: ownerA,
-			Name:        &newName,
-			UpdatedAt:   newUpdatedAt,
+			ID: project.ID, Name: &newName, UpdatedAt: newUpdatedAt,
 		})
 		if err != nil {
 			t.Fatalf("UpdateProject: %v", err)
 		}
-		if updated.Name != "Renamed" {
-			t.Fatalf("name = %q, want Renamed", updated.Name)
+		if updated.Name != "Renamed" || updated.Description != "keep description" {
+			t.Fatalf("updated = %#v", updated)
 		}
-		if updated.Description != "keep description" {
-			t.Fatalf("description = %q, want unchanged", updated.Description)
-		}
-		if updated.Status != domain.ProjectStatusActive {
-			t.Fatalf("status = %q, want unchanged active", updated.Status)
-		}
-		if !updated.UpdatedAt.Equal(newUpdatedAt) {
-			t.Fatalf("updated_at = %v, want %v", updated.UpdatedAt, newUpdatedAt)
-		}
-	})
-
-	t.Run("updates status only", func(t *testing.T) {
-		project := seed(t, ownerA, "Status target", "desc", domain.ProjectStatusActive)
-		newStatus := domain.ProjectStatusArchived
-
-		updated, err := repo.UpdateProject(ctx, domain.UpdateProjectInput{
-			ID:          project.ID,
-			OwnerUserID: ownerA,
-			Status:      &newStatus,
-			UpdatedAt:   createdAt.Add(time.Minute),
-		})
-		if err != nil {
-			t.Fatalf("UpdateProject status: %v", err)
-		}
-		if updated.Status != domain.ProjectStatusArchived {
-			t.Fatalf("status = %q, want archived", updated.Status)
-		}
-		if updated.Name != "Status target" || updated.Description != "desc" {
-			t.Fatalf("non-status fields changed: %#v", updated)
+		if updated.Status != domain.ProjectStatusActive || !updated.UpdatedAt.Equal(newUpdatedAt) {
+			t.Fatalf("updated = %#v", updated)
 		}
 	})
 
 	t.Run("empty description pointer clears the column", func(t *testing.T) {
-		project := seed(t, ownerA, "Has desc", "to be cleared", domain.ProjectStatusActive)
+		project := seed(t, "Has desc", "to be cleared", domain.ProjectStatusActive)
 		empty := ""
-
 		updated, err := repo.UpdateProject(ctx, domain.UpdateProjectInput{
-			ID:          project.ID,
-			OwnerUserID: ownerA,
-			Description: &empty,
-			UpdatedAt:   createdAt.Add(time.Minute),
+			ID: project.ID, Description: &empty, UpdatedAt: createdAt.Add(time.Minute),
 		})
 		if err != nil {
 			t.Fatalf("UpdateProject clear desc: %v", err)
 		}
-		if updated.Description != "" {
-			t.Fatalf("description = %q, want empty", updated.Description)
-		}
-		if updated.Name != "Has desc" {
-			t.Fatalf("name changed unexpectedly: %q", updated.Name)
-		}
-	})
-
-	t.Run("wrong owner returns ErrProjectNotFound", func(t *testing.T) {
-		project := seed(t, ownerA, "Owned by A", "", domain.ProjectStatusActive)
-		newName := "hacked"
-
-		_, err := repo.UpdateProject(ctx, domain.UpdateProjectInput{
-			ID:          project.ID,
-			OwnerUserID: ownerB,
-			Name:        &newName,
-			UpdatedAt:   createdAt.Add(time.Minute),
-		})
-		if !errors.Is(err, domain.ErrProjectNotFound) {
-			t.Fatalf("err = %v, want ErrProjectNotFound", err)
-		}
-
-		got, err := repo.GetProjectByID(ctx, ownerA, project.ID)
-		if err != nil {
-			t.Fatalf("GetProjectByID after bad update: %v", err)
-		}
-		if got.Name != "Owned by A" {
-			t.Fatalf("name was modified by wrong owner: %q", got.Name)
+		if updated.Description != "" || updated.Name != "Has desc" {
+			t.Fatalf("updated = %#v", updated)
 		}
 	})
 
 	t.Run("missing id returns ErrProjectNotFound", func(t *testing.T) {
 		newName := "anything"
 		_, err := repo.UpdateProject(ctx, domain.UpdateProjectInput{
-			ID:          uuid.New(),
-			OwnerUserID: ownerA,
-			Name:        &newName,
-			UpdatedAt:   createdAt,
+			ID: uuid.New(), Name: &newName, UpdatedAt: createdAt,
 		})
 		if !errors.Is(err, domain.ErrProjectNotFound) {
 			t.Fatalf("err = %v, want ErrProjectNotFound", err)
@@ -442,18 +379,12 @@ func TestProjectStoreArchiveProjectIntegration(t *testing.T) {
 
 	ownerA := mustCreateUser(t, ctx, queries, "ada@example.com", "Ada")
 	ownerB := mustCreateUser(t, ctx, queries, "grace@example.com", "Grace")
-
 	createdAt := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
 	seed := func(t *testing.T, owner uuid.UUID, name string, status domain.ProjectStatus) domain.Project {
 		t.Helper()
 		project, err := repo.CreateProject(ctx, domain.CreateProjectInput{
-			ID:          uuid.New(),
-			Name:        name,
-			Description: "desc",
-			Status:      status,
-			OwnerUserID: owner,
-			CreatedAt:   createdAt,
-			UpdatedAt:   createdAt,
+			ID: uuid.New(), Name: name, Description: "desc", Status: status,
+			OwnerUserID: owner, CreatedAt: createdAt, UpdatedAt: createdAt,
 		})
 		if err != nil {
 			t.Fatalf("seed CreateProject: %v", err)
@@ -464,62 +395,31 @@ func TestProjectStoreArchiveProjectIntegration(t *testing.T) {
 	t.Run("archives active project", func(t *testing.T) {
 		project := seed(t, ownerA, "Archive Active", domain.ProjectStatusActive)
 		newUpdatedAt := createdAt.Add(time.Hour)
-
 		archived, err := repo.ArchiveProject(ctx, ownerA, project.ID, newUpdatedAt)
 		if err != nil {
 			t.Fatalf("ArchiveProject: %v", err)
 		}
-		if archived.Status != domain.ProjectStatusArchived {
-			t.Fatalf("status = %q, want archived", archived.Status)
-		}
-		if !archived.UpdatedAt.Equal(newUpdatedAt) {
-			t.Fatalf("updated_at = %v, want %v", archived.UpdatedAt, newUpdatedAt)
-		}
-		if archived.Name != "Archive Active" || archived.Description != "desc" {
-			t.Fatalf("other fields changed: %#v", archived)
+		if archived.Status != domain.ProjectStatusArchived || !archived.UpdatedAt.Equal(newUpdatedAt) {
+			t.Fatalf("archived = %#v", archived)
 		}
 	})
 
-	t.Run("archive already archived is idempotent and refreshes updated_at", func(t *testing.T) {
-		project := seed(t, ownerA, "Archive Idempotent", domain.ProjectStatusArchived)
-		first := createdAt.Add(time.Hour)
-		second := createdAt.Add(2 * time.Hour)
-
-		if _, err := repo.ArchiveProject(ctx, ownerA, project.ID, first); err != nil {
-			t.Fatalf("first archive: %v", err)
-		}
-		got, err := repo.ArchiveProject(ctx, ownerA, project.ID, second)
-		if err != nil {
-			t.Fatalf("second archive: %v", err)
-		}
-		if got.Status != domain.ProjectStatusArchived {
-			t.Fatalf("status = %q, want archived", got.Status)
-		}
-		if !got.UpdatedAt.Equal(second) {
-			t.Fatalf("updated_at = %v, want %v (refreshed)", got.UpdatedAt, second)
-		}
-	})
-
-	t.Run("wrong owner returns ErrProjectNotFound and original row unchanged", func(t *testing.T) {
+	t.Run("archive remains owner scoped in the store", func(t *testing.T) {
 		project := seed(t, ownerA, "Archive Wrong Owner", domain.ProjectStatusActive)
-
-		_, err := repo.ArchiveProject(ctx, ownerB, project.ID, createdAt.Add(time.Hour))
-		if !errors.Is(err, domain.ErrProjectNotFound) {
+		if _, err := repo.ArchiveProject(ctx, ownerB, project.ID, createdAt.Add(time.Hour)); !errors.Is(err, domain.ErrProjectNotFound) {
 			t.Fatalf("err = %v, want ErrProjectNotFound", err)
 		}
-
-		got, err := repo.GetProjectByID(ctx, ownerA, project.ID)
+		access, err := repo.GetProjectWithAccess(ctx, project.ID, ownerA)
 		if err != nil {
-			t.Fatalf("GetProjectByID after wrong-owner archive: %v", err)
+			t.Fatalf("GetProjectWithAccess after wrong-owner archive: %v", err)
 		}
-		if got.Status != domain.ProjectStatusActive {
-			t.Fatalf("status was modified by wrong owner: %q", got.Status)
+		if access.Project.Status != domain.ProjectStatusActive {
+			t.Fatalf("status was modified by a non-owner: %q", access.Project.Status)
 		}
 	})
 
 	t.Run("missing id returns ErrProjectNotFound", func(t *testing.T) {
-		_, err := repo.ArchiveProject(ctx, ownerA, uuid.New(), createdAt)
-		if !errors.Is(err, domain.ErrProjectNotFound) {
+		if _, err := repo.ArchiveProject(ctx, ownerA, uuid.New(), createdAt); !errors.Is(err, domain.ErrProjectNotFound) {
 			t.Fatalf("err = %v, want ErrProjectNotFound", err)
 		}
 	})

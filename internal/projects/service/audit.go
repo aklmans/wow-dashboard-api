@@ -8,19 +8,24 @@ import (
 )
 
 const (
-	EventProjectCreated  = "projects.project.created"
-	EventProjectUpdated  = "projects.project.updated"
-	EventProjectArchived = "projects.project.archived"
+	EventProjectCreated    = "projects.project.created"
+	EventProjectUpdated    = "projects.project.updated"
+	EventProjectArchived   = "projects.project.archived"
+	EventMemberAdded       = "projects.member.added"
+	EventMemberRoleChanged = "projects.member.role_changed"
+	EventMemberRemoved     = "projects.member.removed"
 )
 
 // AuditMetadata is the safe, stable metadata shape stored for project audit
-// events. It deliberately does NOT include project name, description, or any
-// other free-form business text — only stable identifiers and the field names
-// the caller provided.
+// events. It deliberately does NOT include project name, description, email,
+// or any other free-form business text or PII — only stable identifiers, the
+// field names the caller provided, and enum role/status values.
 type AuditMetadata struct {
 	ProjectID     string   `json:"project_id,omitempty"`
 	OwnerUserID   string   `json:"owner_user_id,omitempty"`
+	TargetUserID  string   `json:"target_user_id,omitempty"`
 	Status        string   `json:"status,omitempty"`
+	Role          string   `json:"role,omitempty"`
 	ChangedFields []string `json:"changed_fields,omitempty"`
 	RequestID     string   `json:"request_id,omitempty"`
 }
@@ -84,6 +89,30 @@ func (s *Service) recordProjectArchived(ctx context.Context, metadata AuditMetad
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventProjectArchived,
 		Message:   "Project archived.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordMemberAdded(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventMemberAdded,
+		Message:   "Project member added.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordMemberRoleChanged(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventMemberRoleChanged,
+		Message:   "Project member role changed.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordMemberRemoved(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventMemberRemoved,
+		Message:   "Project member removed.",
 		Metadata:  metadata,
 	})
 }

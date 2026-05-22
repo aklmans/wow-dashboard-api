@@ -121,6 +121,22 @@ func (openAPIProjectsService) ArchiveProject(context.Context, string, string) (p
 	return projectsdomain.Project{}, nil
 }
 
+func (openAPIProjectsService) ListMembers(context.Context, string, string) ([]projectsdomain.ProjectMemberDetail, error) {
+	return nil, nil
+}
+
+func (openAPIProjectsService) AddMember(context.Context, projectservice.AddMemberInput) (projectsdomain.ProjectMember, error) {
+	return projectsdomain.ProjectMember{}, nil
+}
+
+func (openAPIProjectsService) UpdateMemberRole(context.Context, projectservice.UpdateMemberRoleInput) (projectsdomain.ProjectMember, error) {
+	return projectsdomain.ProjectMember{}, nil
+}
+
+func (openAPIProjectsService) RemoveMember(context.Context, string, string, string) error {
+	return nil
+}
+
 func (openAPISystemEventsService) ListEvents(context.Context, systemeventsservice.ListEventsInput) (systemeventsdomain.ListEventsResult, error) {
 	return systemeventsdomain.ListEventsResult{}, nil
 }

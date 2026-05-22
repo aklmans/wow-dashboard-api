@@ -156,6 +156,54 @@ export interface paths {
         patch: operations["patch-project"];
         trace?: never;
     };
+    "/api/projects/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List project members
+         * @description Lists the non-owner members of a project. Any user with access to the project may view its members.
+         */
+        get: operations["get-project-members"];
+        put?: never;
+        /**
+         * Add a project member
+         * @description Grants a user, identified by email, viewer or editor access to a project. Owner only.
+         */
+        post: operations["post-project-member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{id}/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a project member
+         * @description Revokes a user's access to a project. Owner only.
+         */
+        delete: operations["delete-project-member"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a project member role
+         * @description Changes an existing member's access role. Owner only.
+         */
+        patch: operations["patch-project-member"];
+        trace?: never;
+    };
     "/api/system-events": {
         parameters: {
             query?: never;
@@ -264,6 +312,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AddProjectMemberInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/AddProjectMemberInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: email
+             * @description Email of the user to grant access to
+             * @example teammate@example.com
+             */
+            email: string;
+            /**
+             * @description Access role to grant
+             * @example editor
+             * @enum {string}
+             */
+            role: "viewer" | "editor";
+        };
         AuthMeBody: {
             /**
              * Format: uri
@@ -451,6 +519,93 @@ export interface components {
              */
             updatedAt: string;
         };
+        ProjectMemberBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ProjectMemberBody.json
+             */
+            readonly $schema?: string;
+            /** @description The project access grant */
+            member: components["schemas"]["ProjectMemberGrant"];
+        };
+        ProjectMemberDeletedBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ProjectMemberDeletedBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description Operation success flag
+             * @example true
+             */
+            success: boolean;
+        };
+        ProjectMemberGrant: {
+            /**
+             * Format: date-time
+             * @description Grant creation timestamp
+             */
+            createdAt: string;
+            /**
+             * @description Member access role
+             * @example editor
+             */
+            role: string;
+            /**
+             * Format: date-time
+             * @description Grant last update timestamp
+             */
+            updatedAt: string;
+            /**
+             * @description Member user identifier
+             * @example d1f6b2a4-1c3e-4a8b-9d2f-6e7a0b1c2d3e
+             */
+            userId: string;
+        };
+        ProjectMemberItem: {
+            /**
+             * Format: date-time
+             * @description Grant creation timestamp
+             */
+            createdAt: string;
+            /**
+             * @description Member display name
+             * @example Team Mate
+             */
+            displayName: string;
+            /**
+             * @description Member email address
+             * @example teammate@example.com
+             */
+            email: string;
+            /**
+             * @description Member access role
+             * @example editor
+             */
+            role: string;
+            /**
+             * Format: date-time
+             * @description Grant last update timestamp
+             */
+            updatedAt: string;
+            /**
+             * @description Member user identifier
+             * @example d1f6b2a4-1c3e-4a8b-9d2f-6e7a0b1c2d3e
+             */
+            userId: string;
+        };
+        ProjectMembersBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/ProjectMembersBody.json
+             */
+            readonly $schema?: string;
+            /** @description Users granted non-owner access to the project */
+            members: components["schemas"]["ProjectMemberItem"][];
+        };
         ProjectsListBody: {
             /**
              * Format: uri
@@ -603,6 +758,20 @@ export interface components {
              * @example active
              */
             status?: string;
+        };
+        UpdateProjectMemberInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UpdateProjectMemberInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description New access role
+             * @example viewer
+             * @enum {string}
+             */
+            role: "viewer" | "editor";
         };
         UpdateUserInputBody: {
             /**
@@ -1044,6 +1213,145 @@ export interface operations {
             403: components["responses"]["APIError"];
             404: components["responses"]["APIError"];
             409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "get-project-members": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Project UUID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMembersBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-project-member": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Project UUID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddProjectMemberInputBody"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMemberBody"];
+                };
+            };
+            400: components["responses"]["APIError"];
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "delete-project-member": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Project UUID */
+                id: string;
+                /** @description Member user UUID */
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMemberDeletedBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "patch-project-member": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Project UUID */
+                id: string;
+                /** @description Member user UUID */
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectMemberInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMemberBody"];
+                };
+            };
+            400: components["responses"]["APIError"];
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };

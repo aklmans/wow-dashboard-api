@@ -209,33 +209,47 @@ User management read endpoints live under `/api/users` and require `Authorizatio
 
 ## Projects Endpoints
 
-Project management endpoints live under `/api/projects` and require `Authorization: Bearer <accessToken>`. Projects are owner-scoped: every endpoint only operates on rows whose `owner_user_id` matches the authenticated user.
+Project management endpoints live under `/api/projects` and require `Authorization: Bearer <accessToken>`. A project has a single **owner** (`owner_user_id`) and may additionally be **shared** with other users as `viewer` or `editor` members.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/projects` | Return paginated projects as `{ "projects": [...], "page": 1, "pageSize": 20, "total": 1 }` |
-| `GET` | `/api/projects/{id}` | Return a single project as `{ "project": { ... } }`. `404` when the id does not belong to the current user; `422` when `{id}` is not a valid UUID |
-| `POST` | `/api/projects` | Create a project owned by the current user. Returns `201` with `{ "project": { ... } }`; `409 conflict` when the owner already has a project with the same name; `422` for invalid bodies |
-| `PATCH` | `/api/projects/{id}` | Partially update a project owned by the current user. Returns `200` with `{ "project": { ... } }`; `404` when the id does not belong to the current user; `409 conflict` when the new name is already used by another project owned by the current user; `422` for invalid bodies |
-| `DELETE` | `/api/projects/{id}` | Archive a project owned by the current user. Returns `200` with `{ "project": { ... } }` carrying `status: "archived"`; `404` when the id does not belong to the current user; `422` when `{id}` is not a valid UUID |
+| `GET` | `/api/projects` | Return paginated projects the user owns or is a member of, as `{ "projects": [...], "page": 1, "pageSize": 20, "total": 1 }` |
+| `GET` | `/api/projects/{id}` | Return a single project as `{ "project": { ... } }`. Available to the owner and any member; `404` when the user has no access; `422` when `{id}` is not a valid UUID |
+| `POST` | `/api/projects` | Create a project owned by the current user. Returns `201` with `{ "project": { ... } }`; `409 conflict` on a duplicate owner-scoped name; `422` for invalid bodies |
+| `PATCH` | `/api/projects/{id}` | Partially update a project. Owner or `editor` member only; a `viewer` receives `403`. Returns `200` with `{ "project": { ... } }`; `404` when the user has no access; `409 conflict` on a duplicate name; `422` for invalid bodies |
+| `DELETE` | `/api/projects/{id}` | Archive a project. **Owner only** — a non-owner member receives `403`. Returns `200` with `{ "project": { ... } }` carrying `status: "archived"`; `404` when the user has no access |
 
 `GET /api/projects` supports `page`, `pageSize`, `search` (matches `name` or `description`), and `status` (`active` or `archived`). `POST /api/projects` accepts `{ "name": "...", "description": "...", "status": "active" }` (description and status are optional; status defaults to `active`).
 
 `PATCH /api/projects/{id}` accepts a partial body with any subset of `name`, `description`, and `status`. Omitted fields stay unchanged; passing an empty `description` clears the stored value; at least one field must be provided. `updated_at` is refreshed on every successful update.
 
+### Project Sharing
+
+A project owner can grant other users access. Access levels: `viewer` (read), `editor` (read + `PATCH`). The owner alone may archive the project and manage its members.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/projects/{id}/members` | List the project's non-owner members as `{ "members": [...] }`. Available to any user with access to the project |
+| `POST` | `/api/projects/{id}/members` | Owner only. Grant access by email: `{ "email": "...", "role": "viewer\|editor" }`. Returns `201`; `409` when the user already has access; `422` when the email is not a registered user |
+| `PATCH` | `/api/projects/{id}/members/{userId}` | Owner only. Change a member's role: `{ "role": "viewer\|editor" }`. `404` when the user is not a member |
+| `DELETE` | `/api/projects/{id}/members/{userId}` | Owner only. Revoke a user's access. `404` when the user is not a member |
+
 Project names are unique per owner after service-layer trimming. A duplicate create or update returns the standard error envelope with HTTP `409`, `code: "conflict"`, and `message: "Project name already exists."`. This baseline uses PostgreSQL's default case-sensitive text comparison, so `"Demo"` and `"demo"` may coexist for the same owner. Archived projects still reserve their names; archiving does not free a name for reuse.
 
 `DELETE /api/projects/{id}` archives the project (sets `status` to `archived` and refreshes `updated_at`) instead of physically deleting the row. The endpoint is idempotent: archiving a project that is already archived still returns `200` with the archived project.
 
-Project create/update/archive success events are written to the `system_events` table using stable event types:
+Project mutation and sharing success events are written to the `system_events` table using stable event types:
 
 | Event Type | Description |
 |------------|-------------|
 | `projects.project.created` | Project creation succeeded |
 | `projects.project.updated` | Project update succeeded |
 | `projects.project.archived` | Project archive succeeded |
+| `projects.member.added` | A user was granted project access |
+| `projects.member.role_changed` | A member's project role was changed |
+| `projects.member.removed` | A member's project access was revoked |
 
-Project audit metadata is a safe JSON object with `project_id`, `owner_user_id`, `status`, `changed_fields`, and `request_id`. `changed_fields` records field names only, not submitted values. Audit writes are best-effort: if recording an event fails, the project response keeps its original success result and the server logs the audit error.
+Project audit metadata is a safe JSON object with `project_id`, `owner_user_id`, `target_user_id`, `status`, `role`, `changed_fields`, and `request_id` — stable identifiers and enum values only, never project names, descriptions, or email. Audit writes are best-effort: if recording an event fails, the project response keeps its original success result and the server logs the audit error.
 
 ## System Events Endpoints
 

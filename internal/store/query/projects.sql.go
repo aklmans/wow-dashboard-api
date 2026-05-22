@@ -44,7 +44,10 @@ func (q *Queries) ArchiveProject(ctx context.Context, arg ArchiveProjectParams) 
 const countProjectsPage = `-- name: CountProjectsPage :one
 SELECT count(*)::bigint
 FROM projects
-WHERE owner_user_id = $1
+WHERE (
+    owner_user_id = $1
+    OR id IN (SELECT project_id FROM project_members WHERE user_id = $1)
+)
 AND (
     $2::text IS NULL
     OR name ILIKE '%' || $2::text || '%'
@@ -57,13 +60,13 @@ AND (
 `
 
 type CountProjectsPageParams struct {
-	OwnerUserID pgtype.UUID
-	Search      pgtype.Text
-	Status      pgtype.Text
+	UserID pgtype.UUID
+	Search pgtype.Text
+	Status pgtype.Text
 }
 
 func (q *Queries) CountProjectsPage(ctx context.Context, arg CountProjectsPageParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countProjectsPage, arg.OwnerUserID, arg.Search, arg.Status)
+	row := q.db.QueryRow(ctx, countProjectsPage, arg.UserID, arg.Search, arg.Status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -108,20 +111,38 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 	return i, err
 }
 
-const getProjectByID = `-- name: GetProjectByID :one
-SELECT id, name, description, status, owner_user_id, created_at, updated_at
-FROM projects
-WHERE id = $1 AND owner_user_id = $2
+const getProjectWithAccess = `-- name: GetProjectWithAccess :one
+SELECT
+    p.id, p.name, p.description, p.status, p.owner_user_id, p.created_at, p.updated_at,
+    CAST(CASE WHEN p.owner_user_id = $1 THEN 'owner' ELSE m.role END AS text) AS access_role
+FROM projects p
+LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = $1
+WHERE p.id = $2
+  AND (p.owner_user_id = $1 OR m.user_id IS NOT NULL)
 `
 
-type GetProjectByIDParams struct {
-	ID          pgtype.UUID
-	OwnerUserID pgtype.UUID
+type GetProjectWithAccessParams struct {
+	UserID pgtype.UUID
+	ID     pgtype.UUID
 }
 
-func (q *Queries) GetProjectByID(ctx context.Context, arg GetProjectByIDParams) (Project, error) {
-	row := q.db.QueryRow(ctx, getProjectByID, arg.ID, arg.OwnerUserID)
-	var i Project
+type GetProjectWithAccessRow struct {
+	ID          pgtype.UUID
+	Name        string
+	Description string
+	Status      string
+	OwnerUserID pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	AccessRole  string
+}
+
+// Returns the project together with the requesting user's effective access
+// role ('owner', 'editor', or 'viewer'). No row is returned when the user is
+// neither the owner nor a member, so callers cannot probe foreign projects.
+func (q *Queries) GetProjectWithAccess(ctx context.Context, arg GetProjectWithAccessParams) (GetProjectWithAccessRow, error) {
+	row := q.db.QueryRow(ctx, getProjectWithAccess, arg.UserID, arg.ID)
+	var i GetProjectWithAccessRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -130,6 +151,7 @@ func (q *Queries) GetProjectByID(ctx context.Context, arg GetProjectByIDParams) 
 		&i.OwnerUserID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AccessRole,
 	)
 	return i, err
 }
@@ -137,7 +159,10 @@ func (q *Queries) GetProjectByID(ctx context.Context, arg GetProjectByIDParams) 
 const listProjectsPage = `-- name: ListProjectsPage :many
 SELECT id, name, description, status, owner_user_id, created_at, updated_at
 FROM projects
-WHERE owner_user_id = $1
+WHERE (
+    owner_user_id = $1
+    OR id IN (SELECT project_id FROM project_members WHERE user_id = $1)
+)
 AND (
     $2::text IS NULL
     OR name ILIKE '%' || $2::text || '%'
@@ -152,16 +177,16 @@ LIMIT $5 OFFSET $4
 `
 
 type ListProjectsPageParams struct {
-	OwnerUserID pgtype.UUID
-	Search      pgtype.Text
-	Status      pgtype.Text
-	OffsetVal   int32
-	LimitVal    int32
+	UserID    pgtype.UUID
+	Search    pgtype.Text
+	Status    pgtype.Text
+	OffsetVal int32
+	LimitVal  int32
 }
 
 func (q *Queries) ListProjectsPage(ctx context.Context, arg ListProjectsPageParams) ([]Project, error) {
 	rows, err := q.db.Query(ctx, listProjectsPage,
-		arg.OwnerUserID,
+		arg.UserID,
 		arg.Search,
 		arg.Status,
 		arg.OffsetVal,
@@ -200,7 +225,7 @@ SET
     description = COALESCE($2::text, description),
     status = COALESCE($3::text, status),
     updated_at = $4
-WHERE id = $5 AND owner_user_id = $6
+WHERE id = $5
 RETURNING id, name, description, status, owner_user_id, created_at, updated_at
 `
 
@@ -210,9 +235,10 @@ type UpdateProjectParams struct {
 	Status      pgtype.Text
 	UpdatedAt   pgtype.Timestamptz
 	ID          pgtype.UUID
-	OwnerUserID pgtype.UUID
 }
 
+// Scoped by id only: the service authorizes the caller (owner or editor) via
+// GetProjectWithAccess before invoking this query.
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
 	row := q.db.QueryRow(ctx, updateProject,
 		arg.Name,
@@ -220,7 +246,6 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Status,
 		arg.UpdatedAt,
 		arg.ID,
-		arg.OwnerUserID,
 	)
 	var i Project
 	err := row.Scan(

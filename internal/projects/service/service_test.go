@@ -14,22 +14,35 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/projects/service"
 )
 
+func ownerAccess(project domain.Project) domain.ProjectAccess {
+	return domain.ProjectAccess{Project: project, AccessRole: domain.AccessRoleOwner}
+}
+
+func longString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = 'a'
+	}
+	return string(b)
+}
+
+// --- ListProjects -----------------------------------------------------------
+
 func TestServiceListProjectsNormalizesInput(t *testing.T) {
 	store := &fakeProjectStore{}
 	svc := service.NewService(store)
 
-	owner := uuid.New()
-	_, err := svc.ListProjects(context.Background(), service.ListProjectsInput{
-		OwnerUserID: "  " + owner.String() + "  ",
-		Search:      "  Demo  ",
-		Status:      "ACTIVE",
-	})
-	if err != nil {
+	user := uuid.New()
+	if _, err := svc.ListProjects(context.Background(), service.ListProjectsInput{
+		UserID: "  " + user.String() + "  ",
+		Search: "  Demo  ",
+		Status: "ACTIVE",
+	}); err != nil {
 		t.Fatalf("ListProjects returned error: %v", err)
 	}
 
-	if store.listInput.OwnerUserID != owner {
-		t.Fatalf("owner = %s, want %s", store.listInput.OwnerUserID, owner)
+	if store.listInput.UserID != user {
+		t.Fatalf("user = %s, want %s", store.listInput.UserID, user)
 	}
 	if store.listInput.Page != 1 || store.listInput.PageSize != 20 {
 		t.Fatalf("pagination = %d/%d, want 1/20", store.listInput.Page, store.listInput.PageSize)
@@ -43,25 +56,22 @@ func TestServiceListProjectsNormalizesInput(t *testing.T) {
 }
 
 func TestServiceListProjectsRejectsInvalidInput(t *testing.T) {
-	owner := uuid.New().String()
+	user := uuid.New().String()
 	tests := []struct {
 		name  string
 		input service.ListProjectsInput
 	}{
-		{name: "invalid owner", input: service.ListProjectsInput{OwnerUserID: "not-a-uuid"}},
-		{name: "missing owner", input: service.ListProjectsInput{OwnerUserID: ""}},
-		{name: "negative page", input: service.ListProjectsInput{OwnerUserID: owner, Page: -1}},
-		{name: "too large page size", input: service.ListProjectsInput{OwnerUserID: owner, PageSize: 101}},
-		{name: "invalid status", input: service.ListProjectsInput{OwnerUserID: owner, Status: "pending"}},
+		{name: "invalid user", input: service.ListProjectsInput{UserID: "not-a-uuid"}},
+		{name: "missing user", input: service.ListProjectsInput{UserID: ""}},
+		{name: "negative page", input: service.ListProjectsInput{UserID: user, Page: -1}},
+		{name: "too large page size", input: service.ListProjectsInput{UserID: user, PageSize: 101}},
+		{name: "invalid status", input: service.ListProjectsInput{UserID: user, Status: "pending"}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeProjectStore{}
 			svc := service.NewService(store)
-
-			_, err := svc.ListProjects(context.Background(), tt.input)
-			if !errors.Is(err, service.ErrInvalidInput) {
+			if _, err := svc.ListProjects(context.Background(), tt.input); !errors.Is(err, service.ErrInvalidInput) {
 				t.Fatalf("err = %v, want ErrInvalidInput", err)
 			}
 			if store.listCalled {
@@ -71,46 +81,41 @@ func TestServiceListProjectsRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestServiceGetProjectPassesParsedID(t *testing.T) {
-	owner := uuid.New()
-	want := uuid.New()
-	store := &fakeProjectStore{getResult: domain.Project{ID: want, OwnerUserID: owner, Name: "demo"}}
+// --- GetProject -------------------------------------------------------------
+
+func TestServiceGetProjectReturnsAccessibleProject(t *testing.T) {
+	user := uuid.New()
+	id := uuid.New()
+	store := &fakeProjectStore{getAccess: domain.ProjectAccess{
+		Project:    domain.Project{ID: id, OwnerUserID: user, Name: "demo"},
+		AccessRole: domain.AccessRoleViewer,
+	}}
 	svc := service.NewService(store)
 
-	got, err := svc.GetProject(context.Background(), owner.String(), "  "+want.String()+"  ")
+	got, err := svc.GetProject(context.Background(), user.String(), "  "+id.String()+"  ")
 	if err != nil {
 		t.Fatalf("GetProject error: %v", err)
 	}
-	if !store.getCalled {
-		t.Fatal("store.GetProjectByID was not called")
+	if store.getProjectID != id || store.getUserID != user {
+		t.Fatalf("store args = project %s user %s, want %s/%s", store.getProjectID, store.getUserID, id, user)
 	}
-	if store.getOwnerID != owner || store.getID != want {
-		t.Fatalf("store args = owner %s id %s, want %s/%s", store.getOwnerID, store.getID, owner, want)
-	}
-	if got.ID != want {
-		t.Fatalf("returned id = %s, want %s", got.ID, want)
+	if got.ID != id {
+		t.Fatalf("returned id = %s, want %s", got.ID, id)
 	}
 }
 
 func TestServiceGetProjectRejectsInvalidIDs(t *testing.T) {
-	owner := uuid.New().String()
-	cases := []struct {
-		name    string
-		owner   string
-		project string
-	}{
-		{name: "invalid owner", owner: "not-a-uuid", project: uuid.New().String()},
-		{name: "invalid project id", owner: owner, project: "not-a-uuid"},
-		{name: "empty project id", owner: owner, project: "   "},
+	user := uuid.New().String()
+	cases := []struct{ name, user, project string }{
+		{"invalid user", "not-a-uuid", uuid.New().String()},
+		{"invalid project id", user, "not-a-uuid"},
+		{"empty project id", user, "   "},
 	}
-
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeProjectStore{}
 			svc := service.NewService(store)
-
-			_, err := svc.GetProject(context.Background(), tt.owner, tt.project)
-			if !errors.Is(err, service.ErrInvalidInput) {
+			if _, err := svc.GetProject(context.Background(), tt.user, tt.project); !errors.Is(err, service.ErrInvalidInput) {
 				t.Fatalf("err = %v, want ErrInvalidInput", err)
 			}
 			if store.getCalled {
@@ -124,11 +129,12 @@ func TestServiceGetProjectMapsNotFound(t *testing.T) {
 	store := &fakeProjectStore{getErr: domain.ErrProjectNotFound}
 	svc := service.NewService(store)
 
-	_, err := svc.GetProject(context.Background(), uuid.New().String(), uuid.New().String())
-	if !errors.Is(err, service.ErrNotFound) {
+	if _, err := svc.GetProject(context.Background(), uuid.New().String(), uuid.New().String()); !errors.Is(err, service.ErrNotFound) {
 		t.Fatalf("err = %v, want service.ErrNotFound", err)
 	}
 }
+
+// --- CreateProject ----------------------------------------------------------
 
 func TestServiceCreateProjectNormalizesInput(t *testing.T) {
 	owner := uuid.New()
@@ -136,24 +142,19 @@ func TestServiceCreateProjectNormalizesInput(t *testing.T) {
 	store := &fakeProjectStore{}
 	svc := service.NewService(store, service.WithClock(func() time.Time { return fixedNow }))
 
-	got, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
+	if _, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
 		OwnerUserID: owner.String(),
 		Name:        "  Demo Project  ",
 		Description: "  hello  ",
-		Status:      "",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CreateProject error: %v", err)
 	}
 
-	if !store.createCalled {
-		t.Fatal("store.CreateProject was not called")
-	}
 	if store.createInput.Name != "Demo Project" {
-		t.Fatalf("name = %q, want trimmed Demo Project", store.createInput.Name)
+		t.Fatalf("name = %q, want trimmed", store.createInput.Name)
 	}
 	if store.createInput.Description != "hello" {
-		t.Fatalf("description = %q, want trimmed hello", store.createInput.Description)
+		t.Fatalf("description = %q, want trimmed", store.createInput.Description)
 	}
 	if store.createInput.Status != domain.ProjectStatusActive {
 		t.Fatalf("status = %q, want active default", store.createInput.Status)
@@ -167,9 +168,6 @@ func TestServiceCreateProjectNormalizesInput(t *testing.T) {
 	if !store.createInput.CreatedAt.Equal(fixedNow) || !store.createInput.UpdatedAt.Equal(fixedNow) {
 		t.Fatalf("timestamps = %v/%v, want %v", store.createInput.CreatedAt, store.createInput.UpdatedAt, fixedNow)
 	}
-	if got.Name != "" {
-		// store returns zero Project from fake; just sanity-check no panic
-	}
 }
 
 func TestServiceCreateProjectRejectsInvalidInput(t *testing.T) {
@@ -178,20 +176,17 @@ func TestServiceCreateProjectRejectsInvalidInput(t *testing.T) {
 		name  string
 		input service.CreateProjectInput
 	}{
-		{name: "invalid owner", input: service.CreateProjectInput{OwnerUserID: "bad", Name: "x"}},
-		{name: "empty name", input: service.CreateProjectInput{OwnerUserID: owner, Name: "   "}},
-		{name: "name too long", input: service.CreateProjectInput{OwnerUserID: owner, Name: longString(121)}},
-		{name: "description too long", input: service.CreateProjectInput{OwnerUserID: owner, Name: "ok", Description: longString(2001)}},
-		{name: "invalid status", input: service.CreateProjectInput{OwnerUserID: owner, Name: "ok", Status: "deleted"}},
+		{"invalid owner", service.CreateProjectInput{OwnerUserID: "bad", Name: "x"}},
+		{"empty name", service.CreateProjectInput{OwnerUserID: owner, Name: "   "}},
+		{"name too long", service.CreateProjectInput{OwnerUserID: owner, Name: longString(121)}},
+		{"description too long", service.CreateProjectInput{OwnerUserID: owner, Name: "ok", Description: longString(2001)}},
+		{"invalid status", service.CreateProjectInput{OwnerUserID: owner, Name: "ok", Status: "deleted"}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &fakeProjectStore{}
 			svc := service.NewService(store)
-
-			_, err := svc.CreateProject(context.Background(), tt.input)
-			if !errors.Is(err, service.ErrInvalidInput) {
+			if _, err := svc.CreateProject(context.Background(), tt.input); !errors.Is(err, service.ErrInvalidInput) {
 				t.Fatalf("err = %v, want ErrInvalidInput", err)
 			}
 			if store.createCalled {
@@ -202,16 +197,14 @@ func TestServiceCreateProjectRejectsInvalidInput(t *testing.T) {
 }
 
 func TestServiceCreateProjectMapsNameConflictWithoutAudit(t *testing.T) {
-	owner := uuid.New()
 	recorder := &fakeAuditRecorder{}
 	store := &fakeProjectStore{createErr: domain.ErrProjectNameAlreadyExists}
 	svc := service.NewService(store, service.WithAuditRecorder(recorder))
 
-	_, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
-		OwnerUserID: owner.String(),
+	if _, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
+		OwnerUserID: uuid.New().String(),
 		Name:        "Demo",
-	})
-	if !errors.Is(err, service.ErrNameConflict) {
+	}); !errors.Is(err, service.ErrNameConflict) {
 		t.Fatalf("err = %v, want ErrNameConflict", err)
 	}
 	if len(recorder.calls) != 0 {
@@ -219,47 +212,58 @@ func TestServiceCreateProjectMapsNameConflictWithoutAudit(t *testing.T) {
 	}
 }
 
-func longString(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = 'a'
+func TestServiceCreateProjectRecordsAudit(t *testing.T) {
+	owner := uuid.New()
+	created := domain.Project{ID: uuid.New(), OwnerUserID: owner, Status: domain.ProjectStatusActive}
+	recorder := &fakeAuditRecorder{}
+	svc := service.NewService(&fakeProjectStore{createResult: created}, service.WithAuditRecorder(recorder))
+
+	if _, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
+		OwnerUserID: owner.String(),
+		Name:        "Demo",
+	}); err != nil {
+		t.Fatalf("CreateProject error: %v", err)
 	}
-	return string(b)
+	if len(recorder.calls) != 1 || recorder.calls[0].EventType != service.EventProjectCreated {
+		t.Fatalf("audit calls = %#v, want one project.created", recorder.calls)
+	}
 }
 
-func TestServiceUpdateProjectNormalizesAndForwards(t *testing.T) {
-	owner := uuid.New()
-	project := uuid.New()
+// --- UpdateProject ----------------------------------------------------------
+
+func TestServiceUpdateProjectEditorForwardsNormalizedInput(t *testing.T) {
+	user := uuid.New()
+	id := uuid.New()
 	fixedNow := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
-	store := &fakeProjectStore{updateResult: domain.Project{
-		ID: project, OwnerUserID: owner, Name: "New",
-	}}
+	store := &fakeProjectStore{
+		getAccess:    domain.ProjectAccess{Project: domain.Project{ID: id}, AccessRole: domain.AccessRoleEditor},
+		updateResult: domain.Project{ID: id, Name: "New"},
+	}
 	svc := service.NewService(store, service.WithClock(func() time.Time { return fixedNow }))
 
 	name := "  New Name  "
 	description := "  hello  "
 	status := "ARCHIVED"
-	got, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
-		OwnerUserID: owner.String(),
-		ID:          project.String(),
+	if _, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
+		UserID:      user.String(),
+		ID:          id.String(),
 		Name:        &name,
 		Description: &description,
 		Status:      &status,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("UpdateProject error: %v", err)
 	}
 	if !store.updateCalled {
 		t.Fatal("store.UpdateProject was not called")
 	}
-	if store.updateInput.OwnerUserID != owner || store.updateInput.ID != project {
-		t.Fatalf("ids forwarded = owner=%s id=%s, want %s/%s", store.updateInput.OwnerUserID, store.updateInput.ID, owner, project)
+	if store.updateInput.ID != id {
+		t.Fatalf("forwarded id = %s, want %s", store.updateInput.ID, id)
 	}
 	if store.updateInput.Name == nil || *store.updateInput.Name != "New Name" {
-		t.Fatalf("name forwarded = %v, want trimmed New Name", store.updateInput.Name)
+		t.Fatalf("name forwarded = %v, want trimmed", store.updateInput.Name)
 	}
 	if store.updateInput.Description == nil || *store.updateInput.Description != "hello" {
-		t.Fatalf("description forwarded = %v, want trimmed hello", store.updateInput.Description)
+		t.Fatalf("description forwarded = %v, want trimmed", store.updateInput.Description)
 	}
 	if store.updateInput.Status == nil || *store.updateInput.Status != domain.ProjectStatusArchived {
 		t.Fatalf("status forwarded = %v, want archived", store.updateInput.Status)
@@ -267,22 +271,43 @@ func TestServiceUpdateProjectNormalizesAndForwards(t *testing.T) {
 	if !store.updateInput.UpdatedAt.Equal(fixedNow) {
 		t.Fatalf("updatedAt = %v, want %v", store.updateInput.UpdatedAt, fixedNow)
 	}
-	if got.ID != project {
-		t.Fatalf("returned id = %s, want %s", got.ID, project)
+}
+
+func TestServiceUpdateProjectViewerIsForbidden(t *testing.T) {
+	id := uuid.New()
+	store := &fakeProjectStore{getAccess: domain.ProjectAccess{
+		Project: domain.Project{ID: id}, AccessRole: domain.AccessRoleViewer,
+	}}
+	svc := service.NewService(store)
+
+	name := "New"
+	_, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
+		UserID: uuid.New().String(),
+		ID:     id.String(),
+		Name:   &name,
+	})
+	if !errors.Is(err, service.ErrForbidden) {
+		t.Fatalf("err = %v, want ErrForbidden", err)
+	}
+	if store.updateCalled {
+		t.Fatal("store.UpdateProject was called for a viewer")
 	}
 }
 
 func TestServiceUpdateProjectAllowsEmptyDescription(t *testing.T) {
-	store := &fakeProjectStore{updateResult: domain.Project{}}
+	id := uuid.New()
+	store := &fakeProjectStore{
+		getAccess:    ownerAccess(domain.Project{ID: id}),
+		updateResult: domain.Project{ID: id},
+	}
 	svc := service.NewService(store)
 
 	empty := ""
-	_, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
-		OwnerUserID: uuid.New().String(),
-		ID:          uuid.New().String(),
+	if _, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
+		UserID:      uuid.New().String(),
+		ID:          id.String(),
 		Description: &empty,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("UpdateProject error: %v", err)
 	}
 	if store.updateInput.Description == nil || *store.updateInput.Description != "" {
@@ -294,36 +319,28 @@ func TestServiceUpdateProjectAllowsEmptyDescription(t *testing.T) {
 }
 
 func TestServiceUpdateProjectRejectsInvalidInput(t *testing.T) {
-	owner := uuid.New().String()
+	user := uuid.New().String()
 	id := uuid.New().String()
-	emptyStr := ""
-	tooLongName := longString(121)
-	tooLongDesc := longString(2001)
-	emptyName := "   "
-	badStatus := "deleted"
-	okName := "ok"
-
+	emptyStr, tooLongName, tooLongDesc := "", longString(121), longString(2001)
+	emptyName, badStatus, okName := "   ", "deleted", "ok"
 	tests := []struct {
 		name  string
 		input service.UpdateProjectInput
 	}{
-		{name: "invalid owner", input: service.UpdateProjectInput{OwnerUserID: "bad", ID: id, Name: &okName}},
-		{name: "invalid id", input: service.UpdateProjectInput{OwnerUserID: owner, ID: "bad", Name: &okName}},
-		{name: "empty body", input: service.UpdateProjectInput{OwnerUserID: owner, ID: id}},
-		{name: "empty name pointer", input: service.UpdateProjectInput{OwnerUserID: owner, ID: id, Name: &emptyStr}},
-		{name: "whitespace name", input: service.UpdateProjectInput{OwnerUserID: owner, ID: id, Name: &emptyName}},
-		{name: "name too long", input: service.UpdateProjectInput{OwnerUserID: owner, ID: id, Name: &tooLongName}},
-		{name: "description too long", input: service.UpdateProjectInput{OwnerUserID: owner, ID: id, Description: &tooLongDesc}},
-		{name: "invalid status", input: service.UpdateProjectInput{OwnerUserID: owner, ID: id, Status: &badStatus}},
+		{"invalid user", service.UpdateProjectInput{UserID: "bad", ID: id, Name: &okName}},
+		{"invalid id", service.UpdateProjectInput{UserID: user, ID: "bad", Name: &okName}},
+		{"empty body", service.UpdateProjectInput{UserID: user, ID: id}},
+		{"empty name pointer", service.UpdateProjectInput{UserID: user, ID: id, Name: &emptyStr}},
+		{"whitespace name", service.UpdateProjectInput{UserID: user, ID: id, Name: &emptyName}},
+		{"name too long", service.UpdateProjectInput{UserID: user, ID: id, Name: &tooLongName}},
+		{"description too long", service.UpdateProjectInput{UserID: user, ID: id, Description: &tooLongDesc}},
+		{"invalid status", service.UpdateProjectInput{UserID: user, ID: id, Status: &badStatus}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeProjectStore{}
+			store := &fakeProjectStore{getAccess: ownerAccess(domain.Project{})}
 			svc := service.NewService(store)
-
-			_, err := svc.UpdateProject(context.Background(), tt.input)
-			if !errors.Is(err, service.ErrInvalidInput) {
+			if _, err := svc.UpdateProject(context.Background(), tt.input); !errors.Is(err, service.ErrInvalidInput) {
 				t.Fatalf("err = %v, want ErrInvalidInput", err)
 			}
 			if store.updateCalled {
@@ -334,33 +351,34 @@ func TestServiceUpdateProjectRejectsInvalidInput(t *testing.T) {
 }
 
 func TestServiceUpdateProjectMapsNotFound(t *testing.T) {
-	store := &fakeProjectStore{updateErr: domain.ErrProjectNotFound}
+	store := &fakeProjectStore{getErr: domain.ErrProjectNotFound}
 	svc := service.NewService(store)
 
 	name := "x"
-	_, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
-		OwnerUserID: uuid.New().String(),
-		ID:          uuid.New().String(),
-		Name:        &name,
-	})
-	if !errors.Is(err, service.ErrNotFound) {
+	if _, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
+		UserID: uuid.New().String(),
+		ID:     uuid.New().String(),
+		Name:   &name,
+	}); !errors.Is(err, service.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestServiceUpdateProjectMapsNameConflictWithoutAudit(t *testing.T) {
-	owner := uuid.New()
+	id := uuid.New()
 	recorder := &fakeAuditRecorder{}
-	store := &fakeProjectStore{updateErr: domain.ErrProjectNameAlreadyExists}
+	store := &fakeProjectStore{
+		getAccess: ownerAccess(domain.Project{ID: id}),
+		updateErr: domain.ErrProjectNameAlreadyExists,
+	}
 	svc := service.NewService(store, service.WithAuditRecorder(recorder))
 
 	name := "Demo"
-	_, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
-		OwnerUserID: owner.String(),
-		ID:          uuid.New().String(),
-		Name:        &name,
-	})
-	if !errors.Is(err, service.ErrNameConflict) {
+	if _, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
+		UserID: uuid.New().String(),
+		ID:     id.String(),
+		Name:   &name,
+	}); !errors.Is(err, service.ErrNameConflict) {
 		t.Fatalf("err = %v, want ErrNameConflict", err)
 	}
 	if len(recorder.calls) != 0 {
@@ -368,70 +386,129 @@ func TestServiceUpdateProjectMapsNameConflictWithoutAudit(t *testing.T) {
 	}
 }
 
-func TestServiceArchiveProjectSuccess(t *testing.T) {
-	owner := uuid.New()
-	project := uuid.New()
-	fixedNow := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
-	store := &fakeProjectStore{archiveResult: domain.Project{
-		ID: project, OwnerUserID: owner, Status: domain.ProjectStatusArchived,
-	}}
-	svc := service.NewService(store, service.WithClock(func() time.Time { return fixedNow }))
+func TestServiceUpdateProjectRecordsAuditWithChangedFields(t *testing.T) {
+	id := uuid.New()
+	recorder := &fakeAuditRecorder{}
+	store := &fakeProjectStore{
+		getAccess:    ownerAccess(domain.Project{ID: id}),
+		updateResult: domain.Project{ID: id, Status: domain.ProjectStatusArchived},
+	}
+	svc := service.NewService(store, service.WithAuditRecorder(recorder))
 
-	got, err := svc.ArchiveProject(context.Background(), "  "+owner.String()+"  ", "  "+project.String()+"  ")
+	name, desc, status := "New Name", "  hello  ", "archived"
+	if _, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
+		UserID: uuid.New().String(), ID: id.String(),
+		Name: &name, Description: &desc, Status: &status,
+	}); err != nil {
+		t.Fatalf("UpdateProject error: %v", err)
+	}
+	if len(recorder.calls) != 1 || recorder.calls[0].EventType != service.EventProjectUpdated {
+		t.Fatalf("audit = %#v, want one project.updated", recorder.calls)
+	}
+	want := []string{"name", "description", "status"}
+	if got := recorder.calls[0].Metadata.ChangedFields; len(got) != len(want) {
+		t.Fatalf("changed_fields = %v, want %v", got, want)
+	}
+}
+
+// --- ArchiveProject ---------------------------------------------------------
+
+func TestServiceArchiveProjectOwnerSucceeds(t *testing.T) {
+	owner := uuid.New()
+	id := uuid.New()
+	fixedNow := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	store := &fakeProjectStore{
+		getAccess:     ownerAccess(domain.Project{ID: id, OwnerUserID: owner}),
+		archiveResult: domain.Project{ID: id, Status: domain.ProjectStatusArchived},
+	}
+	recorder := &fakeAuditRecorder{}
+	svc := service.NewService(store, service.WithClock(func() time.Time { return fixedNow }), service.WithAuditRecorder(recorder))
+
+	got, err := svc.ArchiveProject(context.Background(), "  "+owner.String()+"  ", id.String())
 	if err != nil {
 		t.Fatalf("ArchiveProject error: %v", err)
 	}
-	if !store.archiveCalled {
-		t.Fatal("store.ArchiveProject was not called")
-	}
-	if store.archiveOwnerID != owner || store.archiveID != project {
-		t.Fatalf("ids forwarded = owner=%s id=%s, want %s/%s", store.archiveOwnerID, store.archiveID, owner, project)
+	if !store.archiveCalled || store.archiveID != id || store.archiveOwnerID != owner {
+		t.Fatalf("archive args = owner %s id %s, want %s/%s", store.archiveOwnerID, store.archiveID, owner, id)
 	}
 	if !store.archiveUpdatedAt.Equal(fixedNow) {
 		t.Fatalf("updatedAt = %v, want %v", store.archiveUpdatedAt, fixedNow)
 	}
 	if got.Status != domain.ProjectStatusArchived {
-		t.Fatalf("returned status = %q, want archived", got.Status)
+		t.Fatalf("status = %q, want archived", got.Status)
+	}
+	if len(recorder.calls) != 1 || recorder.calls[0].EventType != service.EventProjectArchived {
+		t.Fatalf("audit = %#v, want one project.archived", recorder.calls)
 	}
 }
 
-func TestServiceArchiveProjectRejectsInvalidIDs(t *testing.T) {
-	owner := uuid.New().String()
-	cases := []struct {
-		name    string
-		owner   string
-		project string
-	}{
-		{name: "invalid owner", owner: "bad", project: uuid.New().String()},
-		{name: "empty owner", owner: "", project: uuid.New().String()},
-		{name: "invalid project id", owner: owner, project: "bad"},
-		{name: "empty project id", owner: owner, project: "   "},
-	}
-
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			store := &fakeProjectStore{}
-			svc := service.NewService(store)
-
-			_, err := svc.ArchiveProject(context.Background(), tt.owner, tt.project)
-			if !errors.Is(err, service.ErrInvalidInput) {
-				t.Fatalf("err = %v, want ErrInvalidInput", err)
-			}
-			if store.archiveCalled {
-				t.Fatalf("store called for invalid input %s", tt.name)
-			}
-		})
+func TestServiceArchiveProjectNonOwnerIsForbidden(t *testing.T) {
+	id := uuid.New()
+	for _, role := range []domain.AccessRole{domain.AccessRoleEditor, domain.AccessRoleViewer} {
+		store := &fakeProjectStore{getAccess: domain.ProjectAccess{
+			Project: domain.Project{ID: id}, AccessRole: role,
+		}}
+		svc := service.NewService(store)
+		_, err := svc.ArchiveProject(context.Background(), uuid.New().String(), id.String())
+		if !errors.Is(err, service.ErrForbidden) {
+			t.Fatalf("role %q: err = %v, want ErrForbidden", role, err)
+		}
+		if store.archiveCalled {
+			t.Fatalf("role %q: store.ArchiveProject was called", role)
+		}
 	}
 }
 
 func TestServiceArchiveProjectMapsNotFound(t *testing.T) {
-	store := &fakeProjectStore{archiveErr: domain.ErrProjectNotFound}
+	store := &fakeProjectStore{getErr: domain.ErrProjectNotFound}
 	svc := service.NewService(store)
-
-	_, err := svc.ArchiveProject(context.Background(), uuid.New().String(), uuid.New().String())
-	if !errors.Is(err, service.ErrNotFound) {
+	if _, err := svc.ArchiveProject(context.Background(), uuid.New().String(), uuid.New().String()); !errors.Is(err, service.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
+}
+
+// --- Audit safety -----------------------------------------------------------
+
+func TestServiceAuditMetadataDoesNotLeakBusinessText(t *testing.T) {
+	owner := uuid.New()
+	id := uuid.New()
+	recorder := &fakeAuditRecorder{}
+
+	createSvc := service.NewService(&fakeProjectStore{
+		createResult: domain.Project{ID: id, OwnerUserID: owner, Status: domain.ProjectStatusActive},
+	}, service.WithAuditRecorder(recorder))
+	if _, err := createSvc.CreateProject(context.Background(), service.CreateProjectInput{
+		OwnerUserID: owner.String(),
+		Name:        "Top Secret Name",
+		Description: "leaky-token-ABC123 password=hunter2",
+	}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	for _, event := range recorder.calls {
+		raw, err := json.Marshal(event.Metadata)
+		if err != nil {
+			t.Fatalf("marshal metadata: %v", err)
+		}
+		body := strings.ToLower(string(raw))
+		for _, forbidden := range []string{"top secret name", "hunter2", "leaky-token", "password", "\"name\":\"", "\"description\":\""} {
+			if strings.Contains(body, strings.ToLower(forbidden)) {
+				t.Fatalf("metadata leaks %q: %s", forbidden, raw)
+			}
+		}
+	}
+}
+
+// --- fakes ------------------------------------------------------------------
+
+type fakeAuditRecorder struct {
+	calls []service.AuditEvent
+	err   error
+}
+
+func (f *fakeAuditRecorder) RecordProjectEvent(ctx context.Context, event service.AuditEvent) error {
+	f.calls = append(f.calls, event)
+	return f.err
 }
 
 type fakeProjectStore struct {
@@ -440,11 +517,11 @@ type fakeProjectStore struct {
 	listResult domain.ListProjectsResult
 	listErr    error
 
-	getCalled  bool
-	getOwnerID uuid.UUID
-	getID      uuid.UUID
-	getResult  domain.Project
-	getErr     error
+	getCalled    bool
+	getProjectID uuid.UUID
+	getUserID    uuid.UUID
+	getAccess    domain.ProjectAccess
+	getErr       error
 
 	createCalled bool
 	createInput  domain.CreateProjectInput
@@ -462,25 +539,43 @@ type fakeProjectStore struct {
 	archiveUpdatedAt time.Time
 	archiveResult    domain.Project
 	archiveErr       error
+
+	addMemberCalled bool
+	addMemberInput  domain.AddProjectMemberInput
+	addMemberResult domain.ProjectMember
+	addMemberErr    error
+
+	listMembersResult []domain.ProjectMemberDetail
+	listMembersErr    error
+
+	updateMemberInput  domain.UpdateProjectMemberRoleInput
+	updateMemberResult domain.ProjectMember
+	updateMemberErr    error
+
+	removeMemberCalled  bool
+	removeMemberProject uuid.UUID
+	removeMemberUser    uuid.UUID
+	removeMemberErr     error
+
+	findEmailInput  string
+	findEmailResult uuid.UUID
+	findEmailErr    error
 }
 
 func (f *fakeProjectStore) ListProjects(ctx context.Context, input domain.ListProjectsInput) (domain.ListProjectsResult, error) {
 	f.listCalled = true
 	f.listInput = input
-	if f.listErr != nil {
-		return domain.ListProjectsResult{}, f.listErr
-	}
-	return f.listResult, nil
+	return f.listResult, f.listErr
 }
 
-func (f *fakeProjectStore) GetProjectByID(ctx context.Context, ownerUserID uuid.UUID, id uuid.UUID) (domain.Project, error) {
+func (f *fakeProjectStore) GetProjectWithAccess(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) (domain.ProjectAccess, error) {
 	f.getCalled = true
-	f.getOwnerID = ownerUserID
-	f.getID = id
+	f.getProjectID = projectID
+	f.getUserID = userID
 	if f.getErr != nil {
-		return domain.Project{}, f.getErr
+		return domain.ProjectAccess{}, f.getErr
 	}
-	return f.getResult, nil
+	return f.getAccess, nil
 }
 
 func (f *fakeProjectStore) CreateProject(ctx context.Context, input domain.CreateProjectInput) (domain.Project, error) {
@@ -512,234 +607,42 @@ func (f *fakeProjectStore) ArchiveProject(ctx context.Context, ownerUserID uuid.
 	return f.archiveResult, nil
 }
 
-type fakeAuditRecorder struct {
-	calls []service.AuditEvent
-	err   error
+func (f *fakeProjectStore) AddProjectMember(ctx context.Context, input domain.AddProjectMemberInput) (domain.ProjectMember, error) {
+	f.addMemberCalled = true
+	f.addMemberInput = input
+	if f.addMemberErr != nil {
+		return domain.ProjectMember{}, f.addMemberErr
+	}
+	return f.addMemberResult, nil
 }
 
-func (f *fakeAuditRecorder) RecordProjectEvent(ctx context.Context, event service.AuditEvent) error {
-	f.calls = append(f.calls, event)
-	return f.err
+func (f *fakeProjectStore) ListProjectMembers(ctx context.Context, projectID uuid.UUID) ([]domain.ProjectMemberDetail, error) {
+	return f.listMembersResult, f.listMembersErr
 }
 
-func TestServiceCreateProjectRecordsAudit(t *testing.T) {
-	owner := uuid.New()
-	created := domain.Project{
-		ID:          uuid.New(),
-		OwnerUserID: owner,
-		Status:      domain.ProjectStatusActive,
-	}
-	recorder := &fakeAuditRecorder{}
-	store := &fakeProjectStore{createResult: created}
-	svc := service.NewService(store, service.WithAuditRecorder(recorder))
-
-	got, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
-		OwnerUserID: owner.String(),
-		Name:        "Demo",
-	})
-	if err != nil {
-		t.Fatalf("CreateProject error: %v", err)
-	}
-	if got.ID != created.ID {
-		t.Fatalf("returned id mismatch")
-	}
-	if len(recorder.calls) != 1 {
-		t.Fatalf("audit calls = %d, want 1", len(recorder.calls))
-	}
-	event := recorder.calls[0]
-	if event.EventType != service.EventProjectCreated {
-		t.Fatalf("event_type = %q, want %q", event.EventType, service.EventProjectCreated)
-	}
-	if event.Metadata.ProjectID != created.ID.String() ||
-		event.Metadata.OwnerUserID != owner.String() ||
-		event.Metadata.Status != string(domain.ProjectStatusActive) {
-		t.Fatalf("metadata = %#v", event.Metadata)
-	}
+func (f *fakeProjectStore) GetProjectMember(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) (domain.ProjectMember, error) {
+	return domain.ProjectMember{}, domain.ErrProjectMemberNotFound
 }
 
-func TestServiceUpdateProjectRecordsAuditWithChangedFields(t *testing.T) {
-	owner := uuid.New()
-	id := uuid.New()
-	updated := domain.Project{
-		ID:          id,
-		OwnerUserID: owner,
-		Status:      domain.ProjectStatusArchived,
+func (f *fakeProjectStore) UpdateProjectMemberRole(ctx context.Context, input domain.UpdateProjectMemberRoleInput) (domain.ProjectMember, error) {
+	f.updateMemberInput = input
+	if f.updateMemberErr != nil {
+		return domain.ProjectMember{}, f.updateMemberErr
 	}
-	recorder := &fakeAuditRecorder{}
-	store := &fakeProjectStore{updateResult: updated}
-	svc := service.NewService(store, service.WithAuditRecorder(recorder))
-
-	name := "New Name"
-	desc := "  hello  "
-	status := "archived"
-	_, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
-		OwnerUserID: owner.String(),
-		ID:          id.String(),
-		Name:        &name,
-		Description: &desc,
-		Status:      &status,
-	})
-	if err != nil {
-		t.Fatalf("UpdateProject error: %v", err)
-	}
-	if len(recorder.calls) != 1 {
-		t.Fatalf("audit calls = %d, want 1", len(recorder.calls))
-	}
-	event := recorder.calls[0]
-	if event.EventType != service.EventProjectUpdated {
-		t.Fatalf("event_type = %q", event.EventType)
-	}
-	if event.Metadata.ProjectID != id.String() {
-		t.Fatalf("project_id = %q", event.Metadata.ProjectID)
-	}
-	if event.Metadata.OwnerUserID != owner.String() {
-		t.Fatalf("owner_user_id = %q", event.Metadata.OwnerUserID)
-	}
-	if event.Metadata.Status != "archived" {
-		t.Fatalf("status = %q", event.Metadata.Status)
-	}
-	wantFields := []string{"name", "description", "status"}
-	if len(event.Metadata.ChangedFields) != len(wantFields) {
-		t.Fatalf("changed_fields = %v, want %v", event.Metadata.ChangedFields, wantFields)
-	}
-	for i, want := range wantFields {
-		if event.Metadata.ChangedFields[i] != want {
-			t.Fatalf("changed_fields[%d] = %q, want %q", i, event.Metadata.ChangedFields[i], want)
-		}
-	}
+	return f.updateMemberResult, nil
 }
 
-func TestServiceArchiveProjectRecordsAudit(t *testing.T) {
-	owner := uuid.New()
-	id := uuid.New()
-	archived := domain.Project{
-		ID:          id,
-		OwnerUserID: owner,
-		Status:      domain.ProjectStatusArchived,
-	}
-	recorder := &fakeAuditRecorder{}
-	store := &fakeProjectStore{archiveResult: archived}
-	svc := service.NewService(store, service.WithAuditRecorder(recorder))
-
-	_, err := svc.ArchiveProject(context.Background(), owner.String(), id.String())
-	if err != nil {
-		t.Fatalf("ArchiveProject error: %v", err)
-	}
-	if len(recorder.calls) != 1 {
-		t.Fatalf("audit calls = %d, want 1", len(recorder.calls))
-	}
-	event := recorder.calls[0]
-	if event.EventType != service.EventProjectArchived {
-		t.Fatalf("event_type = %q", event.EventType)
-	}
-	if event.Metadata.ProjectID != id.String() ||
-		event.Metadata.OwnerUserID != owner.String() ||
-		event.Metadata.Status != string(domain.ProjectStatusArchived) {
-		t.Fatalf("metadata = %#v", event.Metadata)
-	}
+func (f *fakeProjectStore) RemoveProjectMember(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) error {
+	f.removeMemberCalled = true
+	f.removeMemberProject = projectID
+	f.removeMemberUser = userID
+	return f.removeMemberErr
 }
 
-func TestServiceWriteOperationsTolerateAuditFailures(t *testing.T) {
-	owner := uuid.New()
-	id := uuid.New()
-	recorder := &fakeAuditRecorder{err: errors.New("audit boom")}
-
-	t.Run("create still returns project", func(t *testing.T) {
-		store := &fakeProjectStore{createResult: domain.Project{ID: id, OwnerUserID: owner}}
-		svc := service.NewService(store, service.WithAuditRecorder(recorder))
-		got, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
-			OwnerUserID: owner.String(),
-			Name:        "Demo",
-		})
-		if err != nil {
-			t.Fatalf("CreateProject error: %v", err)
-		}
-		if got.ID != id {
-			t.Fatalf("project id mismatch")
-		}
-	})
-
-	t.Run("update still returns project", func(t *testing.T) {
-		store := &fakeProjectStore{updateResult: domain.Project{ID: id, OwnerUserID: owner}}
-		svc := service.NewService(store, service.WithAuditRecorder(recorder))
-		name := "x"
-		got, err := svc.UpdateProject(context.Background(), service.UpdateProjectInput{
-			OwnerUserID: owner.String(),
-			ID:          id.String(),
-			Name:        &name,
-		})
-		if err != nil {
-			t.Fatalf("UpdateProject error: %v", err)
-		}
-		if got.ID != id {
-			t.Fatalf("project id mismatch")
-		}
-	})
-
-	t.Run("archive still returns project", func(t *testing.T) {
-		store := &fakeProjectStore{archiveResult: domain.Project{ID: id, OwnerUserID: owner, Status: domain.ProjectStatusArchived}}
-		svc := service.NewService(store, service.WithAuditRecorder(recorder))
-		got, err := svc.ArchiveProject(context.Background(), owner.String(), id.String())
-		if err != nil {
-			t.Fatalf("ArchiveProject error: %v", err)
-		}
-		if got.ID != id || got.Status != domain.ProjectStatusArchived {
-			t.Fatalf("project mismatch: %#v", got)
-		}
-	})
-}
-
-func TestServiceAuditMetadataDoesNotLeakBusinessText(t *testing.T) {
-	owner := uuid.New()
-	id := uuid.New()
-	recorder := &fakeAuditRecorder{}
-
-	createStore := &fakeProjectStore{createResult: domain.Project{ID: id, OwnerUserID: owner, Status: domain.ProjectStatusActive}}
-	createSvc := service.NewService(createStore, service.WithAuditRecorder(recorder))
-	if _, err := createSvc.CreateProject(context.Background(), service.CreateProjectInput{
-		OwnerUserID: owner.String(),
-		Name:        "Top Secret Name",
-		Description: "leaky-token-ABC123 password=hunter2",
-	}); err != nil {
-		t.Fatalf("CreateProject: %v", err)
+func (f *fakeProjectStore) FindUserByEmail(ctx context.Context, email string) (uuid.UUID, error) {
+	f.findEmailInput = email
+	if f.findEmailErr != nil {
+		return uuid.Nil, f.findEmailErr
 	}
-
-	updateStore := &fakeProjectStore{updateResult: domain.Project{ID: id, OwnerUserID: owner, Status: domain.ProjectStatusActive}}
-	updateSvc := service.NewService(updateStore, service.WithAuditRecorder(recorder))
-	name := "Another Secret"
-	desc := "Bearer eyJsecret token"
-	if _, err := updateSvc.UpdateProject(context.Background(), service.UpdateProjectInput{
-		OwnerUserID: owner.String(),
-		ID:          id.String(),
-		Name:        &name,
-		Description: &desc,
-	}); err != nil {
-		t.Fatalf("UpdateProject: %v", err)
-	}
-
-	if len(recorder.calls) == 0 {
-		t.Fatal("no audit calls captured")
-	}
-
-	for _, event := range recorder.calls {
-		raw, err := json.Marshal(event.Metadata)
-		if err != nil {
-			t.Fatalf("marshal metadata: %v", err)
-		}
-		body := strings.ToLower(string(raw))
-		for _, forbidden := range []string{
-			"top secret name",
-			"another secret",
-			"hunter2",
-			"leaky-token",
-			"bearer ey",
-			"password",
-			"\"name\":\"",
-			"\"description\":\"",
-		} {
-			if strings.Contains(body, strings.ToLower(forbidden)) {
-				t.Fatalf("metadata leaks %q: %s", forbidden, raw)
-			}
-		}
-	}
+	return f.findEmailResult, nil
 }

@@ -80,8 +80,9 @@ Sign-up returns `201`; sign-in, refresh, and me return `200`.
 
 ## Authorization
 
-- `/api/auth/*` and `/api/projects/*` work for any authenticated user.
-  Projects are owner-scoped — a user only ever sees their own rows.
+- `/api/auth/*` and `/api/projects/*` work for any authenticated user. A user
+  sees the projects they own plus any shared with them; editing requires owner
+  or `editor` access and archiving/member management is owner-only.
 - `/api/users/*` and `/api/system-events` are **admin-only**: the user must be
   active and carry `role = "admin"`. A non-admin authenticated user gets `403`
   with `{ "code": "forbidden", "message": "Admin role required." }`.

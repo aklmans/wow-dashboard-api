@@ -63,6 +63,45 @@
       }
     },
     "schemas": {
+      "AddProjectMemberInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/AddProjectMemberInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "email": {
+            "description": "Email of the user to grant access to",
+            "examples": [
+              "teammate@example.com"
+            ],
+            "format": "email",
+            "maxLength": 320,
+            "type": "string"
+          },
+          "role": {
+            "description": "Access role to grant",
+            "enum": [
+              "viewer",
+              "editor"
+            ],
+            "examples": [
+              "editor"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role"
+        ],
+        "type": "object"
+      },
       "AuthMeBody": {
         "additionalProperties": false,
         "properties": {
@@ -406,6 +445,166 @@
         ],
         "type": "object"
       },
+      "ProjectMemberBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ProjectMemberBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "member": {
+            "$ref": "#/components/schemas/ProjectMemberGrant",
+            "description": "The project access grant"
+          }
+        },
+        "required": [
+          "member"
+        ],
+        "type": "object"
+      },
+      "ProjectMemberDeletedBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ProjectMemberDeletedBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "success": {
+            "description": "Operation success flag",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "type": "object"
+      },
+      "ProjectMemberGrant": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "description": "Grant creation timestamp",
+            "format": "date-time",
+            "type": "string"
+          },
+          "role": {
+            "description": "Member access role",
+            "examples": [
+              "editor"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Grant last update timestamp",
+            "format": "date-time",
+            "type": "string"
+          },
+          "userId": {
+            "description": "Member user identifier",
+            "examples": [
+              "d1f6b2a4-1c3e-4a8b-9d2f-6e7a0b1c2d3e"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "role",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ProjectMemberItem": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "description": "Grant creation timestamp",
+            "format": "date-time",
+            "type": "string"
+          },
+          "displayName": {
+            "description": "Member display name",
+            "examples": [
+              "Team Mate"
+            ],
+            "type": "string"
+          },
+          "email": {
+            "description": "Member email address",
+            "examples": [
+              "teammate@example.com"
+            ],
+            "type": "string"
+          },
+          "role": {
+            "description": "Member access role",
+            "examples": [
+              "editor"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Grant last update timestamp",
+            "format": "date-time",
+            "type": "string"
+          },
+          "userId": {
+            "description": "Member user identifier",
+            "examples": [
+              "d1f6b2a4-1c3e-4a8b-9d2f-6e7a0b1c2d3e"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "email",
+          "displayName",
+          "role",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "ProjectMembersBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/ProjectMembersBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "members": {
+            "description": "Users granted non-owner access to the project",
+            "items": {
+              "$ref": "#/components/schemas/ProjectMemberItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "members"
+        ],
+        "type": "object"
+      },
       "ProjectsListBody": {
         "additionalProperties": false,
         "properties": {
@@ -687,6 +886,35 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "UpdateProjectMemberInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UpdateProjectMemberInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "role": {
+            "description": "New access role",
+            "enum": [
+              "viewer",
+              "editor"
+            ],
+            "examples": [
+              "viewer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
         "type": "object"
       },
       "UpdateUserInputBody": {
@@ -1487,6 +1715,319 @@
           }
         },
         "summary": "Update project",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/projects/{id}/members": {
+      "get": {
+        "description": "Lists the non-owner members of a project. Any user with access to the project may view its members.",
+        "operationId": "get-project-members",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Project UUID",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMembersBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "404": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List project members",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "post": {
+        "description": "Grants a user, identified by email, viewer or editor access to a project. Owner only.",
+        "operationId": "post-project-member",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Project UUID",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddProjectMemberInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMemberBody"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "404": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "409": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Add a project member",
+        "tags": [
+          "Projects"
+        ]
+      }
+    },
+    "/api/projects/{id}/members/{userId}": {
+      "delete": {
+        "description": "Revokes a user's access to a project. Owner only.",
+        "operationId": "delete-project-member",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Project UUID",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Member user UUID",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "description": "Member user UUID",
+              "examples": [
+                "d1f6b2a4-1c3e-4a8b-9d2f-6e7a0b1c2d3e"
+              ],
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMemberDeletedBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "404": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Remove a project member",
+        "tags": [
+          "Projects"
+        ]
+      },
+      "patch": {
+        "description": "Changes an existing member's access role. Owner only.",
+        "operationId": "patch-project-member",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Project UUID",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Project UUID",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Member user UUID",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "description": "Member user UUID",
+              "examples": [
+                "d1f6b2a4-1c3e-4a8b-9d2f-6e7a0b1c2d3e"
+              ],
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectMemberInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectMemberBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "404": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update a project member role",
         "tags": [
           "Projects"
         ]

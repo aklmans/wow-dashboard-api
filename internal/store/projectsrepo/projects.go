@@ -64,32 +64,32 @@ func (s *ProjectStore) CreateProject(ctx context.Context, input domain.CreatePro
 	return projectFromRow(row)
 }
 
-// ListProjects returns the paginated list of projects owned by
-// input.OwnerUserID, applying optional search and status filters.
+// ListProjects returns the paginated list of projects the requesting user
+// owns or is a member of, applying optional search and status filters.
 func (s *ProjectStore) ListProjects(ctx context.Context, input domain.ListProjectsInput) (domain.ListProjectsResult, error) {
 	if s.queries == nil {
 		return domain.ListProjectsResult{}, fmt.Errorf("projectsrepo: queries is nil")
 	}
 
-	owner := pgUUIDFromDomain(input.OwnerUserID)
+	user := pgUUIDFromDomain(input.UserID)
 	search := pgText(escapeLikePattern(input.Search))
 	status := pgText(string(input.Status))
 
 	total, err := s.queries.CountProjectsPage(ctx, query.CountProjectsPageParams{
-		OwnerUserID: owner,
-		Search:      search,
-		Status:      status,
+		UserID: user,
+		Search: search,
+		Status: status,
 	})
 	if err != nil {
 		return domain.ListProjectsResult{}, fmt.Errorf("projectsrepo: count projects: %w", err)
 	}
 
 	rows, err := s.queries.ListProjectsPage(ctx, query.ListProjectsPageParams{
-		OwnerUserID: owner,
-		Search:      search,
-		Status:      status,
-		LimitVal:    int32(input.PageSize),
-		OffsetVal:   int32(input.Offset),
+		UserID:    user,
+		Search:    search,
+		Status:    status,
+		LimitVal:  int32(input.PageSize),
+		OffsetVal: int32(input.Offset),
 	})
 	if err != nil {
 		return domain.ListProjectsResult{}, fmt.Errorf("projectsrepo: list projects: %w", err)
@@ -112,31 +112,38 @@ func (s *ProjectStore) ListProjects(ctx context.Context, input domain.ListProjec
 	}, nil
 }
 
-// GetProjectByID fetches a single project scoped to the owner. Missing rows
-// (or rows owned by another user) are mapped to domain.ErrProjectNotFound.
-func (s *ProjectStore) GetProjectByID(ctx context.Context, ownerUserID uuid.UUID, id uuid.UUID) (domain.Project, error) {
+// GetProjectWithAccess fetches a project together with the requesting user's
+// effective access role. A user who is neither the owner nor a member sees
+// domain.ErrProjectNotFound — identical to a genuinely missing project — so a
+// project's existence is never leaked.
+func (s *ProjectStore) GetProjectWithAccess(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) (domain.ProjectAccess, error) {
 	if s.queries == nil {
-		return domain.Project{}, fmt.Errorf("projectsrepo: queries is nil")
+		return domain.ProjectAccess{}, fmt.Errorf("projectsrepo: queries is nil")
 	}
 
-	row, err := s.queries.GetProjectByID(ctx, query.GetProjectByIDParams{
-		ID:          pgUUIDFromDomain(id),
-		OwnerUserID: pgUUIDFromDomain(ownerUserID),
+	row, err := s.queries.GetProjectWithAccess(ctx, query.GetProjectWithAccessParams{
+		ID:     pgUUIDFromDomain(projectID),
+		UserID: pgUUIDFromDomain(userID),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Project{}, domain.ErrProjectNotFound
+			return domain.ProjectAccess{}, domain.ErrProjectNotFound
 		}
-		return domain.Project{}, fmt.Errorf("projectsrepo: get project: %w", err)
+		return domain.ProjectAccess{}, fmt.Errorf("projectsrepo: get project: %w", err)
 	}
-	return projectFromRow(row)
+
+	project, err := projectFromAccessRow(row)
+	if err != nil {
+		return domain.ProjectAccess{}, err
+	}
+	return domain.ProjectAccess{Project: project, AccessRole: domain.AccessRole(row.AccessRole)}, nil
 }
 
-// UpdateProject applies a partial update to a project owned by
-// input.OwnerUserID. Nil pointer fields leave the column untouched; non-nil
-// fields are applied verbatim (an empty Description string clears the field).
-// Missing rows or rows owned by a different user surface as
-// domain.ErrProjectNotFound.
+// UpdateProject applies a partial update to a project. The caller must already
+// be authorized (owner or editor) by the service via GetProjectWithAccess, so
+// the update is scoped by id alone. Nil pointer fields leave the column
+// untouched; non-nil fields are applied verbatim (an empty Description string
+// clears the field). A missing row surfaces as domain.ErrProjectNotFound.
 func (s *ProjectStore) UpdateProject(ctx context.Context, input domain.UpdateProjectInput) (domain.Project, error) {
 	if s.queries == nil {
 		return domain.Project{}, fmt.Errorf("projectsrepo: queries is nil")
@@ -144,7 +151,6 @@ func (s *ProjectStore) UpdateProject(ctx context.Context, input domain.UpdatePro
 
 	row, err := s.queries.UpdateProject(ctx, query.UpdateProjectParams{
 		ID:          pgUUIDFromDomain(input.ID),
-		OwnerUserID: pgUUIDFromDomain(input.OwnerUserID),
 		Name:        pgTextPtr(input.Name),
 		Description: pgTextPtr(input.Description),
 		Status:      pgStatusPtr(input.Status),
@@ -233,6 +239,27 @@ func pgTime(t time.Time) pgtype.Timestamptz {
 }
 
 func projectFromRow(row query.Project) (domain.Project, error) {
+	if !row.ID.Valid {
+		return domain.Project{}, fmt.Errorf("projectsrepo: invalid project id")
+	}
+	if !row.OwnerUserID.Valid {
+		return domain.Project{}, fmt.Errorf("projectsrepo: invalid owner_user_id")
+	}
+	if !row.CreatedAt.Valid || !row.UpdatedAt.Valid {
+		return domain.Project{}, fmt.Errorf("projectsrepo: invalid timestamps")
+	}
+	return domain.Project{
+		ID:          uuid.UUID(row.ID.Bytes),
+		Name:        row.Name,
+		Description: row.Description,
+		Status:      domain.ProjectStatus(row.Status),
+		OwnerUserID: uuid.UUID(row.OwnerUserID.Bytes),
+		CreatedAt:   row.CreatedAt.Time,
+		UpdatedAt:   row.UpdatedAt.Time,
+	}, nil
+}
+
+func projectFromAccessRow(row query.GetProjectWithAccessRow) (domain.Project, error) {
 	if !row.ID.Valid {
 		return domain.Project{}, fmt.Errorf("projectsrepo: invalid project id")
 	}

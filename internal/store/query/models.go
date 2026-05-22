@@ -18,6 +18,14 @@ type Project struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
+type ProjectMember struct {
+	ProjectID pgtype.UUID
+	UserID    pgtype.UUID
+	Role      string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 type RefreshToken struct {
 	ID                pgtype.UUID
 	UserID            pgtype.UUID

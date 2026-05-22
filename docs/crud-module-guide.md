@@ -190,18 +190,15 @@ Every module must declare one authorization model before implementation:
 | Model | Current reference | Rules |
 |-------|-------------------|-------|
 | Admin-only | `users` endpoints and `internal/http/handlers/authz.go` | Require authenticated current user with `role = "admin"` before calling the service. Use a helper such as `requireAdmin`, not ad hoc role checks in each handler branch. |
-| Owner-scoped authenticated user | `projects` endpoints | Authenticate the user, pass the current user ID into the service, parse it as a UUID at the service boundary, and enforce ownership in every SQL query `WHERE` clause. |
+| Owner-scoped authenticated user | baseline `projects` ownership | Authenticate the user, pass the current user ID into the service, parse it as a UUID at the service boundary, and enforce ownership in every SQL query `WHERE` clause. |
+| Owner + role-based members (shared resource) | `projects` sharing | Layered on owner scope: a `project_members` table grants non-owner `viewer`/`editor` roles. |
 | Public read-only | No current CRUD reference | Must be intentionally documented. Limit to read routes, keep response fields safe for anonymous callers, and still validate path/query params. |
 
-Do not scatter authorization as casual inline `if` checks. Extract a helper or policy function that can be tested and reused. Handler-level authz is good for decisions based on the authenticated user, but it is not enough for owner scope.
+Do not scatter authorization as casual inline `if` checks. Extract a helper or policy function that can be tested and reused. Handler-level authz is good for decisions based on the authenticated user, but it is not enough for resource scope.
 
-Owner scope must be enforced in SQL. The `projects` reference uses:
+Resource scope must be enforced in SQL — never filter rows in the handler or service after fetching, which risks leaking existence, data, counts, or timing behavior. For a purely owner-scoped resource, every list/detail/update/archive query carries `WHERE ... AND owner_user_id = @owner_user_id`.
 
-```sql
-WHERE id = @id AND owner_user_id = @owner_user_id;
-```
-
-List/count/update/archive queries need equivalent owner filters. Filtering rows in the handler or service after fetching is not acceptable because it risks leaking existence, data, counts, or timing behavior.
+A shared resource still enforces access in SQL, but needs the requester's *role*, which a single boolean `WHERE` cannot express. The `projects` reference uses an SQL access query (`GetProjectWithAccess`) that returns the row plus a computed `access_role` (`owner`/`editor`/`viewer`) — or no row when the user has no access. The service then gates the operation on that role (e.g. `editor` may update, only `owner` may archive or manage members), mapping no-access to not-found and insufficient-role to forbidden. List queries use `owner_user_id = @user OR id IN (member subquery)`.
 
 ## Audit Strategy
 

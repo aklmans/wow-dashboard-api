@@ -19,10 +19,14 @@ type ProjectsAuthenticator = UsersAuthenticator
 // ProjectsService is the project use-case surface required by handlers.
 type ProjectsService interface {
 	ListProjects(ctx context.Context, input projectservice.ListProjectsInput) (domain.ListProjectsResult, error)
-	GetProject(ctx context.Context, ownerUserID string, id string) (domain.Project, error)
+	GetProject(ctx context.Context, userID string, id string) (domain.Project, error)
 	CreateProject(ctx context.Context, input projectservice.CreateProjectInput) (domain.Project, error)
 	UpdateProject(ctx context.Context, input projectservice.UpdateProjectInput) (domain.Project, error)
-	ArchiveProject(ctx context.Context, ownerUserID string, id string) (domain.Project, error)
+	ArchiveProject(ctx context.Context, userID string, id string) (domain.Project, error)
+	ListMembers(ctx context.Context, userID string, projectID string) ([]domain.ProjectMemberDetail, error)
+	AddMember(ctx context.Context, input projectservice.AddMemberInput) (domain.ProjectMember, error)
+	UpdateMemberRole(ctx context.Context, input projectservice.UpdateMemberRoleInput) (domain.ProjectMember, error)
+	RemoveMember(ctx context.Context, requestingUserID string, projectID string, targetUserID string) error
 }
 
 type listProjectsInput struct {
@@ -112,11 +116,11 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 		}
 
 		result, err := projectsSvc.ListProjects(ctx, projectservice.ListProjectsInput{
-			OwnerUserID: currentUser.ID,
-			Page:        input.Page,
-			PageSize:    input.PageSize,
-			Search:      input.Search,
-			Status:      input.Status,
+			UserID:   currentUser.ID,
+			Page:     input.Page,
+			PageSize: input.PageSize,
+			Search:   input.Search,
+			Status:   input.Status,
 		})
 		if err != nil {
 			return nil, mapProjectsError(ctx, err)
@@ -208,7 +212,7 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 		}
 
 		project, err := projectsSvc.UpdateProject(ctx, projectservice.UpdateProjectInput{
-			OwnerUserID: currentUser.ID,
+			UserID:      currentUser.ID,
 			ID:          input.ID,
 			Name:        input.Body.Name,
 			Description: input.Body.Description,
@@ -246,6 +250,8 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 		}
 		return &projectDetailResponse{Body: projectDetailBody{Project: projectItemFromDomain(project)}}, nil
 	})
+
+	registerProjectMembers(api, authSvc, projectsSvc)
 }
 
 func authenticateProjects(ctx context.Context, authSvc ProjectsAuthenticator, authHeader string) (currentUser projectsAuthUser, err error) {
@@ -300,8 +306,12 @@ func mapProjectsError(ctx context.Context, err error) huma.StatusError {
 		return apierror.ValidationFailed("Invalid projects request.").ForContext(ctx)
 	case errors.Is(err, projectservice.ErrNotFound):
 		return apierror.NotFound("Project not found.").ForContext(ctx)
+	case errors.Is(err, projectservice.ErrForbidden):
+		return apierror.Forbidden("You do not have permission to perform this action on the project.").ForContext(ctx)
 	case errors.Is(err, projectservice.ErrNameConflict):
 		return apierror.Conflict("Project name already exists.").ForContext(ctx)
+	case errors.Is(err, projectservice.ErrMemberConflict):
+		return apierror.Conflict("That user already has access to the project.").ForContext(ctx)
 	default:
 		return apierror.InternalError(err).ForContext(ctx)
 	}

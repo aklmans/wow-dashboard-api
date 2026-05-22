@@ -154,6 +154,9 @@ Event types currently emitted:
 | `projects.project.created` | Project creation succeeded. |
 | `projects.project.updated` | Project update succeeded. |
 | `projects.project.archived` | Project archive succeeded. |
+| `projects.member.added` | A user was granted project access. |
+| `projects.member.role_changed` | A project member's role was changed. |
+| `projects.member.removed` | A project member's access was revoked. |
 | `users.user.updated` | An admin changed another user's role or status. |
 
 When adding an `event_type`, update this table and add tests that prove the

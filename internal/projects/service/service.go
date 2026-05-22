@@ -19,6 +19,13 @@ var (
 	ErrInvalidInput = errors.New("projects: invalid input")
 	ErrNameConflict = errors.New("projects: name conflict")
 	ErrNotFound     = errors.New("projects: not found")
+	// ErrForbidden is returned when the requester has some access to a
+	// project but not enough for the attempted operation — e.g. a viewer
+	// trying to edit, or a non-owner trying to archive or manage members.
+	ErrForbidden = errors.New("projects: forbidden")
+	// ErrMemberConflict is returned when granting access to a user who is
+	// already a member or is the project owner.
+	ErrMemberConflict = errors.New("projects: member conflict")
 )
 
 const (
@@ -27,12 +34,14 @@ const (
 )
 
 // ListProjectsInput is the raw input the handler passes to the service.
+// UserID is the requesting user; the result includes projects they own or
+// are a member of.
 type ListProjectsInput struct {
-	OwnerUserID string
-	Page        int
-	PageSize    int
-	Search      string
-	Status      string
+	UserID   string
+	Page     int
+	PageSize int
+	Search   string
+	Status   string
 }
 
 // CreateProjectInput is the raw input the handler passes to the service.
@@ -44,11 +53,11 @@ type CreateProjectInput struct {
 }
 
 // UpdateProjectInput is the raw partial-update input the handler passes to
-// the service. Pointer fields distinguish "not provided" (nil) from
-// "provided" (non-nil, including an empty Description string used to clear
-// the column).
+// the service. UserID is the requesting user (owner or editor). Pointer
+// fields distinguish "not provided" (nil) from "provided" (non-nil, including
+// an empty Description string used to clear the column).
 type UpdateProjectInput struct {
-	OwnerUserID string
+	UserID      string
 	ID          string
 	Name        *string
 	Description *string
@@ -59,9 +68,15 @@ type UpdateProjectInput struct {
 type ProjectStore interface {
 	CreateProject(ctx context.Context, input domain.CreateProjectInput) (domain.Project, error)
 	ListProjects(ctx context.Context, input domain.ListProjectsInput) (domain.ListProjectsResult, error)
-	GetProjectByID(ctx context.Context, ownerUserID uuid.UUID, id uuid.UUID) (domain.Project, error)
+	GetProjectWithAccess(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) (domain.ProjectAccess, error)
 	UpdateProject(ctx context.Context, input domain.UpdateProjectInput) (domain.Project, error)
 	ArchiveProject(ctx context.Context, ownerUserID uuid.UUID, id uuid.UUID, updatedAt time.Time) (domain.Project, error)
+	AddProjectMember(ctx context.Context, input domain.AddProjectMemberInput) (domain.ProjectMember, error)
+	ListProjectMembers(ctx context.Context, projectID uuid.UUID) ([]domain.ProjectMemberDetail, error)
+	GetProjectMember(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) (domain.ProjectMember, error)
+	UpdateProjectMemberRole(ctx context.Context, input domain.UpdateProjectMemberRoleInput) (domain.ProjectMember, error)
+	RemoveProjectMember(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) error
+	FindUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 }
 
 // Service orchestrates the project use cases.
@@ -98,7 +113,7 @@ func (s *Service) ListProjects(ctx context.Context, input ListProjectsInput) (do
 		return domain.ListProjectsResult{}, fmt.Errorf("projects: store is nil")
 	}
 
-	ownerID, err := parseOwnerID(input.OwnerUserID)
+	userID, err := parseUserID(input.UserID)
 	if err != nil {
 		return domain.ListProjectsResult{}, err
 	}
@@ -121,44 +136,51 @@ func (s *Service) ListProjects(ctx context.Context, input ListProjectsInput) (do
 	}
 
 	return s.store.ListProjects(ctx, domain.ListProjectsInput{
-		OwnerUserID: ownerID,
-		Page:        page.Page,
-		PageSize:    page.PageSize,
-		Offset:      page.Offset,
-		Search:      page.Search,
-		Status:      status,
+		UserID:   userID,
+		Page:     page.Page,
+		PageSize: page.PageSize,
+		Offset:   page.Offset,
+		Search:   page.Search,
+		Status:   status,
 	})
 }
 
-// GetProject fetches a project owned by the current user. Malformed ids
-// surface as ErrInvalidInput; missing rows surface as ErrNotFound so the
-// handler never sees store-specific sentinels.
-func (s *Service) GetProject(ctx context.Context, ownerUserID string, id string) (domain.Project, error) {
+// GetProject fetches a project the current user owns or is a member of.
+// Malformed ids surface as ErrInvalidInput; a project the user cannot access
+// surfaces as ErrNotFound, identical to a genuinely missing project.
+func (s *Service) GetProject(ctx context.Context, userID string, id string) (domain.Project, error) {
 	if s.store == nil {
 		return domain.Project{}, fmt.Errorf("projects: store is nil")
 	}
 
-	ownerID, err := parseOwnerID(ownerUserID)
+	parsedUser, err := parseUserID(userID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	parsedID, err := parseProjectID(id)
 	if err != nil {
 		return domain.Project{}, err
 	}
 
-	parsedID, err := pathparam.ParseUUID(id, "id")
+	access, err := s.projectAccess(ctx, parsedUser, parsedID)
 	if err != nil {
-		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
-		}
 		return domain.Project{}, err
 	}
+	return access.Project, nil
+}
 
-	project, err := s.store.GetProjectByID(ctx, ownerID, parsedID)
+// projectAccess loads the requesting user's access to a project. A project the
+// user cannot access (or one that does not exist) is mapped to ErrNotFound so
+// callers never leak a foreign project's existence.
+func (s *Service) projectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (domain.ProjectAccess, error) {
+	access, err := s.store.GetProjectWithAccess(ctx, projectID, userID)
 	if err != nil {
 		if errors.Is(err, domain.ErrProjectNotFound) {
-			return domain.Project{}, ErrNotFound
+			return domain.ProjectAccess{}, ErrNotFound
 		}
-		return domain.Project{}, err
+		return domain.ProjectAccess{}, err
 	}
-	return project, nil
+	return access, nil
 }
 
 // CreateProject validates and inserts a new project for the current user.
@@ -167,7 +189,7 @@ func (s *Service) CreateProject(ctx context.Context, input CreateProjectInput) (
 		return domain.Project{}, fmt.Errorf("projects: store is nil")
 	}
 
-	ownerID, err := parseOwnerID(input.OwnerUserID)
+	ownerID, err := parseUserID(input.OwnerUserID)
 	if err != nil {
 		return domain.Project{}, err
 	}
@@ -225,16 +247,13 @@ func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (
 		return domain.Project{}, fmt.Errorf("projects: store is nil")
 	}
 
-	ownerID, err := parseOwnerID(input.OwnerUserID)
+	userID, err := parseUserID(input.UserID)
 	if err != nil {
 		return domain.Project{}, err
 	}
 
-	parsedID, err := pathparam.ParseUUID(input.ID, "id")
+	parsedID, err := parseProjectID(input.ID)
 	if err != nil {
-		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
-		}
 		return domain.Project{}, err
 	}
 
@@ -242,10 +261,17 @@ func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (
 		return domain.Project{}, fmt.Errorf("%w: at least one of name, description, or status must be provided", ErrInvalidInput)
 	}
 
+	access, err := s.projectAccess(ctx, userID, parsedID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	if !access.AccessRole.CanEdit() {
+		return domain.Project{}, ErrForbidden
+	}
+
 	update := domain.UpdateProjectInput{
-		ID:          parsedID,
-		OwnerUserID: ownerID,
-		UpdatedAt:   s.now().UTC().Truncate(time.Microsecond),
+		ID:        parsedID,
+		UpdatedAt: s.now().UTC().Truncate(time.Microsecond),
 	}
 
 	var changedFields []string
@@ -300,30 +326,35 @@ func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (
 	return project, nil
 }
 
-// ArchiveProject archives a project owned by the current user. It is
-// idempotent — archiving an already-archived row still succeeds and refreshes
-// updated_at. Missing rows or rows owned by other users surface as
-// ErrNotFound.
-func (s *Service) ArchiveProject(ctx context.Context, ownerUserID string, id string) (domain.Project, error) {
+// ArchiveProject archives a project. Only the project owner may archive; a
+// non-owner member receives ErrForbidden. It is idempotent — archiving an
+// already-archived row still succeeds and refreshes updated_at. A project the
+// user cannot access surfaces as ErrNotFound.
+func (s *Service) ArchiveProject(ctx context.Context, userID string, id string) (domain.Project, error) {
 	if s.store == nil {
 		return domain.Project{}, fmt.Errorf("projects: store is nil")
 	}
 
-	parsedOwner, err := parseOwnerID(ownerUserID)
+	parsedUser, err := parseUserID(userID)
 	if err != nil {
 		return domain.Project{}, err
 	}
 
-	parsedID, err := pathparam.ParseUUID(id, "id")
+	parsedID, err := parseProjectID(id)
 	if err != nil {
-		if errors.Is(err, pathparam.ErrInvalidUUID) {
-			return domain.Project{}, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))
-		}
 		return domain.Project{}, err
+	}
+
+	access, err := s.projectAccess(ctx, parsedUser, parsedID)
+	if err != nil {
+		return domain.Project{}, err
+	}
+	if access.AccessRole != domain.AccessRoleOwner {
+		return domain.Project{}, ErrForbidden
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
-	project, err := s.store.ArchiveProject(ctx, parsedOwner, parsedID, now)
+	project, err := s.store.ArchiveProject(ctx, parsedUser, parsedID, now)
 	if err != nil {
 		if errors.Is(err, domain.ErrProjectNotFound) {
 			return domain.Project{}, ErrNotFound
@@ -339,8 +370,16 @@ func (s *Service) ArchiveProject(ctx context.Context, ownerUserID string, id str
 	return project, nil
 }
 
-func parseOwnerID(value string) (uuid.UUID, error) {
-	parsed, err := pathparam.ParseUUID(value, "ownerUserId")
+func parseUserID(value string) (uuid.UUID, error) {
+	return parseUUIDField(value, "userId")
+}
+
+func parseProjectID(value string) (uuid.UUID, error) {
+	return parseUUIDField(value, "id")
+}
+
+func parseUUIDField(value string, field string) (uuid.UUID, error) {
+	parsed, err := pathparam.ParseUUID(value, field)
 	if err != nil {
 		if errors.Is(err, pathparam.ErrInvalidUUID) {
 			return uuid.Nil, fmt.Errorf("%w: %s", ErrInvalidInput, pathparam.Detail(err))

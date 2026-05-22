@@ -37,8 +37,8 @@ func TestProjectsNonAdminAuthenticatedUserCanListProjects(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s — projects must remain accessible to non-admin authenticated users", rec.Code, rec.Body.String())
 	}
-	if projectsSvc.listInput.OwnerUserID != owner.String() {
-		t.Fatalf("service owner = %q, want %q", projectsSvc.listInput.OwnerUserID, owner.String())
+	if projectsSvc.listInput.UserID != owner.String() {
+		t.Fatalf("service owner = %q, want %q", projectsSvc.listInput.UserID, owner.String())
 	}
 }
 
@@ -99,8 +99,8 @@ func TestProjectsListHandler(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 		}
-		if projectsSvc.listInput.OwnerUserID != owner.String() {
-			t.Fatalf("service owner = %q, want %q", projectsSvc.listInput.OwnerUserID, owner.String())
+		if projectsSvc.listInput.UserID != owner.String() {
+			t.Fatalf("service owner = %q, want %q", projectsSvc.listInput.UserID, owner.String())
 		}
 		if projectsSvc.listInput.Page != 2 || projectsSvc.listInput.PageSize != 5 {
 			t.Fatalf("pagination forwarded = %d/%d, want 2/5", projectsSvc.listInput.Page, projectsSvc.listInput.PageSize)
@@ -451,9 +451,9 @@ func TestProjectsUpdateHandler(t *testing.T) {
 		if !projectsSvc.updateCalled {
 			t.Fatal("service was not called")
 		}
-		if projectsSvc.updateInput.OwnerUserID != owner.String() ||
+		if projectsSvc.updateInput.UserID != owner.String() ||
 			projectsSvc.updateInput.ID != projectID.String() {
-			t.Fatalf("service ids = owner=%q id=%q", projectsSvc.updateInput.OwnerUserID, projectsSvc.updateInput.ID)
+			t.Fatalf("service ids = user=%q id=%q", projectsSvc.updateInput.UserID, projectsSvc.updateInput.ID)
 		}
 		if projectsSvc.updateInput.Name == nil || *projectsSvc.updateInput.Name != "New Name" {
 			t.Fatalf("service name = %v", projectsSvc.updateInput.Name)
@@ -729,6 +729,24 @@ type fakeProjectsService struct {
 	archiveID      string
 	archiveResult  domain.Project
 	archiveErr     error
+
+	listMembersUserID    string
+	listMembersProjectID string
+	listMembersResult    []domain.ProjectMemberDetail
+	listMembersErr       error
+
+	addMemberInput  projectservice.AddMemberInput
+	addMemberResult domain.ProjectMember
+	addMemberErr    error
+
+	updateMemberInput  projectservice.UpdateMemberRoleInput
+	updateMemberResult domain.ProjectMember
+	updateMemberErr    error
+
+	removeMemberCalled    bool
+	removeMemberProjectID string
+	removeMemberTargetID  string
+	removeMemberErr       error
 }
 
 func (f *fakeProjectsService) ListProjects(ctx context.Context, input projectservice.ListProjectsInput) (domain.ListProjectsResult, error) {
@@ -773,6 +791,38 @@ func (f *fakeProjectsService) ArchiveProject(ctx context.Context, ownerUserID st
 		return domain.Project{}, f.archiveErr
 	}
 	return f.archiveResult, nil
+}
+
+func (f *fakeProjectsService) ListMembers(ctx context.Context, userID string, projectID string) ([]domain.ProjectMemberDetail, error) {
+	f.listMembersUserID = userID
+	f.listMembersProjectID = projectID
+	if f.listMembersErr != nil {
+		return nil, f.listMembersErr
+	}
+	return f.listMembersResult, nil
+}
+
+func (f *fakeProjectsService) AddMember(ctx context.Context, input projectservice.AddMemberInput) (domain.ProjectMember, error) {
+	f.addMemberInput = input
+	if f.addMemberErr != nil {
+		return domain.ProjectMember{}, f.addMemberErr
+	}
+	return f.addMemberResult, nil
+}
+
+func (f *fakeProjectsService) UpdateMemberRole(ctx context.Context, input projectservice.UpdateMemberRoleInput) (domain.ProjectMember, error) {
+	f.updateMemberInput = input
+	if f.updateMemberErr != nil {
+		return domain.ProjectMember{}, f.updateMemberErr
+	}
+	return f.updateMemberResult, nil
+}
+
+func (f *fakeProjectsService) RemoveMember(ctx context.Context, requestingUserID string, projectID string, targetUserID string) error {
+	f.removeMemberCalled = true
+	f.removeMemberProjectID = projectID
+	f.removeMemberTargetID = targetUserID
+	return f.removeMemberErr
 }
 
 func newProjectsTestRouter(authSvc handlers.ProjectsAuthenticator, projectsSvc handlers.ProjectsService) chi.Router {
