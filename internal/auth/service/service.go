@@ -488,12 +488,12 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		return nil, ErrInvalidCredentials
 	}
 
-	// The credentials are valid: clear any accumulated failure state. This is
-	// best-effort — a clear failure does not invalidate a successful sign-in.
-	if user.FailedLoginCount > 0 || user.LockedUntil != nil {
-		if cerr := s.store.ClearLoginFailures(ctx, user.ID, now); cerr != nil {
-			slog.ErrorContext(ctx, "failed to clear login failures", "error", cerr)
-		}
+	// The credentials are valid: record the successful sign-in. This clears any
+	// accumulated failure/lock state and stamps last_login_at, so it runs on
+	// every sign-in, not only when failures had accrued. Best-effort — a
+	// failure here does not invalidate the sign-in.
+	if cerr := s.store.ClearLoginFailures(ctx, user.ID, now); cerr != nil {
+		slog.ErrorContext(ctx, "failed to record successful sign-in", "error", cerr)
 	}
 
 	session, err := s.issueSession(ctx, user.User, uuid.Nil)
