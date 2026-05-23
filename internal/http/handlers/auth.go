@@ -426,7 +426,7 @@ type patchMeInput struct {
 	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
 	Body          struct {
 		DisplayName *string `json:"displayName,omitempty" minLength:"1" maxLength:"256" doc:"New display name; omit to leave unchanged"`
-		AvatarURL   *string `json:"avatarUrl,omitempty" maxLength:"256" doc:"New avatar URL; omit to leave unchanged"`
+		AvatarURL   *string `json:"avatarUrl,omitempty" maxLength:"262144" doc:"New avatar URL or inline data URL; omit to leave unchanged"`
 		Phone       *string `json:"phone,omitempty" maxLength:"256" doc:"New phone number; omit to leave unchanged"`
 		JobTitle    *string `json:"jobTitle,omitempty" maxLength:"256" doc:"New job title; omit to leave unchanged"`
 		Company     *string `json:"company,omitempty" maxLength:"256" doc:"New company; omit to leave unchanged"`

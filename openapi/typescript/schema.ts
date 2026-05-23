@@ -747,7 +747,7 @@ export interface components {
              * @example https://example.com/schemas/PatchMeInputBody.json
              */
             readonly $schema?: string;
-            /** @description New avatar URL; omit to leave unchanged */
+            /** @description New avatar URL or inline data URL; omit to leave unchanged */
             avatarUrl?: string;
             /** @description New company; omit to leave unchanged */
             company?: string;
@@ -1175,7 +1175,7 @@ export interface components {
              * @example https://example.com/schemas/UpdateUserInputBody.json
              */
             readonly $schema?: string;
-            /** @description New avatar URL; omit to leave unchanged */
+            /** @description New avatar URL or inline data URL; omit to leave unchanged */
             avatarUrl?: string;
             /** @description New company; omit to leave unchanged */
             company?: string;

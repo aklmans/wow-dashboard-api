@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	DemoEmail       = "demo@minimals.cc"
+	DemoEmail       = "demo@wow-dashboard.test"
 	DemoPassword    = "@2Minimal"
 	DemoDisplayName = "Demo User"
 	demoStatus      = "active"

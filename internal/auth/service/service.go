@@ -1055,9 +1055,13 @@ func (s *Service) UpdateMyProfile(ctx context.Context, rawAccessToken string, in
 
 // normalizeProfileInput trims each provided profile field, enforces a length
 // cap, and rejects an empty displayName so a user cannot strip themselves of
-// a usable name.
+// a usable name. The avatar URL cap is larger so an inline data URL from a
+// modest upload (a resized 256×256 JPEG) fits.
 func normalizeProfileInput(input UpdateMyProfileInput) (domain.UpdateProfileInput, error) {
-	const maxProfileFieldLen = 256
+	const (
+		maxProfileFieldLen = 256
+		maxAvatarFieldLen  = 256 * 1024 // 256KB — fits a resized inline image
+	)
 	out := domain.UpdateProfileInput{}
 
 	fields := []struct {
@@ -1076,8 +1080,12 @@ func normalizeProfileInput(input UpdateMyProfileInput) (domain.UpdateProfileInpu
 			continue
 		}
 		trimmed := strings.TrimSpace(*f.value)
-		if len(trimmed) > maxProfileFieldLen {
-			return domain.UpdateProfileInput{}, fmt.Errorf("%w: %s must be %d characters or fewer", ErrInvalidInput, f.name, maxProfileFieldLen)
+		maxLen := maxProfileFieldLen
+		if f.name == "avatarUrl" {
+			maxLen = maxAvatarFieldLen
+		}
+		if len(trimmed) > maxLen {
+			return domain.UpdateProfileInput{}, fmt.Errorf("%w: %s must be %d characters or fewer", ErrInvalidInput, f.name, maxLen)
 		}
 		if f.name == "displayName" && trimmed == "" {
 			return domain.UpdateProfileInput{}, fmt.Errorf("%w: displayName cannot be empty", ErrInvalidInput)

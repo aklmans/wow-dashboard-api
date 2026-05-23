@@ -19,7 +19,7 @@
 LOCAL_DATABASE_URL ?= postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable
 SMOKE_AUTH_BASE_URL ?= http://localhost:7272
 BASE_URL ?= $(SMOKE_AUTH_BASE_URL)
-SMOKE_AUTH_EMAIL ?= demo@minimals.cc
+SMOKE_AUTH_EMAIL ?= demo@wow-dashboard.test
 SMOKE_AUTH_PASSWORD ?= @2Minimal
 POSTMAN_BASE_URL ?= $(BASE_URL)
 POSTMAN_EMAIL ?= $(SMOKE_AUTH_EMAIL)

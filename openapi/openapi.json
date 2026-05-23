@@ -562,8 +562,8 @@
             "type": "string"
           },
           "avatarUrl": {
-            "description": "New avatar URL; omit to leave unchanged",
-            "maxLength": 256,
+            "description": "New avatar URL or inline data URL; omit to leave unchanged",
+            "maxLength": 262144,
             "type": "string"
           },
           "company": {
@@ -1386,8 +1386,8 @@
             "type": "string"
           },
           "avatarUrl": {
-            "description": "New avatar URL; omit to leave unchanged",
-            "maxLength": 256,
+            "description": "New avatar URL or inline data URL; omit to leave unchanged",
+            "maxLength": 262144,
             "type": "string"
           },
           "company": {

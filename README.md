@@ -323,7 +323,7 @@ List-style endpoints share a small set of conventions so the dashboard frontends
 ## Smoke & Acceptance Tests
 
 Beyond `make check`, three black-box paths exercise the running API. The demo
-account seeded by `make local-setup` is `demo@minimals.cc` / `@2Minimal`
+account seeded by `make local-setup` is `demo@wow-dashboard.test` / `@2Minimal`
 (`make seed` is idempotent — it creates the user when missing and refreshes the
 hash, display name, status, and role otherwise). For connecting a starter
 frontend to the API, see the [Frontend Integration Guide](docs/frontend-integration.md).

@@ -72,7 +72,7 @@ type updateUserInput struct {
 	Body          struct {
 		Status    *string   `json:"status,omitempty" enum:"active,disabled" example:"active" doc:"New status; omit to leave unchanged"`
 		RoleIDs   *[]string `json:"roleIds,omitempty" minItems:"1" doc:"Replacement set of role ids; omit to leave roles unchanged"`
-		AvatarURL *string   `json:"avatarUrl,omitempty" maxLength:"256" doc:"New avatar URL; omit to leave unchanged"`
+		AvatarURL *string   `json:"avatarUrl,omitempty" maxLength:"262144" doc:"New avatar URL or inline data URL; omit to leave unchanged"`
 		Phone     *string   `json:"phone,omitempty" maxLength:"256" doc:"New phone number; omit to leave unchanged"`
 		JobTitle  *string   `json:"jobTitle,omitempty" maxLength:"256" doc:"New job title; omit to leave unchanged"`
 		Company   *string   `json:"company,omitempty" maxLength:"256" doc:"New company; omit to leave unchanged"`

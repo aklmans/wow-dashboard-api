@@ -305,10 +305,17 @@ func normalizeProfileField(name string, value *string) (*string, error) {
 	if value == nil {
 		return nil, nil
 	}
-	const maxProfileFieldLen = 256
+	const (
+		maxProfileFieldLen = 256
+		maxAvatarFieldLen  = 256 * 1024 // 256KB — fits a resized inline image
+	)
+	maxLen := maxProfileFieldLen
+	if name == "avatarUrl" {
+		maxLen = maxAvatarFieldLen
+	}
 	trimmed := strings.TrimSpace(*value)
-	if len(trimmed) > maxProfileFieldLen {
-		return nil, fmt.Errorf("%w: %s must be %d characters or fewer", ErrInvalidInput, name, maxProfileFieldLen)
+	if len(trimmed) > maxLen {
+		return nil, fmt.Errorf("%w: %s must be %d characters or fewer", ErrInvalidInput, name, maxLen)
 	}
 	return &trimmed, nil
 }

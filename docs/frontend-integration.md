@@ -47,7 +47,7 @@ A Vite starter uses its own env key; the value still points at the API base URL.
 Demo credentials after `make local-setup` (seeded with `role = "admin"`):
 
 ```txt
-demo@minimals.cc
+demo@wow-dashboard.test
 @2Minimal
 ```
 
@@ -94,7 +94,7 @@ Sign-up returns `201`; sign-in, refresh, and me return `200`.
   `roles:manage`). An admin composes a custom role from the catalog returned
   by `GET /api/permissions`; the built-in `admin` and `user` roles are
   immutable.
-- New sign-ups receive the `user` role. The seeded `demo@minimals.cc` user
+- New sign-ups receive the `user` role. The seeded `demo@wow-dashboard.test` user
   holds the `admin` role, which carries the `*` (all-permissions) wildcard.
 
 ## Errors

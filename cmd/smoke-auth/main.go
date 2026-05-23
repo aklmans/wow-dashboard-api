@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultSmokeBaseURL  = "http://localhost:7272"
-	defaultSmokeEmail    = "demo@minimals.cc"
+	defaultSmokeEmail    = "demo@wow-dashboard.test"
 	defaultSmokePassword = "@2Minimal"
 	refreshCookieName    = "wow_dashboard_refresh_token"
 	redactedValue        = "[REDACTED]"
