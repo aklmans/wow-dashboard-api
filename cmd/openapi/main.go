@@ -90,6 +90,10 @@ func (openAPIAuthService) CurrentUser(context.Context, string) (*authservice.Pub
 	return nil, nil
 }
 
+func (openAPIAuthService) UpdateMyProfile(context.Context, string, authservice.UpdateMyProfileInput) (*authservice.PublicUser, error) {
+	return nil, nil
+}
+
 func (openAPIAuthService) ChangePassword(context.Context, string, string, string) error {
 	return nil
 }

@@ -90,9 +90,33 @@ func userFromGetByIDRow(row query.GetUserByIDRow) (domain.User, error) {
 		DisplayName:   row.DisplayName,
 		Status:        domain.UserStatus(row.Status),
 		EmailVerified: row.EmailVerifiedAt.Valid,
+		AvatarURL:     pgTextValue(row.AvatarUrl),
+		Phone:         pgTextValue(row.Phone),
+		JobTitle:      pgTextValue(row.JobTitle),
+		Company:       pgTextValue(row.Company),
+		LastLoginAt:   nullableDomainTimestamp(row.LastLoginAt),
 		CreatedAt:     createdAt,
 		UpdatedAt:     updatedAt,
 	}, nil
+}
+
+// pgTextValue maps a nullable text column to a plain string, treating NULL as
+// the empty string.
+func pgTextValue(t pgtype.Text) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.String
+}
+
+// pgTextPtr maps an optional update field to a nullable text arg: a nil
+// pointer leaves the column unchanged, a non-nil pointer (including "")
+// overwrites it.
+func pgTextPtr(value *string) pgtype.Text {
+	if value == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *value, Valid: true}
 }
 
 func authUserFromRow(row query.User) (domain.AuthUser, error) {

@@ -307,6 +307,10 @@ func (f *fakeUserStore) SetEmailVerified(ctx context.Context, userID uuid.UUID, 
 	return nil
 }
 
+func (f *fakeUserStore) UpdateUserProfile(ctx context.Context, userID uuid.UUID, input domain.UpdateProfileInput, now time.Time) error {
+	return nil
+}
+
 type fakeTokenManager struct {
 	issuedToken string
 	issueErr    error

@@ -55,11 +55,13 @@ ORDER BY created_at DESC
 LIMIT @limit_val OFFSET @offset_val;
 
 -- name: UpdateUserFields :exec
--- Applies an admin status and/or profile-field update. Each field uses a
--- nullable arg: NULL leaves the column unchanged, a value (including '')
--- overwrites it.
+-- Applies a partial user update. Each field uses a nullable arg: NULL leaves
+-- the column unchanged, a value (including '') overwrites it. Both the admin
+-- and the self-service handlers feed this query; each caller is responsible
+-- for restricting which fields it allows the actor to change.
 UPDATE users
 SET status = COALESCE(sqlc.narg('status')::text, status),
+    display_name = COALESCE(sqlc.narg('display_name')::text, display_name),
     avatar_url = COALESCE(sqlc.narg('avatar_url')::text, avatar_url),
     phone = COALESCE(sqlc.narg('phone')::text, phone),
     job_title = COALESCE(sqlc.narg('job_title')::text, job_title),

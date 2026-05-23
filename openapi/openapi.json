@@ -127,6 +127,20 @@
       "AuthMeUser": {
         "additionalProperties": false,
         "properties": {
+          "avatarUrl": {
+            "description": "User avatar image URL; empty when unset",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "company": {
+            "description": "User company; empty when unset",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
           "displayName": {
             "description": "User display name",
             "examples": [
@@ -155,12 +169,31 @@
             ],
             "type": "string"
           },
+          "jobTitle": {
+            "description": "User job title; empty when unset",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "lastLoginAt": {
+            "description": "Last successful sign-in time; null if the user has never signed in",
+            "format": "date-time",
+            "type": "string"
+          },
           "permissions": {
             "description": "Effective permission strings granted by the user's roles",
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "phone": {
+            "description": "User phone number; empty when unset",
+            "examples": [
+              ""
+            ],
+            "type": "string"
           },
           "roles": {
             "description": "Names of the roles assigned to the user",
@@ -175,6 +208,10 @@
           "email",
           "displayName",
           "emailVerified",
+          "avatarUrl",
+          "phone",
+          "jobTitle",
+          "company",
           "roles",
           "permissions"
         ],
@@ -510,6 +547,47 @@
         "required": [
           "status"
         ],
+        "type": "object"
+      },
+      "PatchMeInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/PatchMeInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "avatarUrl": {
+            "description": "New avatar URL; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "company": {
+            "description": "New company; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "displayName": {
+            "description": "New display name; omit to leave unchanged",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "jobTitle": {
+            "description": "New job title; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          },
+          "phone": {
+            "description": "New phone number; omit to leave unchanged",
+            "maxLength": 256,
+            "type": "string"
+          }
+        },
         "type": "object"
       },
       "PermissionsListBody": {
@@ -1709,6 +1787,62 @@
           }
         },
         "summary": "Current user",
+        "tags": [
+          "Auth"
+        ]
+      },
+      "patch": {
+        "description": "Updates the calling user's own profile fields (displayName, avatarUrl, phone, jobTitle, company). Status and role assignments are not editable through this path — those require an admin via PATCH /api/users/{id}.",
+        "operationId": "patch-auth-me",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchMeInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMeBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Update own profile",
         "tags": [
           "Auth"
         ]

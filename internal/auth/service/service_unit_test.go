@@ -600,6 +600,9 @@ type unitUserStore struct {
 	clearFailuresCalls   int
 	updatedPasswordHash  string
 	emailVerifiedSet     bool
+
+	updateProfileInput domain.UpdateProfileInput
+	updateProfileCalls int
 }
 
 func (s *unitUserStore) CreateUser(ctx context.Context, input domain.CreateUserInput) (domain.User, error) {
@@ -675,6 +678,12 @@ func (s *unitUserStore) UpdateUserPassword(ctx context.Context, userID uuid.UUID
 
 func (s *unitUserStore) SetEmailVerified(ctx context.Context, userID uuid.UUID, verifiedAt time.Time, updatedAt time.Time) error {
 	s.emailVerifiedSet = true
+	return nil
+}
+
+func (s *unitUserStore) UpdateUserProfile(ctx context.Context, userID uuid.UUID, input domain.UpdateProfileInput, now time.Time) error {
+	s.updateProfileInput = input
+	s.updateProfileCalls++
 	return nil
 }
 
@@ -969,6 +978,83 @@ func TestServiceVerifyEmail(t *testing.T) {
 		}
 		if store.emailVerifiedSet {
 			t.Fatal("email was marked verified despite an unknown token")
+		}
+	})
+}
+
+func TestServiceUpdateMyProfile(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+	baseUser := domain.User{
+		ID:          userID,
+		Email:       "demo@example.com",
+		DisplayName: "Demo",
+		Status:      domain.UserStatusActive,
+	}
+
+	t.Run("success trims fields and refetches the user", func(t *testing.T) {
+		store := &unitUserStore{user: baseUser}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())})
+
+		newName := "  Demo User  "
+		newPhone := "+1 555 0100"
+		updated, err := authSvc.UpdateMyProfile(context.Background(), "raw-token", service.UpdateMyProfileInput{
+			DisplayName: &newName,
+			Phone:       &newPhone,
+		})
+		if err != nil {
+			t.Fatalf("UpdateMyProfile returned error: %v", err)
+		}
+		if updated == nil {
+			t.Fatal("UpdateMyProfile returned nil user")
+		}
+		if store.updateProfileCalls != 1 {
+			t.Fatalf("store.UpdateUserProfile called %d times, want 1", store.updateProfileCalls)
+		}
+		if store.updateProfileInput.DisplayName == nil || *store.updateProfileInput.DisplayName != "Demo User" {
+			t.Fatalf("DisplayName forwarded as %v, want trimmed value", store.updateProfileInput.DisplayName)
+		}
+		if store.updateProfileInput.Phone == nil || *store.updateProfileInput.Phone != "+1 555 0100" {
+			t.Fatalf("Phone forwarded as %v", store.updateProfileInput.Phone)
+		}
+		// Status and roles cannot be touched through this path.
+		if store.updateProfileInput.AvatarURL != nil {
+			t.Fatalf("AvatarURL forwarded as %v despite not being provided", store.updateProfileInput.AvatarURL)
+		}
+	})
+
+	t.Run("rejects an empty display name", func(t *testing.T) {
+		store := &unitUserStore{user: baseUser}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())})
+		empty := "   "
+		if _, err := authSvc.UpdateMyProfile(context.Background(), "raw-token", service.UpdateMyProfileInput{
+			DisplayName: &empty,
+		}); !errors.Is(err, service.ErrInvalidInput) {
+			t.Fatalf("UpdateMyProfile error = %v, want ErrInvalidInput", err)
+		}
+		if store.updateProfileCalls != 0 {
+			t.Fatal("store.UpdateUserProfile was called despite an empty display name")
+		}
+	})
+
+	t.Run("rejects an overlong field", func(t *testing.T) {
+		store := &unitUserStore{user: baseUser}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())})
+		oversize := strings.Repeat("x", 257)
+		if _, err := authSvc.UpdateMyProfile(context.Background(), "raw-token", service.UpdateMyProfileInput{
+			JobTitle: &oversize,
+		}); !errors.Is(err, service.ErrInvalidInput) {
+			t.Fatalf("UpdateMyProfile error = %v, want ErrInvalidInput", err)
+		}
+	})
+
+	t.Run("rejects an invalid token", func(t *testing.T) {
+		store := &unitUserStore{user: baseUser}
+		authSvc := service.NewService(store, &fakeTokenManager{verifyErr: errors.New("bad token")})
+		newName := "Demo User"
+		if _, err := authSvc.UpdateMyProfile(context.Background(), "bad-token", service.UpdateMyProfileInput{
+			DisplayName: &newName,
+		}); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("UpdateMyProfile error = %v, want ErrInvalidToken", err)
 		}
 	})
 }

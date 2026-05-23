@@ -536,6 +536,11 @@ type fakeAuthService struct {
 	changePasswordNew     string
 	changePasswordErr     error
 
+	updateMyProfileToken  string
+	updateMyProfileInput  service.UpdateMyProfileInput
+	updateMyProfileResult *service.PublicUser
+	updateMyProfileErr    error
+
 	forgotPasswordEmail string
 	forgotPasswordErr   error
 
@@ -586,6 +591,18 @@ func (f *fakeAuthService) ChangePassword(ctx context.Context, rawAccessToken str
 	f.changePasswordCurrent = currentPassword
 	f.changePasswordNew = newPassword
 	return f.changePasswordErr
+}
+
+func (f *fakeAuthService) UpdateMyProfile(ctx context.Context, rawAccessToken string, input service.UpdateMyProfileInput) (*service.PublicUser, error) {
+	f.updateMyProfileToken = rawAccessToken
+	f.updateMyProfileInput = input
+	if f.updateMyProfileErr != nil {
+		return nil, f.updateMyProfileErr
+	}
+	if f.updateMyProfileResult != nil {
+		return f.updateMyProfileResult, nil
+	}
+	return &service.PublicUser{ID: "stub-id", Email: "stub@example.com"}, nil
 }
 
 func (f *fakeAuthService) ForgotPassword(ctx context.Context, email string) error {

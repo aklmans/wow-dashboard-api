@@ -59,13 +59,18 @@ const defaultRoleName = "user"
 // are populated by CurrentUser; sign-in/sign-up leave them empty (clients
 // fetch the resolved set from /api/auth/me).
 type PublicUser struct {
-	ID            string   `json:"id"`
-	Email         string   `json:"email"`
-	DisplayName   string   `json:"displayName"`
-	Status        string   `json:"status,omitempty"`
-	EmailVerified bool     `json:"emailVerified"`
-	Roles         []string `json:"roles,omitempty"`
-	Permissions   []string `json:"permissions,omitempty"`
+	ID            string     `json:"id"`
+	Email         string     `json:"email"`
+	DisplayName   string     `json:"displayName"`
+	Status        string     `json:"status,omitempty"`
+	EmailVerified bool       `json:"emailVerified"`
+	AvatarURL     string     `json:"avatarUrl"`
+	Phone         string     `json:"phone"`
+	JobTitle      string     `json:"jobTitle"`
+	Company       string     `json:"company"`
+	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty"`
+	Roles         []string   `json:"roles,omitempty"`
+	Permissions   []string   `json:"permissions,omitempty"`
 }
 
 // Session represents a successful authentication result containing both the
@@ -102,6 +107,7 @@ type UserStore interface {
 	RegisterLoginFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockUntil time.Time, now time.Time) (bool, error)
 	ClearLoginFailures(ctx context.Context, userID uuid.UUID, now time.Time) error
 	GetUserByIDForAuth(ctx context.Context, id uuid.UUID) (domain.AuthUser, error)
+	UpdateUserProfile(ctx context.Context, userID uuid.UUID, input domain.UpdateProfileInput, now time.Time) error
 	UpdateUserPassword(ctx context.Context, userID uuid.UUID, passwordHash string, updatedAt time.Time) error
 	SetEmailVerified(ctx context.Context, userID uuid.UUID, verifiedAt time.Time, updatedAt time.Time) error
 }
@@ -624,6 +630,11 @@ func (s *Service) CurrentUser(ctx context.Context, rawAccessToken string) (*Publ
 		DisplayName:   user.DisplayName,
 		Status:        string(user.Status),
 		EmailVerified: user.EmailVerified,
+		AvatarURL:     user.AvatarURL,
+		Phone:         user.Phone,
+		JobTitle:      user.JobTitle,
+		Company:       user.Company,
+		LastLoginAt:   user.LastLoginAt,
 		Roles:         roles,
 		Permissions:   permissions,
 	}, nil
@@ -1007,4 +1018,71 @@ func mustDummyHash() string {
 func dummyVerify(passwordStr string) error {
 	_, _ = password.Verify(passwordStr, dummyHash)
 	return nil
+}
+
+// UpdateMyProfileInput captures the optional fields a user can edit on their
+// own profile. Each nil pointer leaves the corresponding field unchanged.
+type UpdateMyProfileInput struct {
+	DisplayName *string
+	AvatarURL   *string
+	Phone       *string
+	JobTitle    *string
+	Company     *string
+}
+
+// UpdateMyProfile applies a self-service profile update for the bearer-token
+// user. Status and role assignments are NOT editable through this path.
+func (s *Service) UpdateMyProfile(ctx context.Context, rawAccessToken string, input UpdateMyProfileInput) (*PublicUser, error) {
+	claims, err := s.tokenManager.VerifyAccessToken(rawAccessToken)
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+	userID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return nil, fmt.Errorf("%w: subject is not a valid UUID", ErrInvalidToken)
+	}
+
+	normalized, err := normalizeProfileInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.store.UpdateUserProfile(ctx, userID, normalized, s.now()); err != nil {
+		return nil, fmt.Errorf("auth: update profile: %w", err)
+	}
+	return s.CurrentUser(ctx, rawAccessToken)
+}
+
+// normalizeProfileInput trims each provided profile field, enforces a length
+// cap, and rejects an empty displayName so a user cannot strip themselves of
+// a usable name.
+func normalizeProfileInput(input UpdateMyProfileInput) (domain.UpdateProfileInput, error) {
+	const maxProfileFieldLen = 256
+	out := domain.UpdateProfileInput{}
+
+	fields := []struct {
+		name  string
+		value *string
+		apply func(*string)
+	}{
+		{"displayName", input.DisplayName, func(v *string) { out.DisplayName = v }},
+		{"avatarUrl", input.AvatarURL, func(v *string) { out.AvatarURL = v }},
+		{"phone", input.Phone, func(v *string) { out.Phone = v }},
+		{"jobTitle", input.JobTitle, func(v *string) { out.JobTitle = v }},
+		{"company", input.Company, func(v *string) { out.Company = v }},
+	}
+	for _, f := range fields {
+		if f.value == nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(*f.value)
+		if len(trimmed) > maxProfileFieldLen {
+			return domain.UpdateProfileInput{}, fmt.Errorf("%w: %s must be %d characters or fewer", ErrInvalidInput, f.name, maxProfileFieldLen)
+		}
+		if f.name == "displayName" && trimmed == "" {
+			return domain.UpdateProfileInput{}, fmt.Errorf("%w: displayName cannot be empty", ErrInvalidInput)
+		}
+		f.apply(&trimmed)
+	}
+	return out, nil
 }

@@ -61,7 +61,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update own profile
+         * @description Updates the calling user's own profile fields (displayName, avatarUrl, phone, jobTitle, company). Status and role assignments are not editable through this path — those require an admin via PATCH /api/users/{id}.
+         */
+        patch: operations["patch-auth-me"];
         trace?: never;
     };
     "/api/auth/refresh": {
@@ -516,6 +520,16 @@ export interface components {
         };
         AuthMeUser: {
             /**
+             * @description User avatar image URL; empty when unset
+             * @example
+             */
+            avatarUrl: string;
+            /**
+             * @description User company; empty when unset
+             * @example
+             */
+            company: string;
+            /**
              * @description User display name
              * @example Demo User
              */
@@ -535,8 +549,23 @@ export interface components {
              * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
              */
             id: string;
+            /**
+             * @description User job title; empty when unset
+             * @example
+             */
+            jobTitle: string;
+            /**
+             * Format: date-time
+             * @description Last successful sign-in time; null if the user has never signed in
+             */
+            lastLoginAt?: string;
             /** @description Effective permission strings granted by the user's roles */
             permissions: string[];
+            /**
+             * @description User phone number; empty when unset
+             * @example
+             */
+            phone: string;
             /** @description Names of the roles assigned to the user */
             roles: string[];
         };
@@ -710,6 +739,24 @@ export interface components {
              * @example ok
              */
             status: string;
+        };
+        PatchMeInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/PatchMeInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description New avatar URL; omit to leave unchanged */
+            avatarUrl?: string;
+            /** @description New company; omit to leave unchanged */
+            company?: string;
+            /** @description New display name; omit to leave unchanged */
+            displayName?: string;
+            /** @description New job title; omit to leave unchanged */
+            jobTitle?: string;
+            /** @description New phone number; omit to leave unchanged */
+            phone?: string;
         };
         PermissionsListBody: {
             /**
@@ -1381,6 +1428,37 @@ export interface operations {
             };
             401: components["responses"]["APIError"];
             403: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "patch-auth-me": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchMeInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMeBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

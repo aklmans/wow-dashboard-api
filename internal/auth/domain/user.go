@@ -21,8 +21,24 @@ type User struct {
 	DisplayName   string
 	Status        UserStatus
 	EmailVerified bool
+	AvatarURL     string
+	Phone         string
+	JobTitle      string
+	Company       string
+	LastLoginAt   *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// UpdateProfileInput is the self-service profile-edit input. Each pointer is
+// nil to leave the corresponding field unchanged; admins use a different
+// path that also accepts status and role changes.
+type UpdateProfileInput struct {
+	DisplayName *string
+	AvatarURL   *string
+	Phone       *string
+	JobTitle    *string
+	Company     *string
 }
 
 type AuthUser struct {

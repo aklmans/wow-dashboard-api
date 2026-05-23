@@ -20,6 +20,7 @@ type AuthService interface {
 	Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error)
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
+	UpdateMyProfile(ctx context.Context, rawAccessToken string, input service.UpdateMyProfileInput) (*service.PublicUser, error)
 	ChangePassword(ctx context.Context, rawAccessToken string, currentPassword string, newPassword string) error
 	ForgotPassword(ctx context.Context, email string) error
 	ResetPassword(ctx context.Context, rawToken string, newPassword string) error
@@ -36,12 +37,17 @@ type authUser struct {
 // authMeUser extends the basic profile with the resolved roles and effective
 // permissions a frontend uses to render menus and gate actions.
 type authMeUser struct {
-	ID            string   `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
-	Email         string   `json:"email" example:"demo@minimals.cc" doc:"User email address"`
-	DisplayName   string   `json:"displayName" example:"Demo User" doc:"User display name"`
-	EmailVerified bool     `json:"emailVerified" example:"true" doc:"Whether the user has confirmed their email address"`
-	Roles         []string `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
-	Permissions   []string `json:"permissions" nullable:"false" doc:"Effective permission strings granted by the user's roles"`
+	ID            string     `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
+	Email         string     `json:"email" example:"demo@minimals.cc" doc:"User email address"`
+	DisplayName   string     `json:"displayName" example:"Demo User" doc:"User display name"`
+	EmailVerified bool       `json:"emailVerified" example:"true" doc:"Whether the user has confirmed their email address"`
+	AvatarURL     string     `json:"avatarUrl" example:"" doc:"User avatar image URL; empty when unset"`
+	Phone         string     `json:"phone" example:"" doc:"User phone number; empty when unset"`
+	JobTitle      string     `json:"jobTitle" example:"" doc:"User job title; empty when unset"`
+	Company       string     `json:"company" example:"" doc:"User company; empty when unset"`
+	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty" doc:"Last successful sign-in time; null if the user has never signed in"`
+	Roles         []string   `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
+	Permissions   []string   `json:"permissions" nullable:"false" doc:"Effective permission strings granted by the user's roles"`
 }
 
 type authSessionBody struct {
@@ -383,6 +389,48 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		}
 		return &authMeResponse{Body: authMeBody{User: meUserResponse(*user)}}, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "patch-auth-me",
+		Method:      http.MethodPatch,
+		Path:        "/api/auth/me",
+		Summary:     "Update own profile",
+		Description: "Updates the calling user's own profile fields (displayName, avatarUrl, phone, jobTitle, company). Status and role assignments are not editable through this path — those require an admin via PATCH /api/users/{id}.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusForbidden,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *patchMeInput) (*authMeResponse, error) {
+		rawAccessToken, ok := parseBearerToken(input.Authorization)
+		if !ok {
+			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+		}
+		user, err := authSvc.UpdateMyProfile(ctx, rawAccessToken, service.UpdateMyProfileInput{
+			DisplayName: input.Body.DisplayName,
+			AvatarURL:   input.Body.AvatarURL,
+			Phone:       input.Body.Phone,
+			JobTitle:    input.Body.JobTitle,
+			Company:     input.Body.Company,
+		})
+		if err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return &authMeResponse{Body: authMeBody{User: meUserResponse(*user)}}, nil
+	})
+}
+
+type patchMeInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
+	Body          struct {
+		DisplayName *string `json:"displayName,omitempty" minLength:"1" maxLength:"256" doc:"New display name; omit to leave unchanged"`
+		AvatarURL   *string `json:"avatarUrl,omitempty" maxLength:"256" doc:"New avatar URL; omit to leave unchanged"`
+		Phone       *string `json:"phone,omitempty" maxLength:"256" doc:"New phone number; omit to leave unchanged"`
+		JobTitle    *string `json:"jobTitle,omitempty" maxLength:"256" doc:"New job title; omit to leave unchanged"`
+		Company     *string `json:"company,omitempty" maxLength:"256" doc:"New company; omit to leave unchanged"`
+	}
 }
 
 func sessionResponse(session *service.Session, refreshCookie RefreshCookieConfig) *authSessionResponse {
@@ -420,6 +468,11 @@ func meUserResponse(user service.PublicUser) authMeUser {
 		Email:         user.Email,
 		DisplayName:   user.DisplayName,
 		EmailVerified: user.EmailVerified,
+		AvatarURL:     user.AvatarURL,
+		Phone:         user.Phone,
+		JobTitle:      user.JobTitle,
+		Company:       user.Company,
+		LastLoginAt:   user.LastLoginAt,
 		Roles:         roles,
 		Permissions:   permissions,
 	}

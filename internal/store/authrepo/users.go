@@ -186,3 +186,21 @@ func (s *UserStore) SetEmailVerified(ctx context.Context, userID uuid.UUID, veri
 	}
 	return nil
 }
+
+// UpdateUserProfile applies the user's own profile-edit. Each nil field is
+// left unchanged; status and role assignments are never touched here (those
+// belong to the admin path).
+func (s *UserStore) UpdateUserProfile(ctx context.Context, userID uuid.UUID, input domain.UpdateProfileInput, now time.Time) error {
+	if err := s.queries.UpdateUserFields(ctx, query.UpdateUserFieldsParams{
+		ID:          pgUUID(userID),
+		DisplayName: pgTextPtr(input.DisplayName),
+		AvatarUrl:   pgTextPtr(input.AvatarURL),
+		Phone:       pgTextPtr(input.Phone),
+		JobTitle:    pgTextPtr(input.JobTitle),
+		Company:     pgTextPtr(input.Company),
+		UpdatedAt:   pgTimestamp(now),
+	}); err != nil {
+		return mapStoreError(err)
+	}
+	return nil
+}

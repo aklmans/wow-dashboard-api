@@ -316,30 +316,34 @@ func (q *Queries) SetEmailVerified(ctx context.Context, arg SetEmailVerifiedPara
 const updateUserFields = `-- name: UpdateUserFields :exec
 UPDATE users
 SET status = COALESCE($1::text, status),
-    avatar_url = COALESCE($2::text, avatar_url),
-    phone = COALESCE($3::text, phone),
-    job_title = COALESCE($4::text, job_title),
-    company = COALESCE($5::text, company),
-    updated_at = $6
-WHERE id = $7
+    display_name = COALESCE($2::text, display_name),
+    avatar_url = COALESCE($3::text, avatar_url),
+    phone = COALESCE($4::text, phone),
+    job_title = COALESCE($5::text, job_title),
+    company = COALESCE($6::text, company),
+    updated_at = $7
+WHERE id = $8
 `
 
 type UpdateUserFieldsParams struct {
-	Status    pgtype.Text
-	AvatarUrl pgtype.Text
-	Phone     pgtype.Text
-	JobTitle  pgtype.Text
-	Company   pgtype.Text
-	UpdatedAt pgtype.Timestamptz
-	ID        pgtype.UUID
+	Status      pgtype.Text
+	DisplayName pgtype.Text
+	AvatarUrl   pgtype.Text
+	Phone       pgtype.Text
+	JobTitle    pgtype.Text
+	Company     pgtype.Text
+	UpdatedAt   pgtype.Timestamptz
+	ID          pgtype.UUID
 }
 
-// Applies an admin status and/or profile-field update. Each field uses a
-// nullable arg: NULL leaves the column unchanged, a value (including ”)
-// overwrites it.
+// Applies a partial user update. Each field uses a nullable arg: NULL leaves
+// the column unchanged, a value (including ”) overwrites it. Both the admin
+// and the self-service handlers feed this query; each caller is responsible
+// for restricting which fields it allows the actor to change.
 func (q *Queries) UpdateUserFields(ctx context.Context, arg UpdateUserFieldsParams) error {
 	_, err := q.db.Exec(ctx, updateUserFields,
 		arg.Status,
+		arg.DisplayName,
 		arg.AvatarUrl,
 		arg.Phone,
 		arg.JobTitle,
