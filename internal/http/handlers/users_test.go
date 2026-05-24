@@ -222,6 +222,32 @@ func TestUsersUpdateHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("passes actor roles and permissions to service", func(t *testing.T) {
+		actor := &authservice.PublicUser{
+			ID:          uuid.New().String(),
+			Status:      "active",
+			Roles:       []string{"operator"},
+			Permissions: []string{"users:manage"},
+		}
+		roleID := uuid.New().String()
+		usersSvc := &fakeUsersService{updateResult: domain.User{
+			ID: targetID, Email: "demo@wow-dashboard.test", DisplayName: "Demo User",
+			Status: domain.UserStatusActive, Roles: []string{"operator"},
+		}}
+		rec := patch(t, &fakeUsersAuthService{currentUser: actor}, usersSvc, targetID.String(),
+			map[string]any{"roleIds": []string{roleID}})
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if len(usersSvc.updateInput.ActorRoles) != 1 || usersSvc.updateInput.ActorRoles[0] != "operator" {
+			t.Fatalf("actor roles = %v, want [operator]", usersSvc.updateInput.ActorRoles)
+		}
+		if len(usersSvc.updateInput.ActorPermissions) != 1 || usersSvc.updateInput.ActorPermissions[0] != "users:manage" {
+			t.Fatalf("actor permissions = %v, want [users:manage]", usersSvc.updateInput.ActorPermissions)
+		}
+	})
+
 	t.Run("missing authorization returns 401", func(t *testing.T) {
 		router := newUsersTestRouter(&fakeUsersAuthService{}, &fakeUsersService{})
 		req := httptest.NewRequest(http.MethodPatch, "/api/users/"+targetID.String(), bytes.NewReader([]byte(`{"status":"disabled"}`)))

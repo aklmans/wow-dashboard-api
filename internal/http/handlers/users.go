@@ -169,14 +169,16 @@ func RegisterUsers(api huma.API, authSvc UsersAuthenticator, usersSvc UsersServi
 		}
 
 		user, err := usersSvc.UpdateUser(ctx, userservice.UpdateUserInput{
-			ActorUserID:  currentUser.ID,
-			TargetUserID: input.ID,
-			Status:       input.Body.Status,
-			RoleIDs:      input.Body.RoleIDs,
-			AvatarURL:    input.Body.AvatarURL,
-			Phone:        input.Body.Phone,
-			JobTitle:     input.Body.JobTitle,
-			Company:      input.Body.Company,
+			ActorUserID:      currentUser.ID,
+			ActorRoles:       currentUser.Roles,
+			ActorPermissions: currentUser.Permissions,
+			TargetUserID:     input.ID,
+			Status:           input.Body.Status,
+			RoleIDs:          input.Body.RoleIDs,
+			AvatarURL:        input.Body.AvatarURL,
+			Phone:            input.Body.Phone,
+			JobTitle:         input.Body.JobTitle,
+			Company:          input.Body.Company,
 		})
 		if err != nil {
 			return nil, mapUsersError(ctx, err)
@@ -225,6 +227,8 @@ func mapUsersError(ctx context.Context, err error) huma.StatusError {
 	switch {
 	case errors.Is(err, userservice.ErrSelfModification):
 		return apierror.Forbidden("Administrators cannot change their own status or roles.").ForContext(ctx)
+	case errors.Is(err, userservice.ErrInsufficientPrivilege):
+		return apierror.Forbidden("You do not have permission to perform this action.").ForContext(ctx)
 	case errors.Is(err, userservice.ErrInvalidInput):
 		return apierror.ValidationFailed("Invalid users request.").ForContext(ctx)
 	case errors.Is(err, userservice.ErrNotFound):

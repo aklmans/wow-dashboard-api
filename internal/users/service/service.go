@@ -5,24 +5,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	"github.com/aklmans/wow-dashboard-api/internal/http/pagination"
 	"github.com/aklmans/wow-dashboard-api/internal/http/pathparam"
 	"github.com/aklmans/wow-dashboard-api/internal/users/domain"
 )
 
 var (
-	ErrInvalidInput = errors.New("users: invalid input")
-	ErrNotFound     = errors.New("users: not found")
+	ErrInvalidInput          = errors.New("users: invalid input")
+	ErrNotFound              = errors.New("users: not found")
+	ErrInsufficientPrivilege = errors.New("users: insufficient privilege")
 	// ErrSelfModification is returned when an admin attempts to change their
 	// own roles or status. Disallowing self-changes guarantees the system
 	// always retains at least one admin and prevents accidental self-lockout.
 	ErrSelfModification = errors.New("users: self modification not allowed")
 )
+
+var systemAdminRoleID = uuid.MustParse("00000000-0000-0000-0000-0000000a0001")
 
 type ListUsersInput struct {
 	Page     int
@@ -43,14 +48,16 @@ type UserStore interface {
 // unchanged; at least one must be provided. RoleIDs, when provided, replaces
 // the user's entire role set.
 type UpdateUserInput struct {
-	ActorUserID  string
-	TargetUserID string
-	Status       *string
-	RoleIDs      *[]string
-	AvatarURL    *string
-	Phone        *string
-	JobTitle     *string
-	Company      *string
+	ActorUserID      string
+	ActorRoles       []string
+	ActorPermissions []string
+	TargetUserID     string
+	Status           *string
+	RoleIDs          *[]string
+	AvatarURL        *string
+	Phone            *string
+	JobTitle         *string
+	Company          *string
 }
 
 type Service struct {
@@ -152,6 +159,9 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		if err != nil {
 			return domain.User{}, err
 		}
+		if slices.Contains(roleIDs, systemAdminRoleID) && !actorCanGrantSystemAdmin(input.ActorRoles, input.ActorPermissions) {
+			return domain.User{}, ErrInsufficientPrivilege
+		}
 		update.RoleIDs = roleIDs
 		changedFields = append(changedFields, "roles")
 		auditRoleIDs = make([]string, len(roleIDs))
@@ -199,6 +209,18 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		RoleIDs:       auditRoleIDs,
 	})
 	return user, nil
+}
+
+func actorCanGrantSystemAdmin(roles []string, permissions []string) bool {
+	if rbac.NewSet(permissions).Has(rbac.PermissionAll) {
+		return true
+	}
+	for _, role := range roles {
+		if strings.TrimSpace(role) == "admin" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) fetchUser(ctx context.Context, id uuid.UUID) (domain.User, error) {

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -41,15 +42,15 @@ type signInRequest struct {
 type signInResponse struct {
 	User struct {
 		Email string `json:"email"`
-		Role  string `json:"role"`
 	} `json:"user"`
 	AccessToken string `json:"accessToken"`
 }
 
 type meResponse struct {
 	User struct {
-		Email string `json:"email"`
-		Role  string `json:"role"`
+		Email       string   `json:"email"`
+		Roles       []string `json:"roles"`
+		Permissions []string `json:"permissions"`
 	} `json:"user"`
 }
 
@@ -122,9 +123,6 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if signInBody.User.Email != cfg.Email {
 		return fmt.Errorf("sign-in user.email = %q, want %q", signInBody.User.Email, cfg.Email)
 	}
-	if signInBody.User.Role == "" {
-		return fmt.Errorf("sign-in user.role is empty")
-	}
 	if signInBody.AccessToken == "" {
 		return fmt.Errorf("sign-in accessToken is empty")
 	}
@@ -135,7 +133,7 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if !ok {
 		return fmt.Errorf("sign-in refresh cookie missing from cookie jar")
 	}
-	fmt.Fprintf(cfg.Stdout, "OK /api/auth/sign-in as %s role=%s\n", signInBody.User.Email, signInBody.User.Role)
+	fmt.Fprintf(cfg.Stdout, "OK /api/auth/sign-in as %s\n", signInBody.User.Email)
 
 	meBody, err := getMe(ctx, cfg.Client, cfg.BaseURL+"/api/auth/me", signInBody.AccessToken)
 	if err != nil {
@@ -144,10 +142,10 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if meBody.User.Email != cfg.Email {
 		return fmt.Errorf("me user.email = %q, want %q", meBody.User.Email, cfg.Email)
 	}
-	if meBody.User.Role != "admin" {
-		return fmt.Errorf("me user.role = %q, want admin", meBody.User.Role)
+	if !slices.Contains(meBody.User.Roles, "admin") {
+		return fmt.Errorf("me user.roles = %v, want to contain admin", meBody.User.Roles)
 	}
-	fmt.Fprintf(cfg.Stdout, "OK /api/auth/me as %s role=%s\n", meBody.User.Email, meBody.User.Role)
+	fmt.Fprintf(cfg.Stdout, "OK /api/auth/me as %s roles=%s\n", meBody.User.Email, strings.Join(meBody.User.Roles, ","))
 
 	refreshBody, sawRotatedSetCookie, err := postRefresh(ctx, cfg)
 	if err != nil {
@@ -155,9 +153,6 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	}
 	if refreshBody.User.Email != cfg.Email {
 		return fmt.Errorf("refresh user.email = %q, want %q", refreshBody.User.Email, cfg.Email)
-	}
-	if refreshBody.User.Role == "" {
-		return fmt.Errorf("refresh user.role is empty")
 	}
 	if refreshBody.AccessToken == "" {
 		return fmt.Errorf("refresh accessToken is empty")
@@ -181,10 +176,10 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if refreshedMeBody.User.Email != cfg.Email {
 		return fmt.Errorf("refreshed me user.email = %q, want %q", refreshedMeBody.User.Email, cfg.Email)
 	}
-	if refreshedMeBody.User.Role != "admin" {
-		return fmt.Errorf("refreshed me user.role = %q, want admin", refreshedMeBody.User.Role)
+	if !slices.Contains(refreshedMeBody.User.Roles, "admin") {
+		return fmt.Errorf("refreshed me user.roles = %v, want to contain admin", refreshedMeBody.User.Roles)
 	}
-	fmt.Fprintf(cfg.Stdout, "OK /api/auth/me with refreshed access token as %s role=%s\n", refreshedMeBody.User.Email, refreshedMeBody.User.Role)
+	fmt.Fprintf(cfg.Stdout, "OK /api/auth/me with refreshed access token as %s roles=%s\n", refreshedMeBody.User.Email, strings.Join(refreshedMeBody.User.Roles, ","))
 
 	if err := postRefreshWithCookieExpectStatus(ctx, cfg, initialRefreshCookie, http.StatusUnauthorized); err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 // Used by clearConfigEnv to isolate tests from host environment.
 var configEnvKeys = []string{
 	"APP_NAME",
+	"APP_BASE_URL",
 	"PORT",
 	"ENV",
 	"LOG_FORMAT",
@@ -62,6 +63,7 @@ func clearConfigEnv(t *testing.T) {
 // clearConfigEnv so the test only has to express its own production overrides.
 func setProductionMinima(t *testing.T) {
 	t.Helper()
+	t.Setenv("APP_BASE_URL", "https://app.example.com")
 	t.Setenv("DATABASE_URL", "postgres://test")
 	t.Setenv("EMAIL_SMTP_HOST", "smtp.example.test")
 }
@@ -183,6 +185,7 @@ func TestLoad_Defaults(t *testing.T) {
 func TestLoad_EnvOverrides(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("APP_NAME", "test-api")
+	t.Setenv("APP_BASE_URL", "https://frontend.example.test")
 	t.Setenv("PORT", "9090")
 	t.Setenv("ENV", "production")
 	t.Setenv("LOG_FORMAT", "json")
@@ -225,6 +228,9 @@ func TestLoad_EnvOverrides(t *testing.T) {
 
 	if cfg.AppName != "test-api" {
 		t.Errorf("AppName = %q, want %q", cfg.AppName, "test-api")
+	}
+	if cfg.AppBaseURL != "https://frontend.example.test" {
+		t.Errorf("AppBaseURL = %q, want %q", cfg.AppBaseURL, "https://frontend.example.test")
 	}
 	if cfg.Port != 9090 {
 		t.Errorf("Port = %d, want %d", cfg.Port, 9090)
@@ -392,6 +398,38 @@ func TestLoad_CORSExactOriginAllowedInProduction(t *testing.T) {
 	}
 	if len(cfg.CORS) != 1 || cfg.CORS[0] != "https://app.example.com" {
 		t.Fatalf("CORS = %#v, want single exact production origin", cfg.CORS)
+	}
+}
+
+func TestLoad_AppBaseURLRequiresHTTPSInProduction(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ENV", "production")
+	setProductionMinima(t)
+	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	t.Setenv("APP_BASE_URL", "http://app.example.com")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should reject http APP_BASE_URL in production, got nil")
+	}
+}
+
+func TestLoad_ValidProductionConfigPasses(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ENV", "production")
+	setProductionMinima(t)
+	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	t.Setenv("APP_BASE_URL", "https://app.example.com")
+	t.Setenv("EMAIL_FROM_ADDRESS", "WOW Dashboard <noreply@example.com>")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.Env != "production" || cfg.AppBaseURL != "https://app.example.com" {
+		t.Fatalf("production config = env %q appBaseURL %q, want production https app URL", cfg.Env, cfg.AppBaseURL)
 	}
 }
 
@@ -1160,6 +1198,16 @@ func TestLoad_EmailTransport(t *testing.T) {
 		_, err := Load()
 		if err == nil {
 			t.Fatal("Load() should reject empty EMAIL_FROM_ADDRESS, got nil")
+		}
+	})
+
+	t.Run("invalid EMAIL_FROM_ADDRESS is rejected", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("EMAIL_FROM_ADDRESS", "not an address")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() should reject invalid EMAIL_FROM_ADDRESS, got nil")
 		}
 	})
 

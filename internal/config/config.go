@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/mail"
 	"net/url"
 	"os"
 	"strconv"
@@ -195,6 +196,24 @@ func validateCORS(cfg *Config) error {
 		if h == "localhost" || h == "127.0.0.1" || h == "0.0.0.0" || h == "::1" || h == "[::1]" || strings.HasPrefix(h, "127.") {
 			return fmt.Errorf("CORS_ALLOWED_ORIGINS must not contain localhost or loopback IP in production: %q", origin)
 		}
+	}
+	return nil
+}
+
+func validateAppBaseURL(cfg *Config) error {
+	cfg.AppBaseURL = strings.TrimSpace(cfg.AppBaseURL)
+	if cfg.Env != "production" {
+		return nil
+	}
+	u, err := url.Parse(cfg.AppBaseURL)
+	if err != nil {
+		return fmt.Errorf("invalid APP_BASE_URL %q in production: %w", cfg.AppBaseURL, err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("APP_BASE_URL must start with %q in production: %q", "https://", cfg.AppBaseURL)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("APP_BASE_URL must contain a valid host in production: %q", cfg.AppBaseURL)
 	}
 	return nil
 }
@@ -412,6 +431,9 @@ func Load() (*Config, error) {
 	if err := validateCORS(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateAppBaseURL(&cfg); err != nil {
+		return nil, err
+	}
 
 	// 9. Email Transport Validations
 	cfg.EmailSMTPTLSMode = strings.ToLower(strings.TrimSpace(cfg.EmailSMTPTLSMode))
@@ -428,6 +450,10 @@ func Load() (*Config, error) {
 	}
 	if strings.TrimSpace(cfg.EmailFromAddress) == "" {
 		return nil, fmt.Errorf("EMAIL_FROM_ADDRESS must not be empty")
+	}
+	cfg.EmailFromAddress = strings.TrimSpace(cfg.EmailFromAddress)
+	if _, err := mail.ParseAddress(cfg.EmailFromAddress); err != nil {
+		return nil, fmt.Errorf("invalid EMAIL_FROM_ADDRESS %q: %w", cfg.EmailFromAddress, err)
 	}
 
 	return &cfg, nil

@@ -59,6 +59,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `APP_NAME` | `wow-dashboard-api` | Application name for logs and identification |
 | `PORT` | `7272` | HTTP listen port |
 | `ENV` | `development` | Environment stage (`development`, `staging`, `production`) |
+| `APP_BASE_URL` | `http://localhost:3000` | Frontend base URL used in transactional email links; production requires `https://` |
 | `LOG_FORMAT` | `text` outside production, `json` in production | Structured log format (`text` or `json`). Invalid values cause startup to fail. |
 | `LOG_LEVEL` | `info` | Structured log level (`debug`, `info`, `warn`, `error`). Invalid values cause startup to fail. |
 | `READ_TIMEOUT_SECONDS` | `15` | HTTP server read timeout |
@@ -84,6 +85,8 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `REFRESH_TOKEN_COOKIE_NAME` | `wow_dashboard_refresh_token` | HttpOnly refresh token cookie name |
 | `REFRESH_TOKEN_COOKIE_SECURE` | `false` | Whether refresh cookies require HTTPS; `ENV=production` requires this to be `true` |
 | `REFRESH_TOKEN_COOKIE_SAMESITE` | `lax` | Refresh cookie SameSite mode (`lax`, `strict`, or `none`) |
+| `EMAIL_FROM_ADDRESS` | `noreply@wow-dashboard.test` | From address for transactional email; must parse as an email address |
+| `EMAIL_FROM_NAME` | `WOW Dashboard` | Display name for transactional email |
 
 See [`.env.example`](.env.example) for a copy-pasteable template.
 
@@ -92,8 +95,9 @@ See [`.env.example`](.env.example) for a copy-pasteable template.
 When `ENV=production`, the application applies strict startup validation: weak
 or insecure defaults — a placeholder/short `JWT_ACCESS_SECRET`, wildcard or
 loopback CORS origins, insecure refresh cookies, an empty `DATABASE_URL`, an
-invalid cookie name, an out-of-range token TTL, or non-positive timeouts/pool
-sizes — cause the process to refuse to start. See the
+invalid cookie name, a non-HTTPS `APP_BASE_URL`, an invalid email sender
+address, an out-of-range token TTL, or non-positive timeouts/pool sizes —
+cause the process to refuse to start. See the
 [Operations Guide](docs/operations.md#configuration-checks) for the full rule list.
 
 The application does not trust client-supplied forwarding headers

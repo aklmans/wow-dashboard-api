@@ -50,7 +50,7 @@ func TestRunSmokeAuthSuccess(t *testing.T) {
 				SameSite: http.SameSiteLaxMode,
 			})
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"},"accessToken":"` + initialAccessToken + `"}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + initialAccessToken + `"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/refresh":
 			cookie, err := r.Cookie(testRefreshCookie)
 			if err != nil {
@@ -76,7 +76,7 @@ func TestRunSmokeAuthSuccess(t *testing.T) {
 					SameSite: http.SameSiteLaxMode,
 				})
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"},"accessToken":"` + refreshedAccessToken + `"}`))
+				_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + refreshedAccessToken + `"}`))
 			default:
 				http.Error(w, "refresh token rejected", http.StatusUnauthorized)
 			}
@@ -103,7 +103,7 @@ func TestRunSmokeAuthSuccess(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/auth/me":
 			sawBearers = append(sawBearers, r.Header.Get("Authorization"))
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"}}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","roles":["admin"],"permissions":["*"]}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -158,7 +158,7 @@ func TestRunSmokeAuthFailsWhenSignInOmitsAccessToken(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		case "/api/auth/sign-in":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"}}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"}}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -185,7 +185,7 @@ func TestRunSmokeAuthFailsWhenSignInOmitsRefreshCookie(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		case "/api/auth/sign-in":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"},"accessToken":"token-123"}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"token-123"}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -232,7 +232,7 @@ func TestRunSmokeAuthRedactsUnexpectedRefreshReplayResponse(t *testing.T) {
 				SameSite: http.SameSiteLaxMode,
 			})
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"},"accessToken":"` + initialAccessToken + `"}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + initialAccessToken + `"}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/refresh":
 			cookie, err := r.Cookie(testRefreshCookie)
 			if err != nil {
@@ -241,7 +241,7 @@ func TestRunSmokeAuthRedactsUnexpectedRefreshReplayResponse(t *testing.T) {
 			}
 			if cookie.Value == initialRefreshToken && rotated {
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"},"accessToken":"` + leakedReplayToken + `"}`))
+				_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + leakedReplayToken + `"}`))
 				return
 			}
 			if cookie.Value != initialRefreshToken {
@@ -257,10 +257,10 @@ func TestRunSmokeAuthRedactsUnexpectedRefreshReplayResponse(t *testing.T) {
 				SameSite: http.SameSiteLaxMode,
 			})
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"},"accessToken":"` + refreshedAccessToken + `"}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + refreshedAccessToken + `"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/auth/me":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","role":"admin"}}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","roles":["admin"],"permissions":["*"]}}`))
 		default:
 			http.NotFound(w, r)
 		}

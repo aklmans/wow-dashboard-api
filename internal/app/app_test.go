@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
+
+	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
 )
 
 type closeFuncServer struct {
@@ -60,5 +63,34 @@ func TestForceCloseAfterShutdownTimeoutReturnsCloseErrorWithoutDroppingShutdownE
 	}
 	if logOutput := logs.String(); !strings.Contains(logOutput, "forced close failed") {
 		t.Fatalf("logs = %s, want forced close failed message", logOutput)
+	}
+}
+
+func TestNewAuthRateLimiterFallsBackToLocalLimiterWhenRedisPingFails(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	limiter, cleanup, err := newAuthRateLimiter(context.Background(), "redis://127.0.0.1:1/0", httpmiddleware.RateLimitConfig{
+		Enabled:  true,
+		Requests: 1,
+		Window:   time.Minute,
+		Burst:    1,
+	}, logger)
+	if err != nil {
+		t.Fatalf("newAuthRateLimiter returned error: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	if _, ok := limiter.(*httpmiddleware.IPRateLimiter); !ok {
+		t.Fatalf("limiter type = %T, want *IPRateLimiter after Redis ping failure", limiter)
+	}
+	if !limiter.Allow("203.0.113.16:1234") {
+		t.Fatal("first request was denied; local limiter should allow within limit")
+	}
+	if limiter.Allow("203.0.113.16:1234") {
+		t.Fatal("second request was allowed; local limiter should enforce the fallback limit")
+	}
+	if !strings.Contains(logs.String(), "Redis ping failed; auth rate limiting falling back to local memory") {
+		t.Fatalf("logs = %s, want Redis fallback warning", logs.String())
 	}
 }

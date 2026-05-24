@@ -171,6 +171,68 @@ func TestServiceUpdateUserReplacesRoles(t *testing.T) {
 	}
 }
 
+func TestServiceUpdateUserRejectsNonAdminGrantingSystemAdminRole(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	adminRoleID := uuid.MustParse("00000000-0000-0000-0000-0000000a0001")
+	store := &fakeUserStore{}
+	svc := service.NewService(store)
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:      actorID.String(),
+		ActorRoles:       []string{"operator"},
+		ActorPermissions: []string{"users:manage"},
+		TargetUserID:     targetID.String(),
+		RoleIDs:          &[]string{adminRoleID.String()},
+	}); !errors.Is(err, service.ErrInsufficientPrivilege) {
+		t.Fatalf("UpdateUser error = %v, want ErrInsufficientPrivilege", err)
+	}
+	if store.updateCalled {
+		t.Fatal("store.UpdateUser was called for forbidden admin-role grant")
+	}
+}
+
+func TestServiceUpdateUserAllowsSystemAdminGrantWithWildcardPermission(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	adminRoleID := uuid.MustParse("00000000-0000-0000-0000-0000000a0001")
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID, Roles: []string{"admin"}}}
+	svc := service.NewService(store)
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:      actorID.String(),
+		ActorPermissions: []string{"*"},
+		TargetUserID:     targetID.String(),
+		RoleIDs:          &[]string{adminRoleID.String()},
+	}); err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	if !store.updateCalled {
+		t.Fatal("store.UpdateUser was not called for wildcard actor")
+	}
+}
+
+func TestServiceUpdateUserAllowsSystemAdminGrantFromAdminRole(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	adminRoleID := uuid.MustParse("00000000-0000-0000-0000-0000000a0001")
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID, Roles: []string{"admin"}}}
+	svc := service.NewService(store)
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:      actorID.String(),
+		ActorRoles:       []string{"admin"},
+		ActorPermissions: []string{"users:manage"},
+		TargetUserID:     targetID.String(),
+		RoleIDs:          &[]string{adminRoleID.String()},
+	}); err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	if !store.updateCalled {
+		t.Fatal("store.UpdateUser was not called for admin actor")
+	}
+}
+
 func TestServiceUpdateUserChangesProfileFields(t *testing.T) {
 	actorID := uuid.New()
 	targetID := uuid.New()
