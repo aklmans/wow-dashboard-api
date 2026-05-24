@@ -14,7 +14,7 @@
 #   make postman-test # run Newman black-box smoke tests against a running API
 #   make smoke-local # prepare local deps, run API, run Newman, stop API
 
-.PHONY: fmt fmt-check test test-race test-integration vet openapi openapi-check openapi-types openapi-types-check sqlc sqlc-check migrate-up migrate-down seed compose-up compose-down wait-db local-setup local-reset smoke-auth postman-test smoke-local check dev docker-build docker-run
+.PHONY: fmt fmt-check test test-race test-integration vet openapi openapi-check openapi-types openapi-types-check sqlc sqlc-check migrate-up migrate-down migrate-river seed compose-up compose-down wait-db local-setup local-reset smoke-auth postman-test smoke-local check dev docker-build docker-run worker queue-ping
 
 LOCAL_DATABASE_URL ?= postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable
 SMOKE_AUTH_BASE_URL ?= http://localhost:7272
@@ -58,6 +58,18 @@ migrate-down:
 	@if [ -z "$$DATABASE_URL" ]; then echo "DATABASE_URL is not set"; exit 1; fi
 	go tool goose -dir migrations postgres "$$DATABASE_URL" down
 
+migrate-river:
+	@if [ -z "$$DATABASE_URL" ]; then echo "DATABASE_URL is not set"; exit 1; fi
+	go run ./cmd/river-migrate
+
+worker:
+	@if [ -z "$$DATABASE_URL" ]; then echo "DATABASE_URL is not set"; exit 1; fi
+	go run ./cmd/worker
+
+queue-ping:
+	@if [ -z "$$DATABASE_URL" ]; then echo "DATABASE_URL is not set"; exit 1; fi
+	go run ./cmd/queue-ping $${MSG}
+
 seed:
 	@if [ -z "$$DATABASE_URL" ]; then echo "DATABASE_URL is not set"; exit 1; fi
 	go run ./cmd/seed
@@ -85,6 +97,7 @@ wait-db:
 
 local-setup: compose-up wait-db
 	$(MAKE) migrate-up DATABASE_URL="$(LOCAL_DATABASE_URL)"
+	$(MAKE) migrate-river DATABASE_URL="$(LOCAL_DATABASE_URL)"
 	$(MAKE) seed DATABASE_URL="$(LOCAL_DATABASE_URL)"
 
 local-reset:

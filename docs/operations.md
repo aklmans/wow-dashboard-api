@@ -70,6 +70,46 @@ violation. Confirm each before staging or production:
 - `.env`, real database URLs, and production secrets are never committed —
   `.env.example` is the only committed env template.
 
+## Background Worker
+
+Asynchronous work (transactional emails, exports, periodic cleanups) runs in
+`cmd/worker`, a separate process that consumes from a Postgres-backed
+[River](https://riverqueue.com/) queue. The same `DATABASE_URL` is shared
+with the API; no extra infrastructure is required.
+
+- Apply River's schema once per database (it is idempotent):
+
+  ```sh
+  DATABASE_URL=postgres://... make migrate-river
+  ```
+
+  `make local-setup` runs this automatically alongside the goose migrations.
+
+- Run a worker locally:
+
+  ```sh
+  DATABASE_URL=postgres://... make worker
+  ```
+
+- Smoke-test the pipeline by enqueueing a no-op `ping` job:
+
+  ```sh
+  DATABASE_URL=postgres://... make queue-ping MSG="hello"
+  ```
+
+  The worker logs `ping job processed` with the job id and the message.
+
+In production, deploy `cmd/worker` as a separate Deployment/Service from
+`cmd/api` so worker capacity and HTTP capacity scale independently. Both
+images run from the same Go module, so a single build produces both
+binaries (`go build ./cmd/api ./cmd/worker`). The worker honours
+`SIGINT`/`SIGTERM` with a 30-second drain.
+
+New job types live in `internal/jobs/` and are wired into the worker via
+`jobs.RegisterAll`. The pattern: declare an `Args` struct that implements
+`Kind() string`, declare a `Worker` that embeds `river.WorkerDefaults`,
+and add it to `RegisterAll`.
+
 ## Database & Migrations
 
 - The API container does **not** run migrations automatically. Apply them as a
