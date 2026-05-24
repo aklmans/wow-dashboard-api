@@ -186,12 +186,34 @@ git diff --exit-code -- openapi/typescript/schema.ts
 
 When sqlc, migrations, or lint tools are introduced, add their exact commands here and keep CI in sync.
 
+## Codex Cloud Notes
+
+Use this repository as its own Codex cloud environment. Cross-repository tasks
+that also change `wow-dashboard-starter` should be split into coordinated PRs
+unless the user explicitly asks for a different workflow.
+
+Recommended Codex cloud setup script:
+
+```sh
+go mod download
+bunx --bun openapi-typescript@7.13.0 --version >/dev/null
+```
+
+Preferred validation is `make check`. If the cloud runtime cannot run Docker or
+`testcontainers-go` integration tests, run the non-container subset
+(`make fmt-check`, `make vet`, `make test`, `make test-race`,
+`make openapi-check`, and `make openapi-types-check`) and state exactly which
+integration checks were skipped.
+
 ## Review Guidelines
 
 - Treat auth, CORS, token handling, password hashing, migrations, and OpenAPI response changes as high-risk.
 - Verify every new endpoint has tests and appears in `openapi/openapi.json`.
 - Verify generated OpenAPI JSON and TypeScript contract artifacts are updated in the same PR as handler/schema changes.
 - Flag unrestricted CORS, leaked internal errors, missing context propagation, and untested auth paths as P1.
+- Flag any change that logs or returns raw database URLs, tokens, cookies, password hashes, SQL errors, or internal stack traces as P1.
+- Verify readiness checks still test PostgreSQL connectivity instead of becoming fixed success responses.
+- Verify background worker, queue, and migration changes keep idempotency, context propagation, and transaction boundaries intact.
 - Do not suggest broad rewrites unless they directly reduce a demonstrated risk.
 
 ## Git And PR Notes
