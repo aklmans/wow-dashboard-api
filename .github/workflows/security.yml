@@ -1,0 +1,43 @@
+name: Security
+
+# Runs govulncheck against the Go module on every push to main and every
+# PR, plus a weekly cron so a freshly disclosed CVE in a dependency we
+# haven't touched still surfaces. govulncheck is symbol-aware — it only
+# fails on CVEs that the code actually reaches, so the noise floor is
+# low enough to gate merges on a green run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...

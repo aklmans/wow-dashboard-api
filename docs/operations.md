@@ -223,6 +223,24 @@ policy, and rollback notes in this document.
 
 ## Security & Auth Checks
 
+### Automated CI gates
+
+- `.github/workflows/security.yml` runs
+  [`govulncheck`](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) on
+  every push, every PR, and on a weekly cron. It is symbol-aware: it only
+  fails on CVEs that the code actually reaches, so a green run is a real
+  signal — no broad-spectrum "your transitive dep has issues" noise.
+- [`.github/dependabot.yml`](../.github/dependabot.yml) tracks `gomod`,
+  `github-actions`, and `docker` weekly; minor + patch bumps ship grouped
+  per ecosystem to avoid PR spam. Security-advisory bumps still open
+  individual PRs immediately.
+- When govulncheck flags a finding, prefer upgrading the offending
+  dependency to a fixed version. If the upgrade is blocked (breaking
+  change in our usage, abandoned dep), capture the rationale in the PR
+  that disables the check for that path and open a follow-up issue.
+
+### Runtime checks
+
 - Access token TTL is short and within the production validation window.
 - Refresh tokens are delivered only through the `HttpOnly` refresh cookie and
   cleared on sign-out. A replayed, already-revoked refresh token revokes its
