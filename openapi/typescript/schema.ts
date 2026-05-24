@@ -536,7 +536,7 @@ export interface components {
             displayName: string;
             /**
              * @description User email address
-             * @example demo@minimals.cc
+             * @example demo@wow-dashboard.test
              */
             email: string;
             /**
@@ -602,7 +602,7 @@ export interface components {
             displayName: string;
             /**
              * @description User email address
-             * @example demo@minimals.cc
+             * @example demo@wow-dashboard.test
              */
             email: string;
             /**
@@ -723,7 +723,7 @@ export interface components {
             /**
              * Format: email
              * @description Email address to send a reset link to
-             * @example demo@minimals.cc
+             * @example demo@wow-dashboard.test
              */
             email: string;
         };
@@ -1037,7 +1037,7 @@ export interface components {
             readonly $schema?: string;
             /**
              * @description Email address
-             * @example demo@minimals.cc
+             * @example demo@wow-dashboard.test
              */
             email: string;
             /**
@@ -1253,7 +1253,7 @@ export interface components {
             displayName: string;
             /**
              * @description User email address
-             * @example demo@minimals.cc
+             * @example demo@wow-dashboard.test
              */
             email: string;
             /**

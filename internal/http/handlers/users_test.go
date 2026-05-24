@@ -62,7 +62,7 @@ func TestUsersHandler(t *testing.T) {
 			result: domain.ListUsersResult{
 				Users: []domain.User{{
 					ID:          userID,
-					Email:       "demo@minimals.cc",
+					Email:       "demo@wow-dashboard.test",
 					DisplayName: "Demo User",
 					Status:      domain.UserStatusActive,
 					Roles:       []string{"admin"},
@@ -131,7 +131,7 @@ func TestUserDetailHandler(t *testing.T) {
 		userID := uuid.New()
 		usersSvc := &fakeUsersService{getResult: domain.User{
 			ID:          userID,
-			Email:       "demo@minimals.cc",
+			Email:       "demo@wow-dashboard.test",
 			DisplayName: "Demo User",
 			Status:      domain.UserStatusActive,
 			Roles:       []string{"admin"},
@@ -202,7 +202,7 @@ func TestUsersUpdateHandler(t *testing.T) {
 		admin := adminPublicUser()
 		roleID := uuid.New().String()
 		usersSvc := &fakeUsersService{updateResult: domain.User{
-			ID: targetID, Email: "demo@minimals.cc", DisplayName: "Demo User",
+			ID: targetID, Email: "demo@wow-dashboard.test", DisplayName: "Demo User",
 			Status: domain.UserStatusDisabled, Roles: []string{"admin"},
 		}}
 		rec := patch(t, &fakeUsersAuthService{currentUser: admin}, usersSvc, targetID.String(),

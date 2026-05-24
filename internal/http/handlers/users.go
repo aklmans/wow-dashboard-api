@@ -47,7 +47,7 @@ type usersListBody struct {
 
 type usersListItem struct {
 	ID            string     `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
-	Email         string     `json:"email" example:"demo@minimals.cc" doc:"User email address"`
+	Email         string     `json:"email" example:"demo@wow-dashboard.test" doc:"User email address"`
 	DisplayName   string     `json:"displayName" example:"Demo User" doc:"User display name"`
 	Status        string     `json:"status" example:"active" doc:"User status"`
 	Roles         []string   `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`

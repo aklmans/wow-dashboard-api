@@ -63,7 +63,7 @@ func TestAuthHandlers(t *testing.T) {
 		router := newAuthTestRouter(authSvc)
 
 		rec := postJSON(router, "/api/auth/sign-in", map[string]string{
-			"email":    "demo@minimals.cc",
+			"email":    "demo@wow-dashboard.test",
 			"password": "@2Minimal",
 		})
 
@@ -77,8 +77,8 @@ func TestAuthHandlers(t *testing.T) {
 		if body.AccessToken != "access-token-123" {
 			t.Errorf("accessToken = %q, want access-token-123", body.AccessToken)
 		}
-		if authSvc.signInInput.Email != "demo@minimals.cc" {
-			t.Errorf("SignIn email = %q, want demo@minimals.cc", authSvc.signInInput.Email)
+		if authSvc.signInInput.Email != "demo@wow-dashboard.test" {
+			t.Errorf("SignIn email = %q, want demo@wow-dashboard.test", authSvc.signInInput.Email)
 		}
 		assertRefreshCookie(t, rec, "refresh-token-123")
 	})
@@ -97,7 +97,7 @@ func TestAuthHandlers(t *testing.T) {
 			refreshSession: &service.Session{
 				User: service.PublicUser{
 					ID:          "user-123",
-					Email:       "demo@minimals.cc",
+					Email:       "demo@wow-dashboard.test",
 					DisplayName: "Demo User",
 					Status:      "active",
 				},
@@ -200,12 +200,12 @@ func TestAuthHandlers(t *testing.T) {
 		router := newAuthTestRouter(authSvc)
 
 		rec := postJSON(router, "/api/auth/sign-in", map[string]string{
-			"email":    "demo@minimals.cc",
+			"email":    "demo@wow-dashboard.test",
 			"password": "@2Minimal",
 		})
 
 		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized, "Invalid email or password.",
-			"demo@minimals.cc", "@2Minimal")
+			"demo@wow-dashboard.test", "@2Minimal")
 	})
 
 	t.Run("sign-up duplicate email returns safe conflict envelope", func(t *testing.T) {
@@ -272,13 +272,13 @@ func TestAuthHandlers(t *testing.T) {
 		router := newAuthTestRouter(authSvc)
 
 		rec := postJSON(router, "/api/auth/sign-in", map[string]string{
-			"email":    "demo@minimals.cc",
+			"email":    "demo@wow-dashboard.test",
 			"password": "@2Minimal",
 		})
 
 		assertAPIError(t, rec, http.StatusInternalServerError, apierror.CodeInternalError,
 			"An internal error occurred. Please try again later.",
-			"password_hash", "SQLSTATE", "database exploded", "demo@minimals.cc", "@2Minimal")
+			"password_hash", "SQLSTATE", "database exploded", "demo@wow-dashboard.test", "@2Minimal")
 	})
 }
 
@@ -308,7 +308,7 @@ func TestAuthRateLimitMiddlewareAppliesToSignInAndSignUpOnly(t *testing.T) {
 		"Too many authentication attempts. Please try again later.")
 
 	signInRec := postJSON(router, "/api/auth/sign-in", map[string]string{
-		"email":    "demo@minimals.cc",
+		"email":    "demo@wow-dashboard.test",
 		"password": "@2Minimal",
 	})
 	assertAPIError(t, signInRec, http.StatusTooManyRequests, apierror.CodeRateLimited,
@@ -336,7 +336,7 @@ func TestAuthRateLimitIgnoresForwardedHeaders(t *testing.T) {
 	router := newProjectAuthTestRouterWithMiddlewares(authSvc, httpmiddleware.AuthRateLimit(limiter))
 
 	first := postJSONFromRemote(router, "/api/auth/sign-in", map[string]string{
-		"email":    "demo@minimals.cc",
+		"email":    "demo@wow-dashboard.test",
 		"password": "@2Minimal",
 	}, "198.51.100.10:1111", map[string]string{
 		"X-Forwarded-For": "203.0.113.1",
@@ -347,7 +347,7 @@ func TestAuthRateLimitIgnoresForwardedHeaders(t *testing.T) {
 	}
 
 	second := postJSONFromRemote(router, "/api/auth/sign-in", map[string]string{
-		"email":    "demo@minimals.cc",
+		"email":    "demo@wow-dashboard.test",
 		"password": "@2Minimal",
 	}, "198.51.100.10:2222", map[string]string{
 		"X-Forwarded-For": "203.0.113.99",
@@ -442,11 +442,11 @@ func TestAuthPreHandlerErrorsUseAPIErrorEnvelope(t *testing.T) {
 		{
 			name:       "sign-in malformed JSON",
 			path:       "/api/auth/sign-in",
-			body:       `{"email":"demo@minimals.cc","password":"@2Minimal"`,
+			body:       `{"email":"demo@wow-dashboard.test","password":"@2Minimal"`,
 			wantStatus: http.StatusBadRequest,
 			wantCode:   apierror.CodeBadRequest,
 			forbiddenLeaks: []string{
-				"demo@minimals.cc",
+				"demo@wow-dashboard.test",
 				"@2Minimal",
 			},
 		},
@@ -756,7 +756,7 @@ func testSession() *service.Session {
 	return &service.Session{
 		User: service.PublicUser{
 			ID:          "user-123",
-			Email:       "demo@minimals.cc",
+			Email:       "demo@wow-dashboard.test",
 			DisplayName: "Demo User",
 			Status:      "active",
 		},
@@ -815,8 +815,8 @@ func assertStarterUser(t *testing.T, user starterUser) {
 	if user.ID != "user-123" {
 		t.Errorf("user.id = %q, want user-123", user.ID)
 	}
-	if user.Email != "demo@minimals.cc" {
-		t.Errorf("user.email = %q, want demo@minimals.cc", user.Email)
+	if user.Email != "demo@wow-dashboard.test" {
+		t.Errorf("user.email = %q, want demo@wow-dashboard.test", user.Email)
 	}
 	if user.DisplayName != "Demo User" {
 		t.Errorf("user.displayName = %q, want Demo User", user.DisplayName)
@@ -965,11 +965,11 @@ func TestEmailAuthFlowHandlers(t *testing.T) {
 
 	t.Run("forgot-password forwards the email and returns 200", func(t *testing.T) {
 		authSvc := &fakeAuthService{}
-		rec := post(t, authSvc, "/api/auth/forgot-password", `{"email":"demo@minimals.cc"}`, "")
+		rec := post(t, authSvc, "/api/auth/forgot-password", `{"email":"demo@wow-dashboard.test"}`, "")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 		}
-		if authSvc.forgotPasswordEmail != "demo@minimals.cc" {
+		if authSvc.forgotPasswordEmail != "demo@wow-dashboard.test" {
 			t.Fatalf("forwarded email = %q", authSvc.forgotPasswordEmail)
 		}
 	})

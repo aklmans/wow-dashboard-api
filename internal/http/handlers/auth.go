@@ -30,7 +30,7 @@ type AuthService interface {
 
 type authUser struct {
 	ID          string `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
-	Email       string `json:"email" example:"demo@minimals.cc" doc:"User email address"`
+	Email       string `json:"email" example:"demo@wow-dashboard.test" doc:"User email address"`
 	DisplayName string `json:"displayName" example:"Demo User" doc:"User display name"`
 }
 
@@ -38,7 +38,7 @@ type authUser struct {
 // permissions a frontend uses to render menus and gate actions.
 type authMeUser struct {
 	ID            string     `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"User identifier"`
-	Email         string     `json:"email" example:"demo@minimals.cc" doc:"User email address"`
+	Email         string     `json:"email" example:"demo@wow-dashboard.test" doc:"User email address"`
 	DisplayName   string     `json:"displayName" example:"Demo User" doc:"User display name"`
 	EmailVerified bool       `json:"emailVerified" example:"true" doc:"Whether the user has confirmed their email address"`
 	AvatarURL     string     `json:"avatarUrl" example:"" doc:"User avatar image URL; empty when unset"`
@@ -88,7 +88,7 @@ type signUpInput struct {
 
 type signInInput struct {
 	Body struct {
-		Email    string `json:"email" maxLength:"320" example:"demo@minimals.cc" doc:"Email address"`
+		Email    string `json:"email" maxLength:"320" example:"demo@wow-dashboard.test" doc:"Email address"`
 		Password string `json:"password" maxLength:"4096" example:"@2Minimal" doc:"Account password"`
 	}
 }
@@ -107,7 +107,7 @@ type changePasswordInput struct {
 
 type forgotPasswordInput struct {
 	Body struct {
-		Email string `json:"email" format:"email" example:"demo@minimals.cc" doc:"Email address to send a reset link to"`
+		Email string `json:"email" format:"email" example:"demo@wow-dashboard.test" doc:"Email address to send a reset link to"`
 	}
 }
 

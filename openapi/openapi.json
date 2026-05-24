@@ -151,7 +151,7 @@
           "email": {
             "description": "User email address",
             "examples": [
-              "demo@minimals.cc"
+              "demo@wow-dashboard.test"
             ],
             "type": "string"
           },
@@ -282,7 +282,7 @@
           "email": {
             "description": "User email address",
             "examples": [
-              "demo@minimals.cc"
+              "demo@wow-dashboard.test"
             ],
             "type": "string"
           },
@@ -513,7 +513,7 @@
           "email": {
             "description": "Email address to send a reset link to",
             "examples": [
-              "demo@minimals.cc"
+              "demo@wow-dashboard.test"
             ],
             "format": "email",
             "type": "string"
@@ -1120,7 +1120,7 @@
           "email": {
             "description": "Email address",
             "examples": [
-              "demo@minimals.cc"
+              "demo@wow-dashboard.test"
             ],
             "maxLength": 320,
             "type": "string"
@@ -1533,7 +1533,7 @@
           "email": {
             "description": "User email address",
             "examples": [
-              "demo@minimals.cc"
+              "demo@wow-dashboard.test"
             ],
             "type": "string"
           },
