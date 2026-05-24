@@ -80,7 +80,7 @@ type authMeResponse struct {
 type signUpInput struct {
 	Body struct {
 		Email     string `json:"email" format:"email" maxLength:"320" example:"hello@gmail.com" doc:"Email address"`
-		Password  string `json:"password" minLength:"8" maxLength:"4096" example:"@2Minimal" doc:"Account password"`
+		Password  string `json:"password" minLength:"8" maxLength:"4096" example:"@Password" doc:"Account password"`
 		FirstName string `json:"firstName" maxLength:"100" example:"Hello" doc:"First name"`
 		LastName  string `json:"lastName" maxLength:"100" example:"Friend" doc:"Last name"`
 	}
@@ -89,7 +89,7 @@ type signUpInput struct {
 type signInInput struct {
 	Body struct {
 		Email    string `json:"email" maxLength:"320" example:"demo@wow-dashboard.test" doc:"Email address"`
-		Password string `json:"password" maxLength:"4096" example:"@2Minimal" doc:"Account password"`
+		Password string `json:"password" maxLength:"4096" example:"@Password" doc:"Account password"`
 	}
 }
 

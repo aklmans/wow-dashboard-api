@@ -48,7 +48,7 @@ Demo credentials after `make local-setup` (seeded with `role = "admin"`):
 
 ```txt
 demo@wow-dashboard.test
-@2Minimal
+@Password
 ```
 
 ## Auth Flow

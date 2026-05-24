@@ -1128,7 +1128,7 @@
           "password": {
             "description": "Account password",
             "examples": [
-              "@2Minimal"
+              "@Password"
             ],
             "maxLength": 4096,
             "type": "string"
@@ -1180,7 +1180,7 @@
           "password": {
             "description": "Account password",
             "examples": [
-              "@2Minimal"
+              "@Password"
             ],
             "maxLength": 4096,
             "minLength": 8,

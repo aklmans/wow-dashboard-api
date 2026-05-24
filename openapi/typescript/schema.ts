@@ -1042,7 +1042,7 @@ export interface components {
             email: string;
             /**
              * @description Account password
-             * @example @2Minimal
+             * @example @Password
              */
             password: string;
         };
@@ -1071,7 +1071,7 @@ export interface components {
             lastName: string;
             /**
              * @description Account password
-             * @example @2Minimal
+             * @example @Password
              */
             password: string;
         };

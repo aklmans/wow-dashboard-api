@@ -32,7 +32,7 @@ func TestAuthHandlers(t *testing.T) {
 
 		rec := postJSON(router, "/api/auth/sign-up", map[string]string{
 			"email":     "hello@gmail.com",
-			"password":  "@2Minimal",
+			"password":  "@Password",
 			"firstName": "Hello",
 			"lastName":  "Friend",
 		})
@@ -50,7 +50,7 @@ func TestAuthHandlers(t *testing.T) {
 		if authSvc.signUpInput.Email != "hello@gmail.com" {
 			t.Errorf("SignUp email = %q, want hello@gmail.com", authSvc.signUpInput.Email)
 		}
-		if authSvc.signUpInput.Password != "@2Minimal" {
+		if authSvc.signUpInput.Password != "@Password" {
 			t.Errorf("SignUp password was not forwarded")
 		}
 		assertRefreshCookie(t, rec, "refresh-token-123")
@@ -64,7 +64,7 @@ func TestAuthHandlers(t *testing.T) {
 
 		rec := postJSON(router, "/api/auth/sign-in", map[string]string{
 			"email":    "demo@wow-dashboard.test",
-			"password": "@2Minimal",
+			"password": "@Password",
 		})
 
 		if rec.Code != http.StatusOK {
@@ -201,11 +201,11 @@ func TestAuthHandlers(t *testing.T) {
 
 		rec := postJSON(router, "/api/auth/sign-in", map[string]string{
 			"email":    "demo@wow-dashboard.test",
-			"password": "@2Minimal",
+			"password": "@Password",
 		})
 
 		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized, "Invalid email or password.",
-			"demo@wow-dashboard.test", "@2Minimal")
+			"demo@wow-dashboard.test", "@Password")
 	})
 
 	t.Run("sign-up duplicate email returns safe conflict envelope", func(t *testing.T) {
@@ -216,7 +216,7 @@ func TestAuthHandlers(t *testing.T) {
 
 		rec := postJSON(router, "/api/auth/sign-up", map[string]string{
 			"email":     "hello@gmail.com",
-			"password":  "@2Minimal",
+			"password":  "@Password",
 			"firstName": "Hello",
 			"lastName":  "Friend",
 		})
@@ -273,12 +273,12 @@ func TestAuthHandlers(t *testing.T) {
 
 		rec := postJSON(router, "/api/auth/sign-in", map[string]string{
 			"email":    "demo@wow-dashboard.test",
-			"password": "@2Minimal",
+			"password": "@Password",
 		})
 
 		assertAPIError(t, rec, http.StatusInternalServerError, apierror.CodeInternalError,
 			"An internal error occurred. Please try again later.",
-			"password_hash", "SQLSTATE", "database exploded", "demo@wow-dashboard.test", "@2Minimal")
+			"password_hash", "SQLSTATE", "database exploded", "demo@wow-dashboard.test", "@Password")
 	})
 }
 
@@ -300,7 +300,7 @@ func TestAuthRateLimitMiddlewareAppliesToSignInAndSignUpOnly(t *testing.T) {
 
 	signUpRec := postJSON(router, "/api/auth/sign-up", map[string]string{
 		"email":     "hello@gmail.com",
-		"password":  "@2Minimal",
+		"password":  "@Password",
 		"firstName": "Hello",
 		"lastName":  "Friend",
 	})
@@ -309,7 +309,7 @@ func TestAuthRateLimitMiddlewareAppliesToSignInAndSignUpOnly(t *testing.T) {
 
 	signInRec := postJSON(router, "/api/auth/sign-in", map[string]string{
 		"email":    "demo@wow-dashboard.test",
-		"password": "@2Minimal",
+		"password": "@Password",
 	})
 	assertAPIError(t, signInRec, http.StatusTooManyRequests, apierror.CodeRateLimited,
 		"Too many authentication attempts. Please try again later.")
@@ -337,7 +337,7 @@ func TestAuthRateLimitIgnoresForwardedHeaders(t *testing.T) {
 
 	first := postJSONFromRemote(router, "/api/auth/sign-in", map[string]string{
 		"email":    "demo@wow-dashboard.test",
-		"password": "@2Minimal",
+		"password": "@Password",
 	}, "198.51.100.10:1111", map[string]string{
 		"X-Forwarded-For": "203.0.113.1",
 		"X-Real-IP":       "203.0.113.2",
@@ -348,7 +348,7 @@ func TestAuthRateLimitIgnoresForwardedHeaders(t *testing.T) {
 
 	second := postJSONFromRemote(router, "/api/auth/sign-in", map[string]string{
 		"email":    "demo@wow-dashboard.test",
-		"password": "@2Minimal",
+		"password": "@Password",
 	}, "198.51.100.10:2222", map[string]string{
 		"X-Forwarded-For": "203.0.113.99",
 		"X-Real-IP":       "203.0.113.100",
@@ -442,23 +442,23 @@ func TestAuthPreHandlerErrorsUseAPIErrorEnvelope(t *testing.T) {
 		{
 			name:       "sign-in malformed JSON",
 			path:       "/api/auth/sign-in",
-			body:       `{"email":"demo@wow-dashboard.test","password":"@2Minimal"`,
+			body:       `{"email":"demo@wow-dashboard.test","password":"@Password"`,
 			wantStatus: http.StatusBadRequest,
 			wantCode:   apierror.CodeBadRequest,
 			forbiddenLeaks: []string{
 				"demo@wow-dashboard.test",
-				"@2Minimal",
+				"@Password",
 			},
 		},
 		{
 			name:       "sign-up missing required fields",
 			path:       "/api/auth/sign-up",
-			body:       `{"email":"hello@gmail.com","password":"@2Minimal"}`,
+			body:       `{"email":"hello@gmail.com","password":"@Password"}`,
 			wantStatus: http.StatusUnprocessableEntity,
 			wantCode:   apierror.CodeValidationFailed,
 			forbiddenLeaks: []string{
 				"hello@gmail.com",
-				"@2Minimal",
+				"@Password",
 			},
 		},
 	}

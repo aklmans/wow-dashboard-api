@@ -14,7 +14,7 @@ import (
 
 const (
 	DemoEmail       = "demo@wow-dashboard.test"
-	DemoPassword    = "@2Minimal"
+	DemoPassword    = "@Password"
 	DemoDisplayName = "Demo User"
 	demoStatus      = "active"
 	demoRole        = "admin"

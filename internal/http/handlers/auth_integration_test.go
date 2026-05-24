@@ -103,7 +103,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 
 	signUpRec := postJSON(router, "/api/auth/sign-up", map[string]string{
 		"email":     "Hello@Gmail.com",
-		"password":  "@2Minimal",
+		"password":  "@Password",
 		"firstName": "Hello",
 		"lastName":  "Friend",
 	})
@@ -124,7 +124,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 
 	signInRec := postJSON(router, "/api/auth/sign-in", map[string]string{
 		"email":    "hello@gmail.com",
-		"password": "@2Minimal",
+		"password": "@Password",
 	})
 	if signInRec.Code != http.StatusOK {
 		t.Fatalf("sign-in status = %d, want %d; body=%s", signInRec.Code, http.StatusOK, signInRec.Body.String())

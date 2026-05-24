@@ -31,7 +31,7 @@ The target uses `npx --yes newman`, so a global Newman install is not required.
 Override connection or credential values when needed:
 
 ```sh
-make postman-test POSTMAN_BASE_URL=http://localhost:7272 POSTMAN_EMAIL=demo@wow-dashboard.test POSTMAN_PASSWORD='@2Minimal'
+make postman-test POSTMAN_BASE_URL=http://localhost:7272 POSTMAN_EMAIL=demo@wow-dashboard.test POSTMAN_PASSWORD='@Password'
 ```
 
 The collection relies on Newman's cookie jar for refresh-token rotation and also
