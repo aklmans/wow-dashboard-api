@@ -1,0 +1,81 @@
+# Local observability stack for wow-dashboard-api.
+#
+# Brings up Prometheus (metrics), Grafana (dashboards), and Jaeger (traces).
+# The API is expected to be running on the host at :7272 — Prometheus scrapes
+# it through `host.docker.internal`. Jaeger v2 receives OTLP directly so we
+# don't need a separate otel-collector for local dev.
+#
+# Usage:
+#   make observability-up         # start the stack
+#   make observability-down       # stop and remove
+#   open http://localhost:3001    # Grafana (admin/admin)
+#   open http://localhost:9090    # Prometheus
+#   open http://localhost:16686   # Jaeger UI
+#
+# Production deployments should use their managed equivalents (Grafana Cloud,
+# AMP, Tempo, etc.) — this stack is for dev, demos, and acceptance testing.
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      # Lets the container reach the API process running on the host. Linux
+      # docker also honours this since Compose v20.10+.
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: dark
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q '\"database\": \"ok\"'"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  jaeger:
+    # Jaeger v2 (jaegertracing/jaeger) accepts OTLP directly on 4317/4318 and
+    # serves the UI on 16686 — no separate otel-collector required for dev.
+    image: jaegertracing/jaeger:2.1.0
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4317:4317"    # OTLP/gRPC
+      - "4318:4318"    # OTLP/HTTP
+    environment:
+      LOG_LEVEL: info
+
+volumes:
+  prometheus-data:
+  grafana-data:

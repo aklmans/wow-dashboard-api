@@ -14,7 +14,7 @@
 #   make postman-test # run Newman black-box smoke tests against a running API
 #   make smoke-local # prepare local deps, run API, run Newman, stop API
 
-.PHONY: fmt fmt-check test test-race test-integration vet openapi openapi-check openapi-types openapi-types-check sqlc sqlc-check migrate-up migrate-down migrate-river seed compose-up compose-down wait-db local-setup local-reset smoke-auth postman-test smoke-local check dev docker-build docker-run worker queue-ping
+.PHONY: fmt fmt-check test test-race test-integration vet openapi openapi-check openapi-types openapi-types-check sqlc sqlc-check migrate-up migrate-down migrate-river seed compose-up compose-down wait-db local-setup local-reset smoke-auth postman-test smoke-local check dev docker-build docker-run worker queue-ping observability-up observability-down observability-logs observability-config
 
 LOCAL_DATABASE_URL ?= postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable
 SMOKE_AUTH_BASE_URL ?= http://localhost:7272
@@ -163,3 +163,21 @@ docker-build:
 
 docker-run:
 	docker run --rm -p 7272:7272 --env-file .env wow-dashboard-api:local
+
+# ---------- Observability stack ----------
+
+observability-up:
+	docker compose -f observability/compose.yaml up -d
+	@echo "==> Grafana:    http://localhost:3001  (admin/admin)"
+	@echo "==> Prometheus: http://localhost:9090"
+	@echo "==> Jaeger UI:  http://localhost:16686"
+	@echo "==> Set OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 on the API process to emit traces."
+
+observability-down:
+	docker compose -f observability/compose.yaml down
+
+observability-logs:
+	docker compose -f observability/compose.yaml logs -f --tail=100
+
+observability-config:
+	docker compose -f observability/compose.yaml config

@@ -1,0 +1,28 @@
+# Prometheus scrape config for the local observability stack. The single
+# scrape target is the Go API running on the host at :7272/metrics — when the
+# API is deployed behind a different address, override this file via a bind
+# mount or rebuild a config image for the target environment.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    service: wow-dashboard-api
+    env: local
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: wow-dashboard-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:7272
+        labels:
+          instance: api-local
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

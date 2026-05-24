@@ -240,6 +240,12 @@ policy, and rollback notes in this document.
 - `GET /readyz` — readiness; checks PostgreSQL connectivity, returns `503` on
   outage. Never configure `/readyz` as a liveness probe — a temporary database
   outage should stop new traffic, not force a restart loop.
+- `GET /metrics` — Prometheus scrape endpoint. See
+  [`observability.md`](observability.md) for the metric reference, the
+  bundled local Grafana stack, and the example alert rules.
+- Distributed traces ship via OTLP/HTTP when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set; the bundled Jaeger v2 instance in
+  `observability/compose.yaml` listens on `http://localhost:4318`.
 - Production logs are structured JSON via `slog`. Every request log and error
   response carries a `request_id`. Request/response headers are never logged;
   sensitive query parameters are redacted.
@@ -270,11 +276,7 @@ make openapi-types
 
 Future evolution items, not blockers for the current baseline:
 
-- A bundled observability stack (collector, dashboards). The app exposes
-  Prometheus metrics at `/metrics` and exports OpenTelemetry traces, but
-  running the collector and dashboards is left to the deployment.
 - External secret-manager integration.
-- Distributed locks and job queues.
 - An attribute-based access-control (ABAC) policy engine. Role-based access
   control with dynamic, database-backed roles is implemented.
 - Refresh-token device/session management UI.

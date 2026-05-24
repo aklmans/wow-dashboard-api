@@ -1,0 +1,69 @@
+# Example alert rules for the wow-dashboard-api. They surface the same
+# signals as the Grafana "API Overview" dashboard so an operator can spot
+# trouble whether they happen to be watching the board or not. Tune the
+# thresholds and `for:` durations to fit each environment's SLOs before
+# wiring these into Alertmanager.
+
+groups:
+  - name: api-availability
+    interval: 30s
+    rules:
+      - alert: ApiDown
+        expr: up{job="wow-dashboard-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "wow-dashboard-api is down"
+          description: |
+            Prometheus has not been able to scrape {{ $labels.instance }} for 2
+            minutes. Check that the API process is running and reachable on
+            :7272/metrics.
+
+      - alert: ApiHighErrorRate
+        expr: |
+          (
+            sum by (instance) (rate(http_requests_total{job="wow-dashboard-api",status=~"5.."}[5m]))
+            /
+            sum by (instance) (rate(http_requests_total{job="wow-dashboard-api"}[5m]))
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 5xx error ratio above 5%"
+          description: |
+            {{ $labels.instance }} has served more than 5% 5xx responses over the
+            last 5 minutes. Inspect the logs for repeated errors and the
+            handler/route breakdown in the API Overview dashboard.
+
+      - alert: ApiSlowP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, route) (rate(http_request_duration_seconds_bucket{job="wow-dashboard-api"}[5m]))
+          ) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API p95 latency above 1s on a route"
+          description: |
+            Route `{{ $labels.route }}` has a p95 above 1s sustained for 10
+            minutes. Look at upstream DB query times in Jaeger and the
+            per-route latency panel.
+
+  - name: api-runtime
+    interval: 30s
+    rules:
+      - alert: ApiGoroutineLeak
+        expr: go_goroutines{job="wow-dashboard-api"} > 5000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Goroutine count climbing on {{ $labels.instance }}"
+          description: |
+            Goroutine count has stayed above 5000 for 15 minutes — usually a
+            sign of leaked workers or a stuck Wait on a channel. Capture a
+            pprof goroutine dump before restarting.

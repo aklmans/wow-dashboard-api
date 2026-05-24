@@ -488,6 +488,10 @@ In Kubernetes or Docker Compose, configure `/healthz` as the liveness probe and 
 
 The service is instrumented with OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP/HTTP collector URL (e.g. `http://localhost:4318`) to export traces; leave it unset and tracing is a no-op with negligible overhead — no collector required. Each HTTP request becomes a server span named by its matched route (`GET /api/users/{id}`), and database queries are recorded as child spans. Incoming W3C `traceparent` headers are honored, so traces join up across services.
 
+### Local Grafana + Jaeger stack
+
+`make observability-up` brings up a Prometheus + Grafana + Jaeger stack from `observability/compose.yaml` with a provisioned **API Overview** dashboard (RED + Go runtime panels). See [`docs/observability.md`](docs/observability.md) for the metric reference, alert rules, and production deployment notes.
+
 ### Database Migrations
 
 The production container ships no migration tooling — run migrations as a

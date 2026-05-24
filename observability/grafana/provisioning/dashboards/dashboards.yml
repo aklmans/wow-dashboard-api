@@ -1,0 +1,18 @@
+# Tells Grafana to load every JSON dashboard under /var/lib/grafana/dashboards
+# (mounted in compose.yaml). New dashboards dropped in that directory show up
+# without a Grafana restart, thanks to updateIntervalSeconds.
+
+apiVersion: 1
+
+providers:
+  - name: wow-dashboard-api
+    orgId: 1
+    folder: wow-dashboard-api
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true
