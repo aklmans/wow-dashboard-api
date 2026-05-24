@@ -5,6 +5,11 @@ For runtime configuration variables and their defaults, see the Configuration
 table in [`README.md`](../README.md); this document covers how to operate the
 service safely, not every individual variable.
 
+For the concrete step-by-step deploy playbook (image tags, env review,
+migrations, rolling updates, rollback), see [`deployment.md`](deployment.md).
+This file is the gate that decides whether a deploy is allowed; that one is
+how to actually run it once the gate is open.
+
 ## Readiness Levels
 
 Move down the list and stop at the first level whose conditions are not met.

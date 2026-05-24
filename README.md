@@ -500,6 +500,15 @@ receives traffic; it never auto-migrates. See the
 [Operations Guide](docs/operations.md#database--migrations) for the runbook and
 the migration `00007` preflight.
 
+### Deployment
+
+Every push to `main` and every `vX.Y.Z` tag publishes a multi-arch image
+(api + worker + river-migrate, distroless nonroot) to
+`ghcr.io/aklmans/wow-dashboard-api`. The [Deployment Runbook](docs/deployment.md)
+walks through pulling the tag, applying migrations, deploying the API +
+worker side-by-side, and rolling back. `compose.prod.yaml` rehearses the
+same flow locally on a single host.
+
 ## CI
 
 GitHub Actions uses layered checks so pull requests stay stable while deeper black-box smoke coverage remains available on demand:

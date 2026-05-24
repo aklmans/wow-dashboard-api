@@ -1,0 +1,106 @@
+# Production-shape full-stack compose. Spins up Postgres, the API, the
+# worker, and the optional Mailpit catcher using the image published to
+# GHCR. This is what an operator would run to validate a release end-to-end
+# on a single host before pushing it to a real orchestrator.
+#
+# Usage:
+#   # 1. Pick an image tag (default: main).
+#   #    For a release: export IMAGE_TAG=v1.2.3 (or `:latest`).
+#   export IMAGE_TAG=main
+#
+#   # 2. Bring up Postgres and apply schema migrations from the host.
+#   #    The image deliberately ships no goose toolchain — migrations are
+#   #    a separate, explicit step (see docs/deployment.md).
+#   docker compose -f compose.prod.yaml up -d postgres
+#   DATABASE_URL=postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable \
+#     make migrate-up
+#
+#   # 3. Bring up the rest. The migrate-river sidecar applies the queue
+#   #    schema, then api + worker start.
+#   docker compose -f compose.prod.yaml up -d
+#
+#   # 4. Tear down.
+#   docker compose -f compose.prod.yaml down
+#
+# This file intentionally hardcodes development-grade secrets so it runs
+# out of the box; before pointing it at anything real, override every
+# `JWT_ACCESS_SECRET`, `POSTGRES_PASSWORD`, etc. via a separate
+# `.env.prod` file and `--env-file`.
+
+x-app-env: &app-env
+  ENV: production
+  DATABASE_URL: postgres://wow_dashboard:wow_dashboard@postgres:5432/wow_dashboard_api?sslmode=disable
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET to a >=32 character secret}
+  JWT_ISSUER: wow-dashboard-api
+  JWT_AUDIENCE: wow-dashboard
+  REFRESH_TOKEN_COOKIE_SECURE: "false"
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8083}
+  EMAIL_SMTP_HOST: mailpit
+  EMAIL_SMTP_PORT: "1025"
+  EMAIL_SMTP_TLS: none
+  EMAIL_FROM_ADDRESS: noreply@wow-dashboard.test
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: wow_dashboard_api
+      POSTGRES_USER: wow_dashboard
+      POSTGRES_PASSWORD: wow_dashboard
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wow_dashboard -d wow_dashboard_api"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    volumes:
+      - wow-dashboard-prod-postgres-data:/var/lib/postgresql/data
+
+  migrate-river:
+    image: ghcr.io/aklmans/wow-dashboard-api:${IMAGE_TAG:-main}
+    entrypoint: ["/river-migrate"]
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: ghcr.io/aklmans/wow-dashboard-api:${IMAGE_TAG:-main}
+    ports:
+      - "7272:7272"
+    environment:
+      <<: *app-env
+      PORT: "7272"
+    depends_on:
+      migrate-river:
+        condition: service_completed_successfully
+    # The image runs distroless with no shell or HTTP client, so a compose
+    # healthcheck would need an `httpcheck` sidecar — overkill for this
+    # demo stack. Use `/healthz` and `/readyz` from your orchestrator's
+    # probes instead (Kubernetes, Nomad, etc.).
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/aklmans/wow-dashboard-api:${IMAGE_TAG:-main}
+    entrypoint: ["/worker"]
+    environment:
+      <<: *app-env
+    depends_on:
+      migrate-river:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    environment:
+      MP_MAX_MESSAGES: "5000"
+
+volumes:
+  wow-dashboard-prod-postgres-data:
