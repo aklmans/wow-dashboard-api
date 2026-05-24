@@ -1,15 +1,13 @@
-# Dependabot keeps the Go module and the GitHub Actions workflows fresh.
-# Updates ship grouped so a quiet week produces one PR per ecosystem, not
-# twenty. Security advisories still open individual PRs immediately so a
-# real CVE never waits on the weekly cadence.
+# Dependabot keeps the Go module and the GitHub Actions workflows fresh on
+# a monthly cadence so the PR feed stays quiet. Security advisories still
+# open individual PRs immediately, so a real CVE never waits on the schedule.
 
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "07:00"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 10
@@ -25,8 +23,7 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "07:00"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
@@ -42,8 +39,7 @@ updates:
   - package-ecosystem: docker
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "07:00"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5

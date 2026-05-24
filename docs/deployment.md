@@ -7,9 +7,10 @@ gate is open.
 
 ## Image
 
-Every push to `main` and every git tag (`vX.Y.Z`) publishes a multi-arch
-image (`linux/amd64`, `linux/arm64`) to
-`ghcr.io/aklmans/wow-dashboard-api`. The image is intentionally minimal:
+The image is built and published from an operator workstation (or your
+staging/test host), not from GitHub Actions — the multi-arch CI job was
+removed to keep PR feedback fast. The Dockerfile is intentionally
+minimal:
 
 | Binary           | Purpose                                                  |
 | ---------------- | -------------------------------------------------------- |
@@ -22,17 +23,23 @@ harness, or any shell — app-schema migrations and data seeding are deliberatel
 external steps so a misconfigured container can never silently mutate
 production data.
 
-Tags published:
+Build and push from the test machine:
 
-| Source              | Tag                                                          |
-| ------------------- | ------------------------------------------------------------ |
-| Push to `main`      | `main`, `sha-<short>`                                        |
-| Pull request        | `pr-<number>` (built only, **not pushed**)                   |
-| Git tag `vX.Y.Z`    | `vX.Y.Z`, `X.Y`, `X`, `latest`                               |
+```sh
+# Single-arch (fast — minutes):
+docker build -t ghcr.io/aklmans/wow-dashboard-api:v1.2.3 .
+docker push ghcr.io/aklmans/wow-dashboard-api:v1.2.3
 
-Pin production deployments to `vX.Y.Z` so a rolling deploy is reproducible.
-`latest` and `main` are convenient for local demos; never point a production
-ReplicaSet at them.
+# Multi-arch via buildx (slow due to arm64 QEMU emulation — 15–25 min):
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/aklmans/wow-dashboard-api:v1.2.3 \
+  --push .
+```
+
+Pin production deployments to a specific `vX.Y.Z` tag so a rolling deploy
+is reproducible. Do not point a production ReplicaSet at a moving tag
+(`main`, `latest`).
 
 ## Required environment
 

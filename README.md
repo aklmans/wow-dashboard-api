@@ -502,22 +502,25 @@ the migration `00007` preflight.
 
 ### Deployment
 
-Every push to `main` and every `vX.Y.Z` tag publishes a multi-arch image
-(api + worker + river-migrate, distroless nonroot) to
-`ghcr.io/aklmans/wow-dashboard-api`. The [Deployment Runbook](docs/deployment.md)
-walks through pulling the tag, applying migrations, deploying the API +
-worker side-by-side, and rolling back. `compose.prod.yaml` rehearses the
-same flow locally on a single host.
+The `Dockerfile` builds a single multi-binary image (api + worker +
+river-migrate, distroless nonroot) intended for
+`ghcr.io/aklmans/wow-dashboard-api` (or any registry of your choice).
+The build + push step runs from an operator workstation or staging host
+— the GitHub Actions release job was removed to keep PR feedback fast.
+
+The [Deployment Runbook](docs/deployment.md) walks through building,
+applying migrations, deploying the API + worker side-by-side, and
+rolling back. `compose.prod.yaml` rehearses the same flow locally on a
+single host.
 
 ## CI
 
-GitHub Actions uses layered checks so pull requests stay stable while deeper black-box smoke coverage remains available on demand:
+GitHub Actions stays lean — PR-blocking jobs are only the cheap, fast checks. Image builds, multi-arch publish, and full black-box smoke runs are deliberately left to the operator's test machine so PR feedback comes back in a couple of minutes:
 
-| Layer | Command | When it runs | Purpose |
-|-------|---------|--------------|---------|
-| Main CI gate | `make check` | Pushes to `main` and pull requests | Formatting, vet, SQLC drift, Go tests, integration tests, OpenAPI JSON drift, and generated TypeScript type drift |
-| Image smoke | `docker build -t wow-dashboard-api:ci .` | Pushes to `main` and pull requests | Verifies the production Docker image still builds; the image is not pushed |
-| Local black-box acceptance | `make smoke-local` | Manual GitHub Actions dispatch or local developer run | Starts Docker Compose PostgreSQL, migrates/seeds the local database, runs the API, executes Newman, then stops the API |
-| Existing API collection | `make postman-test` | Local/manual when an API is already running | Runs the Postman/Newman collection against the configured `POSTMAN_BASE_URL` |
+| Workflow | When it runs | Purpose |
+|----------|--------------|---------|
+| [`ci.yml`](.github/workflows/ci.yml) | Pushes to `main` and pull requests | `make check` — formatting, vet, SQLC drift, Go tests, integration tests, OpenAPI JSON drift, generated TypeScript type drift |
+| [`security.yml`](.github/workflows/security.yml) | Pushes, PRs, and weekly cron | `govulncheck ./...` — symbol-aware vulnerability scan |
+| [`smoke-local.yml`](.github/workflows/smoke-local.yml) | Manual dispatch | Optional black-box smoke run inside Actions if a clean baseline is needed |
 
-The default PR/push workflow is [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The local smoke harness is intentionally separate in [`.github/workflows/smoke-local.yml`](.github/workflows/smoke-local.yml) and can be run from the GitHub Actions **Local Smoke** workflow via **Run workflow**.
+Anything heavier — `docker build` validation, multi-arch publish, full Newman smoke — runs from the operator's workstation or test machine. See [`docs/deployment.md`](docs/deployment.md) for the build/push commands.

@@ -33,14 +33,3 @@ jobs:
 
       - name: Run all checks
         run: make check
-
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: docker build -t wow-dashboard-api:ci .
