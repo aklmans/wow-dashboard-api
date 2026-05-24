@@ -80,7 +80,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `JWT_ISSUER` | `wow-dashboard-api` | Expected JWT issuer claim |
 | `JWT_AUDIENCE` | `wow-dashboard` | Expected JWT audience claim |
 | `JWT_ACCESS_TOKEN_TTL_SECONDS` | `900` | Access token time-to-live in seconds (defaults to 15 minutes / 900 seconds) |
-| `REFRESH_TOKEN_TTL_SECONDS` | `1209600` | Refresh token time-to-live in seconds (defaults to 14 days) |
+| `REFRESH_TOKEN_TTL_SECONDS` | `7776000` | Refresh token time-to-live in seconds (defaults to 90 days; rotation acts as a sliding window so each refresh resets the timer) |
 | `REFRESH_TOKEN_COOKIE_NAME` | `wow_dashboard_refresh_token` | HttpOnly refresh token cookie name |
 | `REFRESH_TOKEN_COOKIE_SECURE` | `false` | Whether refresh cookies require HTTPS; `ENV=production` requires this to be `true` |
 | `REFRESH_TOKEN_COOKIE_SAMESITE` | `lax` | Refresh cookie SameSite mode (`lax`, `strict`, or `none`) |

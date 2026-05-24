@@ -164,8 +164,8 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.JWTAccessTokenTTLSeconds != 900 {
 		t.Errorf("JWTAccessTokenTTLSeconds = %d, want 900", cfg.JWTAccessTokenTTLSeconds)
 	}
-	if cfg.RefreshTokenTTLSeconds != 1209600 {
-		t.Errorf("RefreshTokenTTLSeconds = %d, want 1209600", cfg.RefreshTokenTTLSeconds)
+	if cfg.RefreshTokenTTLSeconds != 7776000 {
+		t.Errorf("RefreshTokenTTLSeconds = %d, want 7776000", cfg.RefreshTokenTTLSeconds)
 	}
 	if cfg.RefreshTokenCookieName != "wow_dashboard_refresh_token" {
 		t.Errorf("RefreshTokenCookieName = %q, want wow_dashboard_refresh_token", cfg.RefreshTokenCookieName)

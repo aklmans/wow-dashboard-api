@@ -66,7 +66,10 @@ type Config struct {
 	JWTAccessTokenTTLSeconds int    `env:"JWT_ACCESS_TOKEN_TTL_SECONDS" envDefault:"900"`
 
 	// Refresh token cookie configuration.
-	RefreshTokenTTLSeconds     int    `env:"REFRESH_TOKEN_TTL_SECONDS" envDefault:"1209600"`
+	// Default TTL is 90 days. Rotation acts as a sliding window — every
+	// /api/auth/refresh call issues a new token expiring 90 days out, so the
+	// user stays signed in as long as they open the app once per quarter.
+	RefreshTokenTTLSeconds     int    `env:"REFRESH_TOKEN_TTL_SECONDS" envDefault:"7776000"`
 	RefreshTokenCookieName     string `env:"REFRESH_TOKEN_COOKIE_NAME" envDefault:"wow_dashboard_refresh_token"`
 	RefreshTokenCookieSecure   bool   `env:"REFRESH_TOKEN_COOKIE_SECURE" envDefault:"false"`
 	RefreshTokenCookieSameSite string `env:"REFRESH_TOKEN_COOKIE_SAMESITE" envDefault:"lax"`
