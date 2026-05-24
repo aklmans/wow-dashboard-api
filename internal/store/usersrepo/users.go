@@ -69,7 +69,11 @@ func (s *UserStore) ListUsers(ctx context.Context, input domain.ListUsersInput) 
 
 // GetUserByID fetches a single user together with the names of their roles.
 func (s *UserStore) GetUserByID(ctx context.Context, id uuid.UUID) (domain.User, error) {
-	row, err := s.queries.GetUserByID(ctx, pgUUIDFromDomain(id))
+	return getUserByID(ctx, s.queries, id)
+}
+
+func getUserByID(ctx context.Context, q *query.Queries, id uuid.UUID) (domain.User, error) {
+	row, err := q.GetUserByID(ctx, pgUUIDFromDomain(id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.User{}, domain.ErrUserNotFound
@@ -82,7 +86,7 @@ func (s *UserStore) GetUserByID(ctx context.Context, id uuid.UUID) (domain.User,
 		return domain.User{}, fmt.Errorf("usersrepo: convert user: %w", err)
 	}
 
-	roleRows, err := s.queries.ListUserRoles(ctx, pgUUIDFromDomain(id))
+	roleRows, err := q.ListUserRoles(ctx, pgUUIDFromDomain(id))
 	if err != nil {
 		return domain.User{}, fmt.Errorf("usersrepo: list user roles: %w", err)
 	}
@@ -147,8 +151,12 @@ func (s *UserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput
 		}
 	}
 
+	user, err := getUserByID(ctx, q, input.ID)
+	if err != nil {
+		return domain.User{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return domain.User{}, fmt.Errorf("usersrepo: commit: %w", err)
 	}
-	return s.GetUserByID(ctx, input.ID)
+	return user, nil
 }

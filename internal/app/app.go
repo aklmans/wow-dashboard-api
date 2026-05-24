@@ -192,27 +192,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		Burst:    cfg.AuthRateLimitBurst,
 	}
 	var authRateLimiter httpmiddleware.RateLimiter
-	if cfg.RedisURL != "" {
-		redisOpts, err := redis.ParseURL(cfg.RedisURL)
-		if err != nil {
-			return fmt.Errorf("parse REDIS_URL: %w", err)
-		}
-		redisClient := redis.NewClient(redisOpts)
-		defer func() {
-			if err := redisClient.Close(); err != nil {
-				logger.Error("Redis client close failed", "error", err)
-			}
-		}()
-		pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
-		if err := redisClient.Ping(pingCtx).Err(); err != nil {
-			logger.Warn("Redis ping failed; the rate limiter will fail open until Redis recovers", "error", err)
-		}
-		cancelPing()
-		authRateLimiter = httpmiddleware.NewRedisRateLimiter(redisClient, rateLimitConfig)
-		logger.Info("Auth rate limiting backed by Redis")
-	} else {
-		authRateLimiter = httpmiddleware.NewIPRateLimiter(rateLimitConfig)
+	closeAuthRateLimiter := func() {}
+	authRateLimiter, closeAuthRateLimiter, err = newAuthRateLimiter(ctx, cfg.RedisURL, rateLimitConfig, logger)
+	if err != nil {
+		return err
 	}
+	defer closeAuthRateLimiter()
 
 	// Wire application routes
 	RegisterRoutes(api, Dependencies{
@@ -296,6 +281,39 @@ func refreshCookieConfig(cfg *config.Config) handlers.RefreshCookieConfig {
 		SameSite: refreshCookieSameSite(cfg.RefreshTokenCookieSameSite),
 		TTL:      cfg.RefreshTokenTTL(),
 	}
+}
+
+func newAuthRateLimiter(ctx context.Context, redisURL string, cfg httpmiddleware.RateLimitConfig, logger *slog.Logger) (httpmiddleware.RateLimiter, func(), error) {
+	if redisURL == "" {
+		return httpmiddleware.NewIPRateLimiter(cfg), func() {}, nil
+	}
+
+	redisOpts, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("parse REDIS_URL: %w", err)
+	}
+	redisClient := redis.NewClient(redisOpts)
+
+	pingCtx, cancelPing := context.WithTimeout(ctx, 5*time.Second)
+	pingErr := redisClient.Ping(pingCtx).Err()
+	cancelPing()
+	if pingErr != nil {
+		if logger != nil {
+			logger.Warn("Redis ping failed; auth rate limiting falling back to local memory", "error", pingErr)
+		}
+		_ = redisClient.Close()
+		return httpmiddleware.NewIPRateLimiter(cfg), func() {}, nil
+	}
+
+	cleanup := func() {
+		if err := redisClient.Close(); err != nil && logger != nil {
+			logger.Error("Redis client close failed", "error", err)
+		}
+	}
+	if logger != nil {
+		logger.Info("Auth rate limiting backed by Redis")
+	}
+	return httpmiddleware.NewRedisRateLimiter(redisClient, cfg), cleanup, nil
 }
 
 func refreshCookieSameSite(value string) http.SameSite {

@@ -29,6 +29,7 @@ return count
 // limit is shared across every API instance pointed at the same Redis.
 type RedisRateLimiter struct {
 	client     *redis.Client
+	fallback   *IPRateLimiter
 	enabled    bool
 	limit      int64
 	window     time.Duration
@@ -46,6 +47,7 @@ func NewRedisRateLimiter(client *redis.Client, cfg RateLimitConfig) *RedisRateLi
 	}
 	return &RedisRateLimiter{
 		client:     client,
+		fallback:   NewIPRateLimiter(cfg),
 		enabled:    cfg.Enabled,
 		limit:      int64(cfg.Requests),
 		window:     cfg.Window,
@@ -54,8 +56,8 @@ func NewRedisRateLimiter(client *redis.Client, cfg RateLimitConfig) *RedisRateLi
 }
 
 // Allow reports whether a request from remoteAddr may proceed. If Redis is
-// unreachable it fails open — a limiter outage must not lock users out of
-// authentication.
+// unreachable at runtime, the limiter falls back to the local per-IP limiter
+// instead of failing open.
 func (l *RedisRateLimiter) Allow(remoteAddr string) bool {
 	if l == nil || !l.enabled {
 		return true
@@ -67,7 +69,7 @@ func (l *RedisRateLimiter) Allow(remoteAddr string) bool {
 	key := redisRateLimitKeyPrefix + clientIPKey(remoteAddr)
 	count, err := redisRateLimitScript.Run(ctx, l.client, []string{key}, int(l.window.Seconds())).Int64()
 	if err != nil {
-		return true
+		return l.fallback.Allow(remoteAddr)
 	}
 	return count <= l.limit
 }

@@ -63,6 +63,8 @@ violation. Confirm each before staging or production:
   environment, free of placeholder words (`change-me`, `changeme`, `dev-only`,
   `example`, `secret`).
 - `JWT_ACCESS_TOKEN_TTL_SECONDS` — between 60 and 3600 seconds.
+- `APP_BASE_URL` — an owned frontend URL using `https://`; password-reset
+  and email-verification links are built from this value.
 - `CORS_ALLOWED_ORIGINS` — exact owned `https://` origins only; no `*`
   wildcards, loopback hosts, or empty entries. Public shared-hosting wildcards
   such as `*.vercel.app` are rejected for credentialed CORS.
@@ -138,7 +140,7 @@ Configuration variables (all read at process start):
 | `EMAIL_SMTP_USERNAME`   | _empty_                          | Enables SMTP AUTH PLAIN when set.                          |
 | `EMAIL_SMTP_PASSWORD`   | _empty_                          | Paired with `EMAIL_SMTP_USERNAME`.                         |
 | `EMAIL_SMTP_TLS`        | `starttls`                       | One of `none`, `starttls`, `tls`.                          |
-| `EMAIL_FROM_ADDRESS`    | `noreply@wow-dashboard.test`     | Required (cannot be empty).                                |
+| `EMAIL_FROM_ADDRESS`    | `noreply@wow-dashboard.test`     | Required and must parse as an email address.               |
 | `EMAIL_FROM_NAME`       | `WOW Dashboard`                  | Optional display name.                                     |
 
 ### Local development with Mailpit
@@ -164,7 +166,8 @@ worker logs each message instead of sending it so the auth flows still work.
 Point `EMAIL_SMTP_HOST` / `PORT` / `USERNAME` / `PASSWORD` / `TLS` at the
 managed relay (SendGrid, AWS SES, Postmark, etc.) and set a verified
 `EMAIL_FROM_ADDRESS`. The API process refuses to start in `ENV=production`
-when `EMAIL_SMTP_HOST` is empty.
+when `EMAIL_SMTP_HOST` is empty; every environment rejects an invalid sender
+address before startup completes.
 
 ## Database & Migrations
 

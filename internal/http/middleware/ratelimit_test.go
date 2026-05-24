@@ -13,6 +13,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
@@ -88,7 +89,31 @@ func TestAuthRateLimit_DisabledAllowsRequests(t *testing.T) {
 	}
 }
 
-func newRateLimitTestHandler(limiter *httpmiddleware.IPRateLimiter) http.Handler {
+func TestRedisRateLimiterFallsBackToLocalLimiterWhenRedisErrors(t *testing.T) {
+	client := redis.NewClient(&redis.Options{
+		Addr:        "127.0.0.1:1",
+		MaxRetries:  0,
+		DialTimeout: 10 * time.Millisecond,
+		ReadTimeout: 10 * time.Millisecond,
+	})
+	t.Cleanup(func() { _ = client.Close() })
+
+	limiter := httpmiddleware.NewRedisRateLimiter(client, httpmiddleware.RateLimitConfig{
+		Enabled:  true,
+		Requests: 1,
+		Window:   time.Minute,
+		Burst:    1,
+	})
+
+	if !limiter.Allow("203.0.113.15:1234") {
+		t.Fatal("first request was denied; local fallback should allow within limit")
+	}
+	if limiter.Allow("203.0.113.15:1234") {
+		t.Fatal("second request was allowed; local fallback should enforce the limit after Redis errors")
+	}
+}
+
+func newRateLimitTestHandler(limiter httpmiddleware.RateLimiter) http.Handler {
 	router := chi.NewRouter()
 	router.Use(chimiddleware.RequestID)
 	router.Use(chimiddleware.RealIP)
