@@ -23,5 +23,5 @@ func TestRegisterAll(t *testing.T) {
 			t.Fatalf("RegisterAll panicked: %v", r)
 		}
 	}()
-	RegisterAll(river.NewWorkers())
+	RegisterAll(river.NewWorkers(), Dependencies{})
 }

@@ -38,6 +38,13 @@ var configEnvKeys = []string{
 	"REFRESH_TOKEN_COOKIE_NAME",
 	"REFRESH_TOKEN_COOKIE_SECURE",
 	"REFRESH_TOKEN_COOKIE_SAMESITE",
+	"EMAIL_SMTP_HOST",
+	"EMAIL_SMTP_PORT",
+	"EMAIL_SMTP_USERNAME",
+	"EMAIL_SMTP_PASSWORD",
+	"EMAIL_SMTP_TLS",
+	"EMAIL_FROM_ADDRESS",
+	"EMAIL_FROM_NAME",
 }
 
 // clearConfigEnv unsets all config-related environment variables for the
@@ -48,6 +55,15 @@ func clearConfigEnv(t *testing.T) {
 	for _, key := range configEnvKeys {
 		t.Setenv(key, "")
 	}
+}
+
+// setProductionMinima populates the env vars that Load() requires whenever
+// ENV=production but that are unrelated to a given test's subject. Call after
+// clearConfigEnv so the test only has to express its own production overrides.
+func setProductionMinima(t *testing.T) {
+	t.Helper()
+	t.Setenv("DATABASE_URL", "postgres://test")
+	t.Setenv("EMAIL_SMTP_HOST", "smtp.example.test")
 }
 
 // --- Default values ---
@@ -194,6 +210,13 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	t.Setenv("REFRESH_TOKEN_COOKIE_NAME", "custom_refresh")
 	t.Setenv("REFRESH_TOKEN_COOKIE_SECURE", "true")
 	t.Setenv("REFRESH_TOKEN_COOKIE_SAMESITE", "strict")
+	t.Setenv("EMAIL_SMTP_HOST", "smtp.override.test")
+	t.Setenv("EMAIL_SMTP_PORT", "2525")
+	t.Setenv("EMAIL_SMTP_USERNAME", "override-user")
+	t.Setenv("EMAIL_SMTP_PASSWORD", "override-pass")
+	t.Setenv("EMAIL_SMTP_TLS", "tls")
+	t.Setenv("EMAIL_FROM_ADDRESS", "override@example.test")
+	t.Setenv("EMAIL_FROM_NAME", "Override Sender")
 
 	cfg, err := Load()
 	if err != nil {
@@ -281,6 +304,27 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	if cfg.RefreshTokenCookieSameSite != "strict" {
 		t.Errorf("RefreshTokenCookieSameSite = %q, want strict", cfg.RefreshTokenCookieSameSite)
 	}
+	if cfg.EmailSMTPHost != "smtp.override.test" {
+		t.Errorf("EmailSMTPHost = %q, want smtp.override.test", cfg.EmailSMTPHost)
+	}
+	if cfg.EmailSMTPPort != 2525 {
+		t.Errorf("EmailSMTPPort = %d, want 2525", cfg.EmailSMTPPort)
+	}
+	if cfg.EmailSMTPUsername != "override-user" {
+		t.Errorf("EmailSMTPUsername = %q, want override-user", cfg.EmailSMTPUsername)
+	}
+	if cfg.EmailSMTPPassword != "override-pass" {
+		t.Errorf("EmailSMTPPassword = %q, want override-pass", cfg.EmailSMTPPassword)
+	}
+	if cfg.EmailSMTPTLSMode != "tls" {
+		t.Errorf("EmailSMTPTLSMode = %q, want tls", cfg.EmailSMTPTLSMode)
+	}
+	if cfg.EmailFromAddress != "override@example.test" {
+		t.Errorf("EmailFromAddress = %q, want override@example.test", cfg.EmailFromAddress)
+	}
+	if cfg.EmailFromName != "Override Sender" {
+		t.Errorf("EmailFromName = %q, want Override Sender", cfg.EmailFromName)
+	}
 }
 
 // --- CORS parsing ---
@@ -325,7 +369,7 @@ func TestLoad_CORSSingleOrigin(t *testing.T) {
 func TestLoad_CORSWildcardForbiddenInProduction(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://*.example.com")
 
@@ -338,7 +382,7 @@ func TestLoad_CORSWildcardForbiddenInProduction(t *testing.T) {
 func TestLoad_CORSExactOriginAllowedInProduction(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 
@@ -354,7 +398,7 @@ func TestLoad_CORSExactOriginAllowedInProduction(t *testing.T) {
 func TestLoad_RefreshCookieSecureDefaultsTrueInProduction(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 
@@ -370,7 +414,7 @@ func TestLoad_RefreshCookieSecureDefaultsTrueInProduction(t *testing.T) {
 func TestLoad_RefreshCookieSecureFalseRejectedInProduction(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 	t.Setenv("REFRESH_TOKEN_COOKIE_SECURE", "false")
@@ -384,7 +428,7 @@ func TestLoad_RefreshCookieSecureFalseRejectedInProduction(t *testing.T) {
 func TestLoad_RefreshCookieSecureTrueAllowedInProduction(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 	t.Setenv("REFRESH_TOKEN_COOKIE_SECURE", "true")
@@ -515,7 +559,7 @@ func TestLoad_LogFormatDefaultsByEnv(t *testing.T) {
 				t.Setenv("JWT_ACCESS_SECRET", tc.jwtSecret)
 			}
 			if tc.env == "production" {
-				t.Setenv("DATABASE_URL", "postgres://test")
+				setProductionMinima(t)
 				t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 			}
 
@@ -560,7 +604,7 @@ func TestLoad_LogFormatExplicitValues(t *testing.T) {
 func TestLoad_LogFormatExplicitTextAllowedInProduction(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("LOG_FORMAT", "text")
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
@@ -617,7 +661,7 @@ func TestLoad_EnvValues(t *testing.T) {
 				t.Setenv("JWT_ACCESS_SECRET", tc.jwtSecret)
 			}
 			if tc.want == "production" {
-				t.Setenv("DATABASE_URL", "postgres://test")
+				setProductionMinima(t)
 				t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 			}
 
@@ -736,7 +780,7 @@ func TestLoad_JWTCustomSecretInProduction(t *testing.T) {
 		t.Run("ENV="+env, func(t *testing.T) {
 			clearConfigEnv(t)
 			t.Setenv("ENV", env)
-			t.Setenv("DATABASE_URL", "postgres://test")
+			setProductionMinima(t)
 			t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 			t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 
@@ -778,7 +822,7 @@ func TestLoad_ProductionPlaceholderJWTSecrets(t *testing.T) {
 		t.Run(secret, func(t *testing.T) {
 			clearConfigEnv(t)
 			t.Setenv("ENV", "production")
-			t.Setenv("DATABASE_URL", "postgres://test")
+			setProductionMinima(t)
 			t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 			t.Setenv("JWT_ACCESS_SECRET", secret)
 
@@ -792,7 +836,7 @@ func TestLoad_ProductionPlaceholderJWTSecrets(t *testing.T) {
 	// A valid non-placeholder secret should pass
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 
@@ -808,7 +852,7 @@ func TestLoad_ProductionJWTAccessTokenTTL(t *testing.T) {
 		t.Run("invalid TTL in production: "+ttl, func(t *testing.T) {
 			clearConfigEnv(t)
 			t.Setenv("ENV", "production")
-			t.Setenv("DATABASE_URL", "postgres://test")
+			setProductionMinima(t)
 			t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 			t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 			t.Setenv("JWT_ACCESS_TOKEN_TTL_SECONDS", ttl)
@@ -825,7 +869,7 @@ func TestLoad_ProductionJWTAccessTokenTTL(t *testing.T) {
 		t.Run("valid TTL in production: "+ttl, func(t *testing.T) {
 			clearConfigEnv(t)
 			t.Setenv("ENV", "production")
-			t.Setenv("DATABASE_URL", "postgres://test")
+			setProductionMinima(t)
 			t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
 			t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 			t.Setenv("JWT_ACCESS_TOKEN_TTL_SECONDS", ttl)
@@ -887,7 +931,7 @@ func TestLoad_ProductionCORSOrigins(t *testing.T) {
 		t.Run("invalid CORS: "+origin, func(t *testing.T) {
 			clearConfigEnv(t)
 			t.Setenv("ENV", "production")
-			t.Setenv("DATABASE_URL", "postgres://test")
+			setProductionMinima(t)
 			t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 			t.Setenv("CORS_ALLOWED_ORIGINS", origin)
 
@@ -901,7 +945,7 @@ func TestLoad_ProductionCORSOrigins(t *testing.T) {
 	// Valid exact production origins
 	clearConfigEnv(t)
 	t.Setenv("ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://test")
+	setProductionMinima(t)
 	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://example.com,https://app.example.com,https://app.example.com:443")
 
@@ -1072,6 +1116,75 @@ func TestLoad_ProductionDATABASE_URL(t *testing.T) {
 		_, err := Load()
 		if err != nil {
 			t.Errorf("Load() returned unexpected error in development: %v", err)
+		}
+	})
+}
+
+func TestLoad_EmailTransport(t *testing.T) {
+	t.Run("default TLS mode is starttls", func(t *testing.T) {
+		clearConfigEnv(t)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if cfg.EmailSMTPTLSMode != "starttls" {
+			t.Errorf("EmailSMTPTLSMode = %q, want starttls", cfg.EmailSMTPTLSMode)
+		}
+	})
+
+	t.Run("invalid TLS mode is rejected", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("EMAIL_SMTP_TLS", "garbage")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() should reject invalid EMAIL_SMTP_TLS, got nil")
+		}
+	})
+
+	t.Run("port outside 0..65535 is rejected", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("EMAIL_SMTP_PORT", "70000")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() should reject out-of-range EMAIL_SMTP_PORT, got nil")
+		}
+	})
+
+	t.Run("empty EMAIL_FROM_ADDRESS is rejected", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("EMAIL_FROM_ADDRESS", "  ")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() should reject empty EMAIL_FROM_ADDRESS, got nil")
+		}
+	})
+
+	t.Run("empty EMAIL_SMTP_HOST fails in production", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ENV", "production")
+		t.Setenv("DATABASE_URL", "postgres://test")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+		t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("Load() should reject empty EMAIL_SMTP_HOST in production, got nil")
+		}
+	})
+
+	t.Run("empty EMAIL_SMTP_HOST passes in development (LogSender fallback)", func(t *testing.T) {
+		clearConfigEnv(t)
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if cfg.EmailSMTPHost != "" {
+			t.Errorf("EmailSMTPHost = %q, want empty (LogSender fallback)", cfg.EmailSMTPHost)
 		}
 	})
 }

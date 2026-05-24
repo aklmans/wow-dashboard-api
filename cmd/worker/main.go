@@ -14,7 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/riverqueue/river"
+
 	"github.com/aklmans/wow-dashboard-api/internal/config"
+	"github.com/aklmans/wow-dashboard-api/internal/email"
 	"github.com/aklmans/wow-dashboard-api/internal/jobs"
 	"github.com/aklmans/wow-dashboard-api/internal/logging"
 	"github.com/aklmans/wow-dashboard-api/internal/store"
@@ -39,7 +42,33 @@ func main() {
 	}
 	defer pool.Close()
 
-	client, err := jobs.NewWorkerClient(pool, jobs.DefaultWorkerConfig(), jobs.RegisterAll)
+	emailSender, err := email.New(email.SMTPSenderConfig{
+		Host:        cfg.EmailSMTPHost,
+		Port:        cfg.EmailSMTPPort,
+		Username:    cfg.EmailSMTPUsername,
+		Password:    cfg.EmailSMTPPassword,
+		TLSMode:     cfg.EmailSMTPTLSMode,
+		FromAddress: cfg.EmailFromAddress,
+		FromName:    cfg.EmailFromName,
+	})
+	if err != nil {
+		logger.Error("worker: build email sender", "error", err)
+		os.Exit(1)
+	}
+	if cfg.EmailSMTPHost == "" {
+		logger.Warn("EMAIL_SMTP_HOST is not set; the worker will log emails to stdout instead of sending them")
+	} else {
+		logger.Info("worker email transport: SMTP",
+			"host", cfg.EmailSMTPHost,
+			"port", cfg.EmailSMTPPort,
+			"tls", cfg.EmailSMTPTLSMode,
+		)
+	}
+
+	registerWorkers := func(workers *river.Workers) {
+		jobs.RegisterAll(workers, jobs.Dependencies{EmailSender: emailSender})
+	}
+	client, err := jobs.NewWorkerClient(pool, jobs.DefaultWorkerConfig(), registerWorkers)
 	if err != nil {
 		logger.Error("worker: build river client", "error", err)
 		os.Exit(1)

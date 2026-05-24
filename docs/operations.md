@@ -106,9 +106,60 @@ binaries (`go build ./cmd/api ./cmd/worker`). The worker honours
 `SIGINT`/`SIGTERM` with a 30-second drain.
 
 New job types live in `internal/jobs/` and are wired into the worker via
-`jobs.RegisterAll`. The pattern: declare an `Args` struct that implements
-`Kind() string`, declare a `Worker` that embeds `river.WorkerDefaults`,
-and add it to `RegisterAll`.
+`jobs.RegisterAll(workers, deps)`. The pattern: declare an `Args` struct that
+implements `Kind() string`, declare a `Worker` that embeds
+`river.WorkerDefaults`, add any new collaborator to `jobs.Dependencies`, and
+register the worker in `RegisterAll`.
+
+## Email
+
+Transactional email (password reset, email verification) is sent through a
+two-stage pipeline so the API never blocks on SMTP:
+
+1. The API process holds a River insert-only client wrapped as
+   `jobs.AsyncEmailSender` and passes it to the auth service via
+   `authservice.WithEmailSender(...)`. Each `Send` enqueues a `send_email` job
+   on the default queue and returns immediately.
+2. `cmd/worker` runs `SendEmailWorker`, which delivers each job through the
+   transport selected by `email.New(cfg)` — `LogSender` when `EMAIL_SMTP_HOST`
+   is empty, otherwise a real `SMTPSender` (`github.com/wneessen/go-mail`).
+
+Configuration variables (all read at process start):
+
+| Variable                | Default                          | Notes                                                      |
+| ----------------------- | -------------------------------- | ---------------------------------------------------------- |
+| `EMAIL_SMTP_HOST`       | _empty_ (LogSender)              | Required in production.                                    |
+| `EMAIL_SMTP_PORT`       | `0` → defaults per TLS mode      | `none=25`, `starttls=587`, `tls=465` when left at `0`.     |
+| `EMAIL_SMTP_USERNAME`   | _empty_                          | Enables SMTP AUTH PLAIN when set.                          |
+| `EMAIL_SMTP_PASSWORD`   | _empty_                          | Paired with `EMAIL_SMTP_USERNAME`.                         |
+| `EMAIL_SMTP_TLS`        | `starttls`                       | One of `none`, `starttls`, `tls`.                          |
+| `EMAIL_FROM_ADDRESS`    | `noreply@wow-dashboard.test`     | Required (cannot be empty).                                |
+| `EMAIL_FROM_NAME`       | `WOW Dashboard`                  | Optional display name.                                     |
+
+### Local development with Mailpit
+
+`compose.yaml` ships an `axllent/mailpit` service that catches every SMTP
+message and exposes a web UI:
+
+```sh
+docker compose up -d mailpit
+# .env.example already points at Mailpit:
+#   EMAIL_SMTP_HOST=localhost
+#   EMAIL_SMTP_PORT=1025
+#   EMAIL_SMTP_TLS=none
+make worker     # delivers via Mailpit
+open http://localhost:8025
+```
+
+Without Mailpit (or any other relay), leave `EMAIL_SMTP_HOST` empty; the
+worker logs each message instead of sending it so the auth flows still work.
+
+### Production
+
+Point `EMAIL_SMTP_HOST` / `PORT` / `USERNAME` / `PASSWORD` / `TLS` at the
+managed relay (SendGrid, AWS SES, Postmark, etc.) and set a verified
+`EMAIL_FROM_ADDRESS`. The API process refuses to start in `ENV=production`
+when `EMAIL_SMTP_HOST` is empty.
 
 ## Database & Migrations
 

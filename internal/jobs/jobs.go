@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+
+	"github.com/aklmans/wow-dashboard-api/internal/email"
 )
 
 // QueueDefault is the queue used by every job registered here unless a caller
@@ -71,11 +73,19 @@ func NewWorkerClient(pool *pgxpool.Pool, cfg WorkerConfig, registerWorkers func(
 	return client, nil
 }
 
+// Dependencies bundles the runtime collaborators a worker may need. Add
+// fields as new job types come online; nil fields are tolerated so cmd/worker
+// can boot in degraded mode (e.g. without an SMTP sender for the email job).
+type Dependencies struct {
+	EmailSender email.Sender
+}
+
 // RegisterAll registers every job type defined in this package. cmd/worker
 // passes this to NewWorkerClient so adding a new job type only requires a
 // new file plus a one-line addition here.
-func RegisterAll(workers *river.Workers) {
+func RegisterAll(workers *river.Workers, deps Dependencies) {
 	river.AddWorker(workers, &PingWorker{})
+	river.AddWorker(workers, &SendEmailWorker{sender: deps.EmailSender})
 }
 
 // Stop gracefully drains in-flight jobs and shuts down the client.

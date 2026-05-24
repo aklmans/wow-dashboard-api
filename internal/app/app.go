@@ -23,6 +23,7 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	"github.com/aklmans/wow-dashboard-api/internal/http/handlers"
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
+	"github.com/aklmans/wow-dashboard-api/internal/jobs"
 	"github.com/aklmans/wow-dashboard-api/internal/logging"
 	"github.com/aklmans/wow-dashboard-api/internal/observability"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
@@ -147,6 +148,24 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("initialize JWT token manager: %w", err)
 	}
 
+	// Email is queued through River so the API never blocks on SMTP. The
+	// worker process picks up SendEmailArgs jobs and dispatches them via the
+	// real transport (or LogSender when EMAIL_SMTP_HOST is unset).
+	riverInsertClient, err := jobs.NewInsertOnlyClient(pool)
+	if err != nil {
+		return fmt.Errorf("initialize river insert-only client: %w", err)
+	}
+	var emailSender email.Sender = jobs.NewAsyncEmailSender(riverInsertClient)
+	if cfg.EmailSMTPHost == "" {
+		logger.Warn("EMAIL_SMTP_HOST is not set; the worker will log emails to stdout instead of sending them")
+	} else {
+		logger.Info("API email transport: queued via River → SMTP",
+			"host", cfg.EmailSMTPHost,
+			"port", cfg.EmailSMTPPort,
+			"tls", cfg.EmailSMTPTLSMode,
+		)
+	}
+
 	authStore := authrepo.NewUserStore(queries)
 	refreshTokenStore := authrepo.NewRefreshTokenStore(queries)
 	authTokenStore := authrepo.NewAuthTokenStore(queries)
@@ -157,7 +176,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		authservice.WithUnitOfWork(unitOfWork),
 		authservice.WithAuditRecorder(auditRecorder),
 		authservice.WithAuthTokenStore(authTokenStore),
-		authservice.WithEmailSender(email.LogSender{}),
+		authservice.WithEmailSender(emailSender),
 		authservice.WithAppBaseURL(cfg.AppBaseURL))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(pool),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)))

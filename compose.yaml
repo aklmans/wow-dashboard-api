@@ -31,5 +31,24 @@ services:
       retries: 12
       start_period: 3s
 
+  # Mailpit catches outbound SMTP in development. The API/worker talk to
+  # localhost:1025 with TLS=none, and the web UI at http://localhost:8025
+  # shows every captured message. Production must point at a real relay.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    environment:
+      MP_MAX_MESSAGES: "5000"
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v1/info"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
 volumes:
   wow-dashboard-api-postgres-data:

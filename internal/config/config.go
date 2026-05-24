@@ -71,6 +71,16 @@ type Config struct {
 	RefreshTokenCookieSecure   bool   `env:"REFRESH_TOKEN_COOKIE_SECURE" envDefault:"false"`
 	RefreshTokenCookieSameSite string `env:"REFRESH_TOKEN_COOKIE_SAMESITE" envDefault:"lax"`
 
+	// Email transport configuration. Empty EmailSMTPHost falls back to the
+	// LogSender (stdout) so dev environments without a relay still work.
+	EmailSMTPHost     string `env:"EMAIL_SMTP_HOST" envDefault:""`
+	EmailSMTPPort     int    `env:"EMAIL_SMTP_PORT" envDefault:"0"`
+	EmailSMTPUsername string `env:"EMAIL_SMTP_USERNAME" envDefault:""`
+	EmailSMTPPassword string `env:"EMAIL_SMTP_PASSWORD" envDefault:""`
+	EmailSMTPTLSMode  string `env:"EMAIL_SMTP_TLS" envDefault:"starttls"`
+	EmailFromAddress  string `env:"EMAIL_FROM_ADDRESS" envDefault:"noreply@wow-dashboard.test"`
+	EmailFromName     string `env:"EMAIL_FROM_NAME" envDefault:"WOW Dashboard"`
+
 	// slogLevel is the parsed slog.Level, populated by Load.
 	slogLevel slog.Level
 }
@@ -398,6 +408,23 @@ func Load() (*Config, error) {
 	// 8. CORS Validations
 	if err := validateCORS(&cfg); err != nil {
 		return nil, err
+	}
+
+	// 9. Email Transport Validations
+	cfg.EmailSMTPTLSMode = strings.ToLower(strings.TrimSpace(cfg.EmailSMTPTLSMode))
+	switch cfg.EmailSMTPTLSMode {
+	case "none", "starttls", "tls":
+	default:
+		return nil, fmt.Errorf("invalid EMAIL_SMTP_TLS %q: must be one of none, starttls, tls", cfg.EmailSMTPTLSMode)
+	}
+	if cfg.EmailSMTPPort < 0 || cfg.EmailSMTPPort > 65535 {
+		return nil, fmt.Errorf("EMAIL_SMTP_PORT must be between 0 and 65535")
+	}
+	if cfg.Env == "production" && strings.TrimSpace(cfg.EmailSMTPHost) == "" {
+		return nil, fmt.Errorf("EMAIL_SMTP_HOST must not be empty in production")
+	}
+	if strings.TrimSpace(cfg.EmailFromAddress) == "" {
+		return nil, fmt.Errorf("EMAIL_FROM_ADDRESS must not be empty")
 	}
 
 	return &cfg, nil
