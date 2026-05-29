@@ -316,6 +316,7 @@ func postRefreshExpectStatus(ctx context.Context, cfg smokeConfig, wantStatus in
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	return doExpectStatus(ctx, cfg.Client, req, "POST /api/auth/refresh", wantStatus)
 }
 
@@ -325,6 +326,7 @@ func postRefreshWithCookieExpectStatus(ctx context.Context, cfg smokeConfig, ref
 		return err
 	}
 	req.AddCookie(&http.Cookie{Name: refreshCookieName, Value: refreshCookie})
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	client := *cfg.Client
 	client.Jar = nil
 	return doExpectStatus(ctx, &client, req, "POST /api/auth/refresh with previous refresh cookie", wantStatus)

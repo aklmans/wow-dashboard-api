@@ -85,7 +85,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `REFRESH_TOKEN_COOKIE_NAME` | `wow_dashboard_refresh_token` | HttpOnly refresh token cookie name |
 | `REFRESH_TOKEN_COOKIE_SECURE` | `false` | Whether refresh cookies require HTTPS; `ENV=production` requires this to be `true` |
 | `REFRESH_TOKEN_COOKIE_SAMESITE` | `lax` | Refresh cookie SameSite mode (`lax`, `strict`, or `none`) |
-| `ACCESS_TOKEN_COOKIE_NAME` | `wow_dashboard_access_token` | HttpOnly access token cookie name (served at `Path=/`; TTL follows `JWT_ACCESS_TOKEN_TTL_SECONDS`) |
+| `ACCESS_TOKEN_COOKIE_NAME` | `wow_dashboard_access_token` | HttpOnly access token cookie name (served at `Path=/`; cookie MaxAge tracks `REFRESH_TOKEN_TTL_SECONDS` so it outlives the short JWT, which expires per `JWT_ACCESS_TOKEN_TTL_SECONDS`) |
 | `ACCESS_TOKEN_COOKIE_SECURE` | `false` | Whether the access cookie requires HTTPS; `ENV=production` requires this to be `true` |
 | `ACCESS_TOKEN_COOKIE_SAMESITE` | `lax` | Access cookie SameSite mode (`lax`, `strict`, or `none`) |
 | `ACCESS_TOKEN_COOKIE_DOMAIN` | _(empty)_ | Optional cookie `Domain`; set to a shared parent (e.g. `.example.com`) for cross-subdomain app/API, empty for host-only |

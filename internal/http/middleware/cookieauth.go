@@ -31,16 +31,16 @@ func AccessCookieBridge(cookieName string) func(http.Handler) http.Handler {
 	}
 }
 
-// CSRFGuard blocks cross-site state-changing requests that authenticate via the
-// access cookie. For unsafe methods (POST/PUT/PATCH/DELETE) carrying the access
-// cookie, it requires the request to originate from a trusted context — either a
-// same-origin/same-site Sec-Fetch-Site, or an Origin in the allowlist. Safe
-// methods and requests without the cookie (e.g. pure Bearer API clients, or the
-// unauthenticated sign-in/refresh calls) pass through untouched.
-//
-// This is the companion guard for AccessCookieBridge: SameSite=Lax on the cookie
-// stops most cross-site sends, and this check closes the remaining gap.
-func CSRFGuard(allowedOrigins []string, accessCookieName string) func(http.Handler) http.Handler {
+// CSRFGuard blocks cross-site state-changing requests that authenticate via an
+// ambient cookie. For unsafe methods (POST/PUT/PATCH/DELETE) that carry any of
+// the named auth cookies (access OR refresh — the refresh cookie still rides on
+// /api/auth/refresh and /sign-out after the short-lived access cookie expires),
+// it requires the request to come from a trusted context: a same-origin (or
+// user-initiated) Sec-Fetch-Site, or an allowlisted Origin. Same-site requests
+// from sibling subdomains are NOT trusted on the Sec-Fetch-Site signal alone —
+// they must still match the Origin allowlist. Safe methods and requests without
+// an auth cookie (pure Bearer API clients, unauthenticated sign-in) pass through.
+func CSRFGuard(allowedOrigins []string, cookieNames ...string) func(http.Handler) http.Handler {
 	allow := make(map[string]struct{}, len(allowedOrigins))
 	for _, origin := range allowedOrigins {
 		if trimmed := strings.TrimSpace(origin); trimmed != "" {
@@ -50,7 +50,7 @@ func CSRFGuard(allowedOrigins []string, accessCookieName string) func(http.Handl
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if isStateChangingMethod(r.Method) && requestHasCookie(r, accessCookieName) && !originIsTrusted(r, allow) {
+			if isStateChangingMethod(r.Method) && requestHasAnyCookie(r, cookieNames) && !originIsTrusted(r, allow) {
 				apierror.WriteResponse(w, apierror.Forbidden("Cross-site request blocked.").WithRequestID(apierror.RequestIDFromRequest(r)))
 				return
 			}
@@ -68,27 +68,46 @@ func isStateChangingMethod(method string) bool {
 	}
 }
 
-func requestHasCookie(r *http.Request, name string) bool {
-	if name == "" {
-		return false
-	}
-	_, err := r.Cookie(name)
-	return err == nil
-}
-
-// originIsTrusted prefers the Fetch Metadata signal (sent by modern browsers and
-// not forgeable by cross-site script), falling back to an Origin allowlist match
-// for older clients. A cookie-authenticated unsafe request with neither signal is
-// treated as untrusted.
-func originIsTrusted(r *http.Request, allow map[string]struct{}) bool {
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
-		// Only a genuine cross-site initiator is a CSRF threat; same-origin,
-		// same-site, and none (user-initiated, e.g. address bar) are all safe.
-		return site != "cross-site"
-	}
-	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
-		_, ok := allow[origin]
-		return ok
+func requestHasAnyCookie(r *http.Request, names []string) bool {
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		if _, err := r.Cookie(name); err == nil {
+			return true
+		}
 	}
 	return false
+}
+
+// originIsTrusted decides whether a cookie-authenticated unsafe request comes
+// from a trusted context. It prefers the Fetch Metadata signal (which a
+// cross-site script cannot forge) but treats only same-origin and user-initiated
+// requests as inherently trusted; a same-site request (e.g. a sibling subdomain
+// under the same registrable domain, which may be untrusted) must still match
+// the Origin allowlist, as must any request without Fetch Metadata.
+func originIsTrusted(r *http.Request, allow map[string]struct{}) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "none":
+		// Exact same origin, or a user-initiated navigation (address bar /
+		// bookmark) — neither is a cross-origin CSRF vector.
+		return true
+	case "same-site", "cross-site":
+		// A different origin (including an untrusted sibling subdomain): require
+		// an explicitly allowlisted Origin.
+		return originAllowed(r, allow)
+	default:
+		// No Fetch Metadata (older client / non-browser): fall back to the
+		// Origin allowlist; a missing Origin is untrusted.
+		return originAllowed(r, allow)
+	}
+}
+
+func originAllowed(r *http.Request, allow map[string]struct{}) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return false
+	}
+	_, ok := allow[origin]
+	return ok
 }

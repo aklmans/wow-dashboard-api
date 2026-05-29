@@ -77,9 +77,11 @@ type Config struct {
 
 	// Access token cookie configuration. The access token also rides as an
 	// HttpOnly cookie (Path=/) so the browser never exposes it to JS and a
-	// same-site edge middleware can gate routes on its presence. The cookie TTL
-	// follows JWTAccessTokenTTL. Set Domain to a shared parent (e.g.
-	// ".example.com") when the app and API live on different subdomains.
+	// same-site edge middleware can gate routes on its presence. The cookie's
+	// MaxAge tracks the refresh-session lifetime (RefreshTokenTTL) so it survives
+	// access-token expiry; the JWT inside still expires per JWTAccessTokenTTL and
+	// is re-minted on refresh. Set Domain to a shared parent (e.g. ".example.com")
+	// when the app and API live on different subdomains.
 	AccessTokenCookieName     string `env:"ACCESS_TOKEN_COOKIE_NAME" envDefault:"wow_dashboard_access_token"`
 	AccessTokenCookieSecure   bool   `env:"ACCESS_TOKEN_COOKIE_SECURE" envDefault:"false"`
 	AccessTokenCookieSameSite string `env:"ACCESS_TOKEN_COOKIE_SAMESITE" envDefault:"lax"`
@@ -462,6 +464,13 @@ func Load() (*Config, error) {
 	}
 	if cfg.AccessTokenCookieSameSite == "none" && !cfg.AccessTokenCookieSecure {
 		return nil, fmt.Errorf("ACCESS_TOKEN_COOKIE_SECURE must be true when SameSite is set to %q", "none")
+	}
+	// The access cookie (Path=/) and refresh cookie (Path=/api/auth) are both
+	// sent on /api/auth/* requests; if they shared a name the longer-path refresh
+	// cookie would win in the access-cookie bridge and promote the opaque refresh
+	// token to a Bearer access token. Require distinct names.
+	if cfg.AccessTokenCookieName == cfg.RefreshTokenCookieName {
+		return nil, fmt.Errorf("ACCESS_TOKEN_COOKIE_NAME and REFRESH_TOKEN_COOKIE_NAME must be different")
 	}
 
 	// 8. CORS Validations

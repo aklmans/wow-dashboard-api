@@ -134,7 +134,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// The access token rides as an ambient HttpOnly cookie, so block cross-site
 	// state-changing requests (CSRF) before bridging that cookie into the
 	// Authorization header every handler already reads.
-	router.Use(httpmiddleware.CSRFGuard(cfg.CORS, cfg.AccessTokenCookieName))
+	router.Use(httpmiddleware.CSRFGuard(cfg.CORS, cfg.AccessTokenCookieName, cfg.RefreshTokenCookieName))
 	router.Use(httpmiddleware.AccessCookieBridge(cfg.AccessTokenCookieName))
 
 	// Prometheus scrape endpoint, served outside the Huma JSON API.
@@ -302,7 +302,13 @@ func accessCookieConfig(cfg *config.Config) handlers.AccessCookieConfig {
 		Domain:   cfg.AccessTokenCookieDomain,
 		Secure:   cfg.AccessTokenCookieSecure,
 		SameSite: refreshCookieSameSite(cfg.AccessTokenCookieSameSite),
-		TTL:      cfg.JWTAccessTokenTTL(),
+		// MaxAge tracks the refresh-session lifetime, not the short JWT TTL. The
+		// JWT inside still expires per JWTAccessTokenTTL (enforced server-side),
+		// but the cookie must outlive it: a reload after the access token expires
+		// then still presents the cookie, the API returns 401, the client
+		// silently refreshes, and an edge guard keying off cookie presence does
+		// not bounce a still-refreshable session.
+		TTL: cfg.RefreshTokenTTL(),
 	}
 }
 

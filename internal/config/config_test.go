@@ -557,6 +557,15 @@ func TestLoad_AccessCookieValidation(t *testing.T) {
 			t.Fatal("Load() should reject ACCESS_TOKEN_COOKIE_SECURE=false in production, got nil")
 		}
 	})
+
+	t.Run("must differ from refresh cookie name", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ACCESS_TOKEN_COOKIE_NAME", "wow_dashboard_session")
+		t.Setenv("REFRESH_TOKEN_COOKIE_NAME", "wow_dashboard_session")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() should reject identical access/refresh cookie names, got nil")
+		}
+	})
 }
 
 // --- Duration helpers ---
