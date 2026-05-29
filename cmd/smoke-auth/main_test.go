@@ -49,8 +49,15 @@ func TestRunSmokeAuthSuccess(t *testing.T) {
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
 			})
+			http.SetCookie(w, &http.Cookie{
+				Name:     accessCookieName,
+				Value:    initialAccessToken,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + initialAccessToken + `"}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/refresh":
 			cookie, err := r.Cookie(testRefreshCookie)
 			if err != nil {
@@ -75,8 +82,15 @@ func TestRunSmokeAuthSuccess(t *testing.T) {
 					HttpOnly: true,
 					SameSite: http.SameSiteLaxMode,
 				})
+				http.SetCookie(w, &http.Cookie{
+					Name:     accessCookieName,
+					Value:    refreshedAccessToken,
+					Path:     "/",
+					HttpOnly: true,
+					SameSite: http.SameSiteLaxMode,
+				})
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + refreshedAccessToken + `"}`))
+				_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"}}`))
 			default:
 				http.Error(w, "refresh token rejected", http.StatusUnauthorized)
 			}
@@ -94,6 +108,14 @@ func TestRunSmokeAuthSuccess(t *testing.T) {
 				Name:     testRefreshCookie,
 				Value:    "",
 				Path:     "/api/auth",
+				MaxAge:   -1,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+			http.SetCookie(w, &http.Cookie{
+				Name:     accessCookieName,
+				Value:    "",
+				Path:     "/",
 				MaxAge:   -1,
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
@@ -150,13 +172,22 @@ func TestRunSmokeAuthSuccess(t *testing.T) {
 	}
 }
 
-func TestRunSmokeAuthFailsWhenSignInOmitsAccessToken(t *testing.T) {
+func TestRunSmokeAuthFailsWhenSignInOmitsAccessCookie(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/healthz", "/readyz":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		case "/api/auth/sign-in":
+			// Sets the refresh cookie but not the access cookie, so the run must
+			// fail specifically on the missing access cookie.
+			http.SetCookie(w, &http.Cookie{
+				Name:     refreshCookieName,
+				Value:    "refresh-token",
+				Path:     "/api/auth",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"}}`))
 		default:
@@ -173,7 +204,7 @@ func TestRunSmokeAuthFailsWhenSignInOmitsAccessToken(t *testing.T) {
 		Stdout:   &bytes.Buffer{},
 	})
 	if err == nil {
-		t.Fatal("run returned nil error, want missing access token failure")
+		t.Fatal("run returned nil error, want missing access cookie failure")
 	}
 }
 
@@ -231,8 +262,15 @@ func TestRunSmokeAuthRedactsUnexpectedRefreshReplayResponse(t *testing.T) {
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
 			})
+			http.SetCookie(w, &http.Cookie{
+				Name:     accessCookieName,
+				Value:    initialAccessToken,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + initialAccessToken + `"}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/auth/refresh":
 			cookie, err := r.Cookie(testRefreshCookie)
 			if err != nil {
@@ -256,8 +294,15 @@ func TestRunSmokeAuthRedactsUnexpectedRefreshReplayResponse(t *testing.T) {
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
 			})
+			http.SetCookie(w, &http.Cookie{
+				Name:     accessCookieName,
+				Value:    refreshedAccessToken,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"},"accessToken":"` + refreshedAccessToken + `"}`))
+			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test"}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/auth/me":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"user":{"email":"demo@wow-dashboard.test","roles":["admin"],"permissions":["*"]}}`))

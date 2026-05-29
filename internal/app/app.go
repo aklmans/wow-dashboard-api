@@ -47,6 +47,7 @@ type Dependencies struct {
 	ProjectsService         handlers.ProjectsService
 	SystemEventsService     handlers.SystemEventsService
 	RefreshCookie           handlers.RefreshCookieConfig
+	AccessCookie            handlers.AccessCookieConfig
 	AuthRateLimitMiddleware func(huma.Context, func(huma.Context))
 	ReadyChecker            handlers.ReadyChecker
 }
@@ -60,7 +61,7 @@ func RegisterRoutes(api huma.API, deps Dependencies) {
 		if deps.AuthRateLimitMiddleware != nil {
 			authMiddlewares = append(authMiddlewares, deps.AuthRateLimitMiddleware)
 		}
-		handlers.RegisterAuthWithCookies(api, deps.AuthService, deps.RefreshCookie, authMiddlewares...)
+		handlers.RegisterAuthWithCookies(api, deps.AuthService, deps.RefreshCookie, deps.AccessCookie, authMiddlewares...)
 	}
 	if deps.AuthService != nil && deps.UsersService != nil {
 		handlers.RegisterUsers(api, deps.AuthService, deps.UsersService)
@@ -81,7 +82,11 @@ func NewAPI(router chi.Router) huma.API {
 	humaCfg := huma.DefaultConfig("Spec D-D API", "1.0.0")
 	humaCfg.OpenAPIPath = "/openapi"
 	humaCfg.DocsPath = "/docs"
-	humaCfg.Transformers = append(humaCfg.Transformers, apierror.HumaErrorTransformer)
+	// LoggingTransformer runs first so it observes the original error value
+	// (with its internal cause) before HumaErrorTransformer collapses 5xx into
+	// the generic client envelope. It passes nil to resolve slog.Default(),
+	// which Run() has already configured via slog.SetDefault.
+	humaCfg.Transformers = append(humaCfg.Transformers, apierror.LoggingTransformer(nil), apierror.HumaErrorTransformer)
 	return humachi.New(router, humaCfg)
 }
 
@@ -125,6 +130,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	// Baseline security response headers; HSTS only in production (HTTPS).
 	router.Use(httpmiddleware.SecurityHeaders(cfg.Env == "production"))
+
+	// The access token rides as an ambient HttpOnly cookie, so block cross-site
+	// state-changing requests (CSRF) before bridging that cookie into the
+	// Authorization header every handler already reads.
+	router.Use(httpmiddleware.CSRFGuard(cfg.CORS, cfg.AccessTokenCookieName, cfg.RefreshTokenCookieName))
+	router.Use(httpmiddleware.AccessCookieBridge(cfg.AccessTokenCookieName))
 
 	// Prometheus scrape endpoint, served outside the Huma JSON API.
 	router.Handle("/metrics", metrics.Handler())
@@ -207,6 +218,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ProjectsService:         projectsSvc,
 		SystemEventsService:     systemEventsSvc,
 		RefreshCookie:           refreshCookieConfig(cfg),
+		AccessCookie:            accessCookieConfig(cfg),
 		AuthRateLimitMiddleware: httpmiddleware.AuthRateLimit(authRateLimiter),
 		ReadyChecker:            handlers.NewDatabaseReadyChecker(pool, cfg.DBHealthTimeout()),
 	})
@@ -280,6 +292,23 @@ func refreshCookieConfig(cfg *config.Config) handlers.RefreshCookieConfig {
 		Secure:   cfg.RefreshTokenCookieSecure,
 		SameSite: refreshCookieSameSite(cfg.RefreshTokenCookieSameSite),
 		TTL:      cfg.RefreshTokenTTL(),
+	}
+}
+
+func accessCookieConfig(cfg *config.Config) handlers.AccessCookieConfig {
+	return handlers.AccessCookieConfig{
+		Name:     cfg.AccessTokenCookieName,
+		Path:     "/",
+		Domain:   cfg.AccessTokenCookieDomain,
+		Secure:   cfg.AccessTokenCookieSecure,
+		SameSite: refreshCookieSameSite(cfg.AccessTokenCookieSameSite),
+		// MaxAge tracks the refresh-session lifetime, not the short JWT TTL. The
+		// JWT inside still expires per JWTAccessTokenTTL (enforced server-side),
+		// but the cookie must outlive it: a reload after the access token expires
+		// then still presents the cookie, the API returns 401, the client
+		// silently refreshes, and an edge guard keying off cookie presence does
+		// not bounce a still-refreshable session.
+		TTL: cfg.RefreshTokenTTL(),
 	}
 }
 

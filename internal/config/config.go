@@ -75,6 +75,18 @@ type Config struct {
 	RefreshTokenCookieSecure   bool   `env:"REFRESH_TOKEN_COOKIE_SECURE" envDefault:"false"`
 	RefreshTokenCookieSameSite string `env:"REFRESH_TOKEN_COOKIE_SAMESITE" envDefault:"lax"`
 
+	// Access token cookie configuration. The access token also rides as an
+	// HttpOnly cookie (Path=/) so the browser never exposes it to JS and a
+	// same-site edge middleware can gate routes on its presence. The cookie's
+	// MaxAge tracks the refresh-session lifetime (RefreshTokenTTL) so it survives
+	// access-token expiry; the JWT inside still expires per JWTAccessTokenTTL and
+	// is re-minted on refresh. Set Domain to a shared parent (e.g. ".example.com")
+	// when the app and API live on different subdomains.
+	AccessTokenCookieName     string `env:"ACCESS_TOKEN_COOKIE_NAME" envDefault:"wow_dashboard_access_token"`
+	AccessTokenCookieSecure   bool   `env:"ACCESS_TOKEN_COOKIE_SECURE" envDefault:"false"`
+	AccessTokenCookieSameSite string `env:"ACCESS_TOKEN_COOKIE_SAMESITE" envDefault:"lax"`
+	AccessTokenCookieDomain   string `env:"ACCESS_TOKEN_COOKIE_DOMAIN" envDefault:""`
+
 	// Email transport configuration. Empty EmailSMTPHost falls back to the
 	// LogSender (stdout) so dev environments without a relay still work.
 	EmailSMTPHost     string `env:"EMAIL_SMTP_HOST" envDefault:""`
@@ -137,14 +149,34 @@ func normalizeEnv(s string) (string, error) {
 	}
 }
 
-func normalizeRefreshCookieSameSite(s string) (string, error) {
-	value := strings.ToLower(strings.TrimSpace(s))
-	switch value {
+func normalizeCookieSameSite(value, envVar string) (string, error) {
+	v := strings.ToLower(strings.TrimSpace(value))
+	switch v {
 	case "lax", "strict", "none":
-		return value, nil
+		return v, nil
 	default:
-		return "", fmt.Errorf("invalid REFRESH_TOKEN_COOKIE_SAMESITE %q: must be one of lax, strict, none", s)
+		return "", fmt.Errorf("invalid %s %q: must be one of lax, strict, none", envVar, value)
 	}
+}
+
+// validateCookieName enforces the HTTP cookie-name token rules: no control or
+// non-ASCII characters and no separator characters.
+func validateCookieName(name, envVar string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("%s must not be empty", envVar)
+	}
+	// separators: ()<>@,;:\"/[]?={} \t
+	const separators = "()<>@,;:\"\\\\/[]?={} \t"
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c <= 31 || c >= 127 {
+			return fmt.Errorf("%s %q contains control or non-ASCII character", envVar, name)
+		}
+		if strings.ContainsRune(separators, rune(c)) {
+			return fmt.Errorf("%s %q contains invalid separator character %q", envVar, name, string(c))
+		}
+	}
+	return nil
 }
 
 func validateCORS(cfg *Config) error {
@@ -313,7 +345,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("REFRESH_TOKEN_COOKIE_SECURE must be true in production")
 	}
 
-	sameSite, err := normalizeRefreshCookieSameSite(cfg.RefreshTokenCookieSameSite)
+	sameSite, err := normalizeCookieSameSite(cfg.RefreshTokenCookieSameSite, "REFRESH_TOKEN_COOKIE_SAMESITE")
 	if err != nil {
 		return nil, err
 	}
@@ -407,24 +439,38 @@ func Load() (*Config, error) {
 	}
 
 	// 7. Cookie Validations
-	if strings.TrimSpace(cfg.RefreshTokenCookieName) == "" {
-		return nil, fmt.Errorf("REFRESH_TOKEN_COOKIE_NAME must not be empty")
+	if err := validateCookieName(cfg.RefreshTokenCookieName, "REFRESH_TOKEN_COOKIE_NAME"); err != nil {
+		return nil, err
 	}
-	// Validate cookie name based on HTTP cookie token rules
-	// separators: ()<>@,;:\"/[]?={} \t
-	separators := "()<>@,;:\"\\\\/[]?={} \t"
-	for i := 0; i < len(cfg.RefreshTokenCookieName); i++ {
-		c := cfg.RefreshTokenCookieName[i]
-		if c <= 31 || c >= 127 {
-			return nil, fmt.Errorf("REFRESH_TOKEN_COOKIE_NAME %q contains control or non-ASCII character", cfg.RefreshTokenCookieName)
-		}
-		if strings.ContainsRune(separators, rune(c)) {
-			return nil, fmt.Errorf("REFRESH_TOKEN_COOKIE_NAME %q contains invalid separator character %q", cfg.RefreshTokenCookieName, string(c))
-		}
-	}
-
 	if cfg.RefreshTokenCookieSameSite == "none" && !cfg.RefreshTokenCookieSecure {
 		return nil, fmt.Errorf("REFRESH_TOKEN_COOKIE_SECURE must be true when SameSite is set to %q", "none")
+	}
+
+	// Access token cookie: mirror the refresh cookie's production hardening.
+	accessCookieSecureConfigured := strings.TrimSpace(os.Getenv("ACCESS_TOKEN_COOKIE_SECURE")) != ""
+	if cfg.Env == "production" && !accessCookieSecureConfigured {
+		cfg.AccessTokenCookieSecure = true
+	}
+	if cfg.Env == "production" && accessCookieSecureConfigured && !cfg.AccessTokenCookieSecure {
+		return nil, fmt.Errorf("ACCESS_TOKEN_COOKIE_SECURE must be true in production")
+	}
+	accessSameSite, err := normalizeCookieSameSite(cfg.AccessTokenCookieSameSite, "ACCESS_TOKEN_COOKIE_SAMESITE")
+	if err != nil {
+		return nil, err
+	}
+	cfg.AccessTokenCookieSameSite = accessSameSite
+	if err := validateCookieName(cfg.AccessTokenCookieName, "ACCESS_TOKEN_COOKIE_NAME"); err != nil {
+		return nil, err
+	}
+	if cfg.AccessTokenCookieSameSite == "none" && !cfg.AccessTokenCookieSecure {
+		return nil, fmt.Errorf("ACCESS_TOKEN_COOKIE_SECURE must be true when SameSite is set to %q", "none")
+	}
+	// The access cookie (Path=/) and refresh cookie (Path=/api/auth) are both
+	// sent on /api/auth/* requests; if they shared a name the longer-path refresh
+	// cookie would win in the access-cookie bridge and promote the opaque refresh
+	// token to a Bearer access token. Require distinct names.
+	if cfg.AccessTokenCookieName == cfg.RefreshTokenCookieName {
+		return nil, fmt.Errorf("ACCESS_TOKEN_COOKIE_NAME and REFRESH_TOKEN_COOKIE_NAME must be different")
 	}
 
 	// 8. CORS Validations

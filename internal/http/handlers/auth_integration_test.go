@@ -114,8 +114,9 @@ func TestAuthHandlersIntegration(t *testing.T) {
 	var signUpBody authSessionResponse
 	decodeJSON(t, signUpRec, &signUpBody)
 	assertIntegrationUser(t, signUpBody.User, "hello@gmail.com", "Hello Friend")
-	if signUpBody.AccessToken == "" {
-		t.Fatal("sign-up accessToken is empty")
+	signUpAccessCookie := cookieByName(t, signUpRec, "wow_dashboard_access_token")
+	if signUpAccessCookie.Value == "" || !signUpAccessCookie.HttpOnly || signUpAccessCookie.Path != "/" {
+		t.Fatalf("sign-up access cookie = %#v, want HttpOnly / cookie", signUpAccessCookie)
 	}
 	signUpRefreshCookie := cookieByName(t, signUpRec, "wow_dashboard_refresh_token")
 	if signUpRefreshCookie.Value == "" || !signUpRefreshCookie.HttpOnly || signUpRefreshCookie.Path != "/api/auth" {
@@ -133,8 +134,9 @@ func TestAuthHandlersIntegration(t *testing.T) {
 	var signInBody authSessionResponse
 	decodeJSON(t, signInRec, &signInBody)
 	assertIntegrationUser(t, signInBody.User, "hello@gmail.com", "Hello Friend")
-	if signInBody.AccessToken == "" {
-		t.Fatal("sign-in accessToken is empty")
+	signInAccessCookie := cookieByName(t, signInRec, "wow_dashboard_access_token")
+	if signInAccessCookie.Value == "" || !signInAccessCookie.HttpOnly || signInAccessCookie.Path != "/" {
+		t.Fatalf("sign-in access cookie = %#v, want HttpOnly / cookie", signInAccessCookie)
 	}
 	signInRefreshCookie := cookieByName(t, signInRec, "wow_dashboard_refresh_token")
 	if signInRefreshCookie.Value == "" || !signInRefreshCookie.HttpOnly || signInRefreshCookie.Path != "/api/auth" {
@@ -148,8 +150,9 @@ func TestAuthHandlersIntegration(t *testing.T) {
 	var refreshBody authSessionResponse
 	decodeJSON(t, refreshRec, &refreshBody)
 	assertIntegrationUser(t, refreshBody.User, "hello@gmail.com", "Hello Friend")
-	if refreshBody.AccessToken == "" {
-		t.Fatal("refresh accessToken is empty")
+	refreshAccessCookie := cookieByName(t, refreshRec, "wow_dashboard_access_token")
+	if refreshAccessCookie.Value == "" {
+		t.Fatal("refresh access cookie is empty")
 	}
 	rotatedRefreshCookie := cookieByName(t, refreshRec, "wow_dashboard_refresh_token")
 	if rotatedRefreshCookie.Value == "" || rotatedRefreshCookie.Value == signInRefreshCookie.Value {
@@ -157,7 +160,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 	}
 
 	meReq := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	meReq.Header.Set("Authorization", "Bearer "+refreshBody.AccessToken)
+	meReq.Header.Set("Authorization", "Bearer "+refreshAccessCookie.Value)
 	meRec := httptest.NewRecorder()
 	router.ServeHTTP(meRec, meReq)
 	if meRec.Code != http.StatusOK {

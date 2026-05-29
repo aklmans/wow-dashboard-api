@@ -39,6 +39,10 @@ var configEnvKeys = []string{
 	"REFRESH_TOKEN_COOKIE_NAME",
 	"REFRESH_TOKEN_COOKIE_SECURE",
 	"REFRESH_TOKEN_COOKIE_SAMESITE",
+	"ACCESS_TOKEN_COOKIE_NAME",
+	"ACCESS_TOKEN_COOKIE_SECURE",
+	"ACCESS_TOKEN_COOKIE_SAMESITE",
+	"ACCESS_TOKEN_COOKIE_DOMAIN",
 	"EMAIL_SMTP_HOST",
 	"EMAIL_SMTP_PORT",
 	"EMAIL_SMTP_USERNAME",
@@ -177,6 +181,15 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.RefreshTokenCookieSameSite != "lax" {
 		t.Errorf("RefreshTokenCookieSameSite = %q, want lax", cfg.RefreshTokenCookieSameSite)
+	}
+	if cfg.AccessTokenCookieName != "wow_dashboard_access_token" {
+		t.Errorf("AccessTokenCookieName = %q, want wow_dashboard_access_token", cfg.AccessTokenCookieName)
+	}
+	if cfg.AccessTokenCookieSecure {
+		t.Error("AccessTokenCookieSecure = true, want false in development")
+	}
+	if cfg.AccessTokenCookieSameSite != "lax" {
+		t.Errorf("AccessTokenCookieSameSite = %q, want lax", cfg.AccessTokenCookieSameSite)
 	}
 }
 
@@ -488,6 +501,71 @@ func TestLoad_InvalidRefreshCookieSameSite(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load() should return error for invalid REFRESH_TOKEN_COOKIE_SAMESITE, got nil")
 	}
+}
+
+func TestLoad_AccessCookieValidation(t *testing.T) {
+	t.Run("invalid SameSite is rejected", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ACCESS_TOKEN_COOKIE_SAMESITE", "sometimes")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() should reject invalid ACCESS_TOKEN_COOKIE_SAMESITE, got nil")
+		}
+	})
+
+	t.Run("invalid cookie name is rejected", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ACCESS_TOKEN_COOKIE_NAME", "bad name")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() should reject invalid ACCESS_TOKEN_COOKIE_NAME, got nil")
+		}
+	})
+
+	t.Run("SameSite none requires Secure", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ACCESS_TOKEN_COOKIE_SAMESITE", "none")
+		t.Setenv("ACCESS_TOKEN_COOKIE_SECURE", "false")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() should reject ACCESS SameSite=none with Secure=false, got nil")
+		}
+	})
+
+	t.Run("secure defaults true in production", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ENV", "production")
+		setProductionMinima(t)
+		t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if !cfg.AccessTokenCookieSecure {
+			t.Fatal("AccessTokenCookieSecure = false, want true by default in production")
+		}
+	})
+
+	t.Run("secure false rejected in production", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ENV", "production")
+		setProductionMinima(t)
+		t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+		t.Setenv("ACCESS_TOKEN_COOKIE_SECURE", "false")
+
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() should reject ACCESS_TOKEN_COOKIE_SECURE=false in production, got nil")
+		}
+	})
+
+	t.Run("must differ from refresh cookie name", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("ACCESS_TOKEN_COOKIE_NAME", "wow_dashboard_session")
+		t.Setenv("REFRESH_TOKEN_COOKIE_NAME", "wow_dashboard_session")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load() should reject identical access/refresh cookie names, got nil")
+		}
+	})
 }
 
 // --- Duration helpers ---
