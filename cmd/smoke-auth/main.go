@@ -21,6 +21,7 @@ const (
 	defaultSmokeEmail    = "demo@wow-dashboard.test"
 	defaultSmokePassword = "@Password"
 	refreshCookieName    = "wow_dashboard_refresh_token"
+	accessCookieName     = "wow_dashboard_access_token"
 	redactedValue        = "[REDACTED]"
 )
 
@@ -43,7 +44,6 @@ type signInResponse struct {
 	User struct {
 		Email string `json:"email"`
 	} `json:"user"`
-	AccessToken string `json:"accessToken"`
 }
 
 type meResponse struct {
@@ -123,11 +123,12 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if signInBody.User.Email != cfg.Email {
 		return fmt.Errorf("sign-in user.email = %q, want %q", signInBody.User.Email, cfg.Email)
 	}
-	if signInBody.AccessToken == "" {
-		return fmt.Errorf("sign-in accessToken is empty")
-	}
 	if !sawRefreshSetCookie {
 		return fmt.Errorf("sign-in did not set refresh cookie")
+	}
+	signInAccessToken, ok := accessCookieValue(cfg.Client, baseURL)
+	if !ok {
+		return fmt.Errorf("sign-in did not set access cookie")
 	}
 	initialRefreshCookie, ok := refreshCookieValue(cfg.Client, baseURL)
 	if !ok {
@@ -135,7 +136,7 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	}
 	fmt.Fprintf(cfg.Stdout, "OK /api/auth/sign-in as %s\n", signInBody.User.Email)
 
-	meBody, err := getMe(ctx, cfg.Client, cfg.BaseURL+"/api/auth/me", signInBody.AccessToken)
+	meBody, err := getMe(ctx, cfg.Client, cfg.BaseURL+"/api/auth/me", signInAccessToken)
 	if err != nil {
 		return err
 	}
@@ -154,9 +155,6 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if refreshBody.User.Email != cfg.Email {
 		return fmt.Errorf("refresh user.email = %q, want %q", refreshBody.User.Email, cfg.Email)
 	}
-	if refreshBody.AccessToken == "" {
-		return fmt.Errorf("refresh accessToken is empty")
-	}
 	if !sawRotatedSetCookie {
 		return fmt.Errorf("refresh did not set rotated refresh cookie")
 	}
@@ -167,9 +165,13 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if rotatedRefreshCookie == initialRefreshCookie {
 		return fmt.Errorf("refresh cookie was not rotated")
 	}
+	refreshedAccessToken, ok := accessCookieValue(cfg.Client, baseURL)
+	if !ok {
+		return fmt.Errorf("refresh did not set access cookie")
+	}
 	fmt.Fprintln(cfg.Stdout, "OK /api/auth/refresh rotated refresh cookie")
 
-	refreshedMeBody, err := getMe(ctx, cfg.Client, cfg.BaseURL+"/api/auth/me", refreshBody.AccessToken)
+	refreshedMeBody, err := getMe(ctx, cfg.Client, cfg.BaseURL+"/api/auth/me", refreshedAccessToken)
 	if err != nil {
 		return err
 	}
@@ -196,7 +198,10 @@ func run(ctx context.Context, cfg smokeConfig) error {
 	if _, ok := refreshCookieValue(cfg.Client, baseURL); ok {
 		return fmt.Errorf("refresh cookie still present after sign-out")
 	}
-	fmt.Fprintln(cfg.Stdout, "OK /api/auth/sign-out cleared refresh cookie")
+	if _, ok := accessCookieValue(cfg.Client, baseURL); ok {
+		return fmt.Errorf("access cookie still present after sign-out")
+	}
+	fmt.Fprintln(cfg.Stdout, "OK /api/auth/sign-out cleared refresh and access cookies")
 
 	if err := postRefreshExpectStatus(ctx, cfg, http.StatusUnauthorized); err != nil {
 		return err
@@ -242,6 +247,7 @@ func postSignIn(ctx context.Context, cfg smokeConfig) (*signInResponse, bool, er
 		return nil, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 
 	resp, err := cfg.Client.Do(req)
 	if err != nil {
@@ -287,6 +293,7 @@ func postRefresh(ctx context.Context, cfg smokeConfig) (*signInResponse, bool, e
 	if err != nil {
 		return nil, false, err
 	}
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 
 	resp, err := cfg.Client.Do(req)
 	if err != nil {
@@ -328,6 +335,7 @@ func postSignOut(ctx context.Context, cfg smokeConfig) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 
 	resp, err := cfg.Client.Do(req)
 	if err != nil {
@@ -360,6 +368,20 @@ func refreshCookieValue(client *http.Client, baseURL *url.URL) (string, bool) {
 	cookieURL.Path = "/api/auth/refresh"
 	for _, cookie := range client.Jar.Cookies(&cookieURL) {
 		if cookie.Name == refreshCookieName && cookie.Value != "" {
+			return cookie.Value, true
+		}
+	}
+	return "", false
+}
+
+func accessCookieValue(client *http.Client, baseURL *url.URL) (string, bool) {
+	if client == nil || client.Jar == nil || baseURL == nil {
+		return "", false
+	}
+	cookieURL := *baseURL
+	cookieURL.Path = "/"
+	for _, cookie := range client.Jar.Cookies(&cookieURL) {
+		if cookie.Name == accessCookieName && cookie.Value != "" {
 			return cookie.Value, true
 		}
 	}

@@ -53,28 +53,34 @@ demo@wow-dashboard.test
 
 ## Auth Flow
 
-Sign-in and sign-up return `{ user, accessToken }` JSON and additionally set an
-`HttpOnly` refresh-token cookie. Browser JavaScript cannot — and should not —
-read that cookie; never store or inspect the refresh token in frontend state.
+Sign-in and sign-up return `{ user }` JSON and set two `HttpOnly` cookies: the
+access token (`Path=/`, short-lived) and the refresh token (`Path=/api/auth`).
+Browser JavaScript cannot — and should not — read either, and the access token
+is **never** returned in the response body.
 
-Requests that rely on the refresh cookie must send credentials:
+Because auth rides on cookies, every API call must send credentials:
 
 ```ts
-fetch(`${baseURL}/api/auth/refresh`, { method: 'POST', credentials: 'include' });
+fetch(`${baseURL}/api/auth/me`, { credentials: 'include' });
 // axios: axios.create({ baseURL, withCredentials: true })
 ```
 
 Access-token handling:
 
-- Keep the access token in memory or the starter's existing auth context.
-  Avoid long-term `localStorage`; use it only as a temporary bridge if the
-  starter already depends on it.
-- Send protected requests with `Authorization: Bearer <accessToken>`.
-- On a `401`, call `POST /api/auth/refresh` with credentials. If it succeeds,
-  update the access token and retry the original request once. If it fails,
-  clear auth state and return the user to login.
-- On sign-out, call `POST /api/auth/sign-out` with credentials, then clear
-  frontend access-token/user state.
+- Do not store the access token in JS — there is nothing to store. The browser
+  attaches the access cookie automatically, so there is no `Authorization`
+  header to set from the frontend.
+- On a `401`, call `POST /api/auth/refresh` with credentials. On success the API
+  sets a fresh access cookie (nothing to read from the body); retry the original
+  request once. If it fails, clear auth state and return the user to login.
+- On sign-out, call `POST /api/auth/sign-out` with credentials; the API clears
+  both cookies. Then clear frontend user state.
+- State-changing requests (`POST/PUT/PATCH/DELETE`) are CSRF-protected: the API
+  rejects cookie-authenticated unsafe requests that are cross-site. Same-origin
+  and same-site browser requests pass automatically (see CORS & Cookies for
+  cross-site deployments).
+- Non-browser / API clients may instead send `Authorization: Bearer <token>` —
+  the API accepts the access cookie or a Bearer header interchangeably.
 
 Sign-up returns `201`; sign-in, refresh, and me return `200`.
 
@@ -113,18 +119,23 @@ the browser console.
 
 - The frontend origin must be listed in `CORS_ALLOWED_ORIGINS`. Local defaults
   already include common starter ports (`3000`, `5173`, …).
-- The refresh cookie path is `/api/auth`.
-- Production requires `REFRESH_TOKEN_COOKIE_SECURE=true`. Credentialed CORS is
-  granted only to exact configured origins, never to wildcard-matched ones.
-- For a cross-site deployment, confirm the HTTPS / SameSite / cookie-domain
-  strategy before launch (`SameSite=None` requires `Secure`).
+- The access cookie path is `/` (sent on every API call); the refresh cookie
+  path is `/api/auth`.
+- Production requires `REFRESH_TOKEN_COOKIE_SECURE=true` and
+  `ACCESS_TOKEN_COOKIE_SECURE=true` (both default to `true` when
+  `ENV=production`). Credentialed CORS is granted only to exact configured
+  origins, never to wildcard-matched ones.
+- For a cross-site deployment, set `SameSite=None` (requires `Secure`) on both
+  cookies and an `ACCESS_TOKEN_COOKIE_DOMAIN` shared parent (e.g. `.example.com`)
+  when the app and API use different subdomains; otherwise the access cookie and
+  the CSRF origin check assume same-site.
 
 ## Acceptance Checklist
 
 - Backend `make smoke-auth` passes.
 - Frontend login succeeds with the seeded demo user.
-- `POST /api/auth/sign-in` returns `Set-Cookie`; browser JS cannot read it.
-- `POST /api/auth/refresh` sends the cookie and returns a fresh `accessToken`.
-- `GET /api/auth/me` succeeds with the bearer token.
+- `POST /api/auth/sign-in` sets the access and refresh `Set-Cookie`s; browser JS cannot read them.
+- `POST /api/auth/refresh` sends the refresh cookie and sets a fresh access cookie (no token in the body).
+- `GET /api/auth/me` succeeds with cookies sent (`credentials: 'include'`), no bearer header.
 - After sign-out, refresh no longer succeeds.
 - No token is visible in console logs, storage, or error messages.

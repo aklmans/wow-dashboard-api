@@ -51,8 +51,7 @@ type authMeUser struct {
 }
 
 type authSessionBody struct {
-	User        authUser `json:"user" doc:"Authenticated user profile"`
-	AccessToken string   `json:"accessToken" doc:"JWT access token"`
+	User authUser `json:"user" doc:"Authenticated user profile"`
 }
 
 type authSessionResponse struct {
@@ -144,14 +143,27 @@ type RefreshCookieConfig struct {
 	TTL      time.Duration
 }
 
-// RegisterAuth registers Starter-compatible JWT auth endpoints.
-func RegisterAuth(api huma.API, authSvc AuthService, authMiddlewares ...func(huma.Context, func(huma.Context))) {
-	RegisterAuthWithCookies(api, authSvc, DefaultRefreshCookieConfig(), authMiddlewares...)
+// AccessCookieConfig configures the HttpOnly cookie that carries the JWT access
+// token. Unlike the refresh cookie it uses Path "/" so the browser sends it on
+// every API call and a same-site edge middleware can see it.
+type AccessCookieConfig struct {
+	Name     string
+	Path     string
+	Domain   string
+	Secure   bool
+	SameSite http.SameSite
+	TTL      time.Duration
 }
 
-// RegisterAuthWithCookies registers auth endpoints with explicit refresh cookie settings.
-func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie RefreshCookieConfig, authMiddlewares ...func(huma.Context, func(huma.Context))) {
+// RegisterAuth registers Starter-compatible JWT auth endpoints.
+func RegisterAuth(api huma.API, authSvc AuthService, authMiddlewares ...func(huma.Context, func(huma.Context))) {
+	RegisterAuthWithCookies(api, authSvc, DefaultRefreshCookieConfig(), DefaultAccessCookieConfig(), authMiddlewares...)
+}
+
+// RegisterAuthWithCookies registers auth endpoints with explicit cookie settings.
+func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie RefreshCookieConfig, accessCookie AccessCookieConfig, authMiddlewares ...func(huma.Context, func(huma.Context))) {
 	refreshCookie = refreshCookie.withDefaults()
+	accessCookie = accessCookie.withDefaults()
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "post-auth-sign-up",
@@ -179,7 +191,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		if err != nil {
 			return nil, mapAuthError(ctx, err)
 		}
-		return sessionResponse(session, refreshCookie), nil
+		return sessionResponse(session, refreshCookie, accessCookie), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -206,7 +218,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		if err != nil {
 			return nil, mapAuthError(ctx, err)
 		}
-		return sessionResponse(session, refreshCookie), nil
+		return sessionResponse(session, refreshCookie, accessCookie), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -231,7 +243,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		if err != nil {
 			return nil, mapAuthError(ctx, err)
 		}
-		return sessionResponse(session, refreshCookie), nil
+		return sessionResponse(session, refreshCookie, accessCookie), nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -252,7 +264,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		}
 
 		return &authSuccessResponse{
-			SetCookie: []http.Cookie{clearRefreshCookie(refreshCookie)},
+			SetCookie: []http.Cookie{clearRefreshCookie(refreshCookie), clearAccessCookie(accessCookie)},
 			Body:      authSuccessBody{Success: true},
 		}, nil
 	})
@@ -282,7 +294,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 
 		// The change revoked every refresh token, so clear the now-dead cookie.
 		return &authSuccessResponse{
-			SetCookie: []http.Cookie{clearRefreshCookie(refreshCookie)},
+			SetCookie: []http.Cookie{clearRefreshCookie(refreshCookie), clearAccessCookie(accessCookie)},
 			Body:      authSuccessBody{Success: true},
 		}, nil
 	})
@@ -433,15 +445,19 @@ type patchMeInput struct {
 	}
 }
 
-func sessionResponse(session *service.Session, refreshCookie RefreshCookieConfig) *authSessionResponse {
+func sessionResponse(session *service.Session, refreshCookie RefreshCookieConfig, accessCookie AccessCookieConfig) *authSessionResponse {
 	resp := &authSessionResponse{
 		Body: authSessionBody{
-			User:        publicUserResponse(session.User),
-			AccessToken: session.AccessToken,
+			User: publicUserResponse(session.User),
 		},
 	}
+	// The access token now ships only as an HttpOnly cookie — never in the JSON
+	// body — so it is never reachable from JavaScript.
+	if session.AccessToken != "" {
+		resp.SetCookie = append(resp.SetCookie, newAccessCookie(accessCookie, session.AccessToken))
+	}
 	if session.RefreshToken != "" {
-		resp.SetCookie = []http.Cookie{newRefreshCookie(refreshCookie, session.RefreshToken)}
+		resp.SetCookie = append(resp.SetCookie, newRefreshCookie(refreshCookie, session.RefreshToken))
 	}
 	return resp
 }
@@ -554,6 +570,59 @@ func clearRefreshCookie(cfg RefreshCookieConfig) http.Cookie {
 		Name:     cfg.Name,
 		Value:    "",
 		Path:     cfg.Path,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0).UTC(),
+		HttpOnly: true,
+		Secure:   cfg.Secure,
+		SameSite: cfg.SameSite,
+	}
+}
+
+func DefaultAccessCookieConfig() AccessCookieConfig {
+	return AccessCookieConfig{
+		Name:     "wow_dashboard_access_token",
+		Path:     "/",
+		SameSite: http.SameSiteLaxMode,
+		TTL:      15 * time.Minute,
+	}
+}
+
+func (cfg AccessCookieConfig) withDefaults() AccessCookieConfig {
+	defaults := DefaultAccessCookieConfig()
+	if strings.TrimSpace(cfg.Name) == "" {
+		cfg.Name = defaults.Name
+	}
+	if strings.TrimSpace(cfg.Path) == "" {
+		cfg.Path = defaults.Path
+	}
+	if cfg.SameSite == http.SameSiteDefaultMode {
+		cfg.SameSite = defaults.SameSite
+	}
+	if cfg.TTL <= 0 {
+		cfg.TTL = defaults.TTL
+	}
+	return cfg
+}
+
+func newAccessCookie(cfg AccessCookieConfig, value string) http.Cookie {
+	return http.Cookie{
+		Name:     cfg.Name,
+		Value:    value,
+		Path:     cfg.Path,
+		Domain:   cfg.Domain,
+		MaxAge:   int(cfg.TTL.Seconds()),
+		HttpOnly: true,
+		Secure:   cfg.Secure,
+		SameSite: cfg.SameSite,
+	}
+}
+
+func clearAccessCookie(cfg AccessCookieConfig) http.Cookie {
+	return http.Cookie{
+		Name:     cfg.Name,
+		Value:    "",
+		Path:     cfg.Path,
+		Domain:   cfg.Domain,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0).UTC(),
 		HttpOnly: true,

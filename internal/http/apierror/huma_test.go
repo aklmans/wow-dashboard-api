@@ -1,9 +1,11 @@
 package apierror
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -205,3 +207,120 @@ func errorf(msg string) error {
 type plainError struct{ msg string }
 
 func (e *plainError) Error() string { return e.msg }
+
+// newLoggingTestAPI wires LoggingTransformer(logger) ahead of HumaErrorTransformer
+// (the production order) on a single GET /logging-test route whose handler error
+// is supplied by the caller, so a test can drive the full transform pipeline.
+func newLoggingTestAPI(logger *slog.Logger, handlerErr func(ctx context.Context) error) http.Handler {
+	router := chi.NewRouter()
+	router.Use(middleware.RequestID)
+
+	cfg := huma.DefaultConfig("Test API", "1.0.0")
+	cfg.Transformers = append(cfg.Transformers, LoggingTransformer(logger), HumaErrorTransformer)
+	api := humachi.New(router, cfg)
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-logging-test",
+		Method:      http.MethodGet,
+		Path:        "/logging-test",
+	}, func(ctx context.Context, _ *struct{}) (*struct{ Body string }, error) {
+		return nil, handlerErr(ctx)
+	})
+	return router
+}
+
+func TestLoggingTransformer_AppErrorCauseLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	const secret = "pq: connection refused to 10.0.0.5"
+	router := newLoggingTestAPI(logger, func(ctx context.Context) error {
+		return InternalError(errors.New(secret)).ForContext(ctx)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/logging-test", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+
+	rawBody := rec.Body.String()
+	var body ResponseBody
+	if err := json.Unmarshal([]byte(rawBody), &body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if body.Code != CodeInternalError {
+		t.Errorf("body.Code = %q, want %q", body.Code, CodeInternalError)
+	}
+	// Client must never see the internal cause.
+	if strings.Contains(rawBody, secret) {
+		t.Errorf("response leaked the internal cause to the client: %s", rawBody)
+	}
+
+	logged := buf.String()
+	if !strings.Contains(logged, "request_error") {
+		t.Errorf("expected a request_error log line, got: %s", logged)
+	}
+	if !strings.Contains(logged, secret) {
+		t.Errorf("expected the cause %q in the log, got: %s", secret, logged)
+	}
+	if !strings.Contains(logged, `"level":"ERROR"`) {
+		t.Errorf("expected an ERROR-level log line, got: %s", logged)
+	}
+}
+
+func TestLoggingTransformer_ClientErrorNotLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	router := newLoggingTestAPI(logger, func(ctx context.Context) error {
+		return NotFound("item not found").ForContext(ctx)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/logging-test", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	// A plain 4xx client error is expected; it must not be logged as a fault.
+	if strings.Contains(buf.String(), "request_error") {
+		t.Errorf("4xx client error should not produce a request_error log, got: %s", buf.String())
+	}
+}
+
+func TestLoggingTransformer_HumaModel5xxLogged(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	const raw = "raw downstream boom"
+	router := newLoggingTestAPI(logger, func(ctx context.Context) error {
+		// A plain error is wrapped by huma.NewError into a *huma.ErrorModel (500),
+		// which the existing transformer collapses to a generic client envelope.
+		return errors.New(raw)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/logging-test", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+
+	rawBody := rec.Body.String()
+	if strings.Contains(rawBody, raw) || strings.Contains(rawBody, "unexpected error occurred") {
+		t.Errorf("response leaked huma error detail to the client: %s", rawBody)
+	}
+
+	logged := buf.String()
+	if !strings.Contains(logged, "request_error") || !strings.Contains(logged, `"level":"ERROR"`) {
+		t.Errorf("expected an ERROR-level request_error log line, got: %s", logged)
+	}
+	if !strings.Contains(logged, raw) {
+		t.Errorf("expected the wrapped cause %q in the log, got: %s", raw, logged)
+	}
+}

@@ -44,9 +44,7 @@ func TestAuthHandlers(t *testing.T) {
 		var body authSessionResponse
 		decodeJSON(t, rec, &body)
 		assertStarterUser(t, body.User)
-		if body.AccessToken != "access-token-123" {
-			t.Errorf("accessToken = %q, want access-token-123", body.AccessToken)
-		}
+		assertAccessCookie(t, rec, "access-token-123")
 		if authSvc.signUpInput.Email != "hello@gmail.com" {
 			t.Errorf("SignUp email = %q, want hello@gmail.com", authSvc.signUpInput.Email)
 		}
@@ -74,9 +72,7 @@ func TestAuthHandlers(t *testing.T) {
 		var body authSessionResponse
 		decodeJSON(t, rec, &body)
 		assertStarterUser(t, body.User)
-		if body.AccessToken != "access-token-123" {
-			t.Errorf("accessToken = %q, want access-token-123", body.AccessToken)
-		}
+		assertAccessCookie(t, rec, "access-token-123")
 		if authSvc.signInInput.Email != "demo@wow-dashboard.test" {
 			t.Errorf("SignIn email = %q, want demo@wow-dashboard.test", authSvc.signInInput.Email)
 		}
@@ -117,9 +113,7 @@ func TestAuthHandlers(t *testing.T) {
 		}
 		var body authSessionResponse
 		decodeJSON(t, rec, &body)
-		if body.AccessToken != "new-access-token" {
-			t.Fatalf("accessToken = %q, want new-access-token", body.AccessToken)
-		}
+		assertAccessCookie(t, rec, "new-access-token")
 		assertStarterUser(t, body.User)
 		assertRefreshCookie(t, rec, "new-refresh-token")
 	})
@@ -137,6 +131,7 @@ func TestAuthHandlers(t *testing.T) {
 			t.Fatalf("SignOut token = %q, want old-refresh-token", authSvc.signOutToken)
 		}
 		assertClearedRefreshCookie(t, rec)
+		assertClearedAccessCookie(t, rec)
 	})
 
 	t.Run("sign-out missing cookie is idempotent and clears refresh cookie", func(t *testing.T) {
@@ -152,6 +147,7 @@ func TestAuthHandlers(t *testing.T) {
 			t.Fatalf("SignOut token = %q, want empty for missing cookie", authSvc.signOutToken)
 		}
 		assertClearedRefreshCookie(t, rec)
+		assertClearedAccessCookie(t, rec)
 	})
 
 	t.Run("sign-out revoke failure returns internal error and keeps cookie untouched", func(t *testing.T) {
@@ -738,8 +734,7 @@ func assertAPIError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int
 }
 
 type authSessionResponse struct {
-	User        starterUser `json:"user"`
-	AccessToken string      `json:"accessToken"`
+	User starterUser `json:"user"`
 }
 
 type authMeResponse struct {
@@ -796,6 +791,31 @@ func assertClearedRefreshCookie(t *testing.T, rec *httptest.ResponseRecorder) {
 	}
 	if !cookie.HttpOnly {
 		t.Fatal("cleared refresh cookie is not HttpOnly")
+	}
+}
+
+func assertAccessCookie(t *testing.T, rec *httptest.ResponseRecorder, wantValue string) {
+	t.Helper()
+	cookie := cookieByName(t, rec, "wow_dashboard_access_token")
+	if cookie.Value != wantValue {
+		t.Fatalf("access cookie value = %q, want %q", cookie.Value, wantValue)
+	}
+	if !cookie.HttpOnly {
+		t.Fatal("access cookie is not HttpOnly")
+	}
+	if cookie.Path != "/" {
+		t.Fatalf("access cookie path = %q, want /", cookie.Path)
+	}
+}
+
+func assertClearedAccessCookie(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	cookie := cookieByName(t, rec, "wow_dashboard_access_token")
+	if cookie.Value != "" {
+		t.Fatalf("cleared access cookie value = %q, want empty", cookie.Value)
+	}
+	if cookie.MaxAge >= 0 {
+		t.Fatalf("cleared access cookie MaxAge = %d, want negative", cookie.MaxAge)
 	}
 }
 

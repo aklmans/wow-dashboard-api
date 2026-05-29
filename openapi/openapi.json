@@ -229,18 +229,13 @@
             "readOnly": true,
             "type": "string"
           },
-          "accessToken": {
-            "description": "JWT access token",
-            "type": "string"
-          },
           "user": {
             "$ref": "#/components/schemas/AuthUser",
             "description": "Authenticated user profile"
           }
         },
         "required": [
-          "user",
-          "accessToken"
+          "user"
         ],
         "type": "object"
       },

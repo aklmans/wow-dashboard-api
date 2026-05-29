@@ -3,6 +3,7 @@ package apierror
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -166,4 +167,118 @@ func fieldFromHumaLocation(location string) string {
 	location = strings.TrimSpace(location)
 	location = strings.TrimPrefix(location, "body.")
 	return location
+}
+
+// LoggingTransformer returns a Huma transformer that records server-side
+// diagnostics for error responses. It never mutates the value it receives — it
+// only emits a structured log line so the internal cause of a 5xx (which is
+// deliberately stripped from the client envelope) is preserved for operators.
+//
+// Register it BEFORE [HumaErrorTransformer] so it observes the original error
+// value (a handler-returned *Error still carrying its cause, or Huma's own
+// *huma.ErrorModel) rather than the already-collapsed client envelope.
+//
+// If logger is nil the process default (slog.Default()) is resolved lazily at
+// call time, matching the rest of the HTTP stack (see middleware.RequestLogger).
+func LoggingTransformer(logger *slog.Logger) huma.Transformer {
+	return func(ctx huma.Context, status string, value any) (any, error) {
+		switch v := value.(type) {
+		case *Error:
+			logAppError(ctx, logger, v)
+		case *huma.ErrorModel:
+			logHumaModel(ctx, logger, status, v)
+		}
+		return value, nil
+	}
+}
+
+func resolveLogger(logger *slog.Logger) *slog.Logger {
+	if logger != nil {
+		return logger
+	}
+	return slog.Default()
+}
+
+// logAppError logs handler-returned apierror values. Pure 4xx client errors are
+// expected and already captured by the request log, so only server faults
+// (status >= 500) and any error carrying an internal cause are recorded here.
+func logAppError(ctx huma.Context, logger *slog.Logger, e *Error) {
+	if e == nil {
+		return
+	}
+	if e.Status < http.StatusInternalServerError && e.cause == nil {
+		return
+	}
+
+	requestID := e.RequestID
+	if requestID == "" {
+		requestID = RequestIDFromContext(ctx.Context())
+	}
+
+	attrs := []any{
+		"code", e.Code,
+		"status", e.Status,
+		"request_id", requestID,
+	}
+	if e.cause != nil {
+		attrs = append(attrs, "error", e.cause)
+	} else {
+		attrs = append(attrs, "error", e.Message)
+	}
+
+	log := resolveLogger(logger)
+	if e.Status >= http.StatusInternalServerError {
+		log.ErrorContext(ctx.Context(), "request_error", attrs...)
+		return
+	}
+	log.WarnContext(ctx.Context(), "request_error", attrs...)
+}
+
+// logHumaModel logs Huma-generated errors (parse/validation failures, or a
+// plain error wrapped by huma.NewError). Only 5xx are recorded; 4xx detail is
+// safely returned to the client already. Huma collapses the real cause of a
+// non-StatusError into the model's Detail/Errors, so capture it here before
+// HumaErrorTransformer strips it from the client envelope.
+func logHumaModel(ctx huma.Context, logger *slog.Logger, status string, model *huma.ErrorModel) {
+	if model == nil {
+		return
+	}
+	statusCode := model.Status
+	if statusCode == 0 {
+		if parsed, err := strconv.Atoi(status); err == nil {
+			statusCode = parsed
+		}
+	}
+	if statusCode < http.StatusInternalServerError {
+		return
+	}
+
+	attrs := []any{
+		"status", statusCode,
+		"request_id", RequestIDFromContext(ctx.Context()),
+	}
+	if detail := humaModelDetail(model); detail != "" {
+		attrs = append(attrs, "error", detail)
+	}
+	resolveLogger(logger).ErrorContext(ctx.Context(), "request_error", attrs...)
+}
+
+// humaModelDetail builds a single diagnostic string from a Huma error model,
+// combining its top-level Detail with any field-level messages.
+func humaModelDetail(model *huma.ErrorModel) string {
+	parts := make([]string, 0, len(model.Errors)+1)
+	if model.Detail != "" {
+		parts = append(parts, model.Detail)
+	}
+	for _, d := range model.Errors {
+		if d == nil || d.Message == "" {
+			continue
+		}
+		if d.Location != "" {
+			parts = append(parts, d.Location+": "+d.Message)
+			continue
+		}
+		parts = append(parts, d.Message)
+	}
+	return strings.Join(parts, "; ")
 }

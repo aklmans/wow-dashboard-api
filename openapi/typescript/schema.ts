@@ -576,8 +576,6 @@ export interface components {
              * @example https://example.com/schemas/AuthSessionBody.json
              */
             readonly $schema?: string;
-            /** @description JWT access token */
-            accessToken: string;
             /** @description Authenticated user profile */
             user: components["schemas"]["AuthUser"];
         };
