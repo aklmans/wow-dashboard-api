@@ -8,6 +8,7 @@ import (
 	"time"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // RequestLogger records one structured log event per HTTP request.
@@ -38,6 +39,13 @@ func RequestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			}
 			if query := sanitizeRawQuery(r.URL.RawQuery); query != "" {
 				attrs = append(attrs, "query", query)
+			}
+			// Correlate the log line with its distributed trace. The span is
+			// created by the otelhttp handler wrapping the router, so it is in
+			// context here; when tracing is a no-op the span context is invalid
+			// and the ids are omitted.
+			if sc := trace.SpanContextFromContext(r.Context()); sc.IsValid() {
+				attrs = append(attrs, "trace_id", sc.TraceID().String(), "span_id", sc.SpanID().String())
 			}
 
 			logger.InfoContext(r.Context(), "http_request", attrs...)

@@ -57,19 +57,27 @@ this hostname since Compose v20.10+ — the `extra_hosts` block in
 
 ## Metric reference
 
-The API uses two HTTP metrics plus the standard Go runtime and process
-collectors.
+The API exposes HTTP, auth, database-pool, and background-job metrics plus the
+standard Go runtime and process collectors.
 
 | Metric                                     | Type      | Labels                  | Notes |
 | ------------------------------------------ | --------- | ----------------------- | ----- |
 | `http_requests_total`                      | Counter   | `method`, `route`, `status` | `route` is the matched Chi pattern (e.g. `/api/users/{id}`). Excludes `/metrics`. |
 | `http_request_duration_seconds`            | Histogram | `method`, `route`       | Default Prometheus buckets, seconds. |
+| `auth_rate_limit_rejections_total`         | Counter   | —                       | Requests rejected by the auth rate limiter (HTTP 429). |
+| `db_pool_connections`                      | Gauge     | `state`                 | pgx pool connections by state: `total`, `idle`, `acquired`, `constructing`, `max`. |
+| `db_pool_acquire_total`                    | Counter   | —                       | Successful pool acquisitions. |
+| `db_pool_empty_acquire_total`              | Counter   | —                       | Acquisitions that had to wait for a connection — a saturation signal. |
+| `db_pool_canceled_acquire_total`           | Counter   | —                       | Acquisitions canceled by a context before completing. |
+| `river_jobs`                               | Gauge     | `state`                 | Background jobs by River state (`available`, `running`, `discarded`, …). Read from the shared `river_job` table; emits nothing when the table is absent (River migrations not run). |
 | `go_goroutines`, `go_gc_duration_seconds`, `go_memstats_*` | varies | —     | Runtime collector. |
 | `process_resident_memory_bytes`, `process_cpu_seconds_total`, … | varies | — | Process collector. |
 | `up{job="wow-dashboard-api"}`              | Gauge     | `instance`              | Prometheus-internal; 1 when the scrape succeeded. |
 
-There are intentionally no DB-pool, queue-depth, or rate-limiter metrics
-yet — those are deferred until there's a real production need.
+`db_pool_connections` and `db_pool_*` are collected by reading `pgxpool.Stat()`
+on each scrape; `river_jobs` runs a `GROUP BY state` count against `river_job`.
+Both are exported by the API process (it shares the pool and database with the
+worker), so a separate worker scrape target is not required.
 
 ## Dashboard layout (API Overview)
 
@@ -90,17 +98,19 @@ positives in the at-a-glance tiles.
 
 ## Alert rules
 
-`observability/prometheus/alerts.yml` ships three example alerts. They mirror
-the dashboard panels so an operator sees the same signal whether they happen
-to be watching Grafana or not. Tune the thresholds and `for:` durations to
-each environment before pointing Alertmanager at them.
+`observability/prometheus/alerts.yml` ships example alerts. They mirror
+the dashboard panels and resource gauges so an operator sees the same signal
+whether they happen to be watching Grafana or not. Tune the thresholds and
+`for:` durations to each environment before pointing Alertmanager at them.
 
-| Alert               | Trigger                                                  | Severity |
-| ------------------- | -------------------------------------------------------- | -------- |
-| `ApiDown`           | `up == 0` for 2m                                         | critical |
-| `ApiHighErrorRate`  | 5xx ratio > 5% over 5m, sustained 10m                    | warning  |
-| `ApiSlowP95Latency` | Any route p95 > 1s over 5m, sustained 10m                | warning  |
-| `ApiGoroutineLeak`  | `go_goroutines > 5000` sustained 15m                     | warning  |
+| Alert                  | Trigger                                                  | Severity |
+| ---------------------- | -------------------------------------------------------- | -------- |
+| `ApiDown`              | `up == 0` for 2m                                         | critical |
+| `ApiHighErrorRate`     | 5xx ratio > 5% over 5m, sustained 10m                    | warning  |
+| `ApiSlowP95Latency`    | Any route p95 > 1s over 5m, sustained 10m                | warning  |
+| `ApiGoroutineLeak`     | `go_goroutines > 5000` sustained 15m                     | warning  |
+| `ApiDbPoolSaturation`  | acquired/max pool connections > 90%, sustained 10m       | warning  |
+| `ApiJobQueueBacklog`   | `river_jobs{state="available"} > 100`, sustained 10m     | warning  |
 
 These rules are not wired to Alertmanager by default — the local stack only
 runs Prometheus, Grafana, and Jaeger. To wire alerts, add Alertmanager to

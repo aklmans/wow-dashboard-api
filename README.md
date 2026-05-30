@@ -494,11 +494,19 @@ In Kubernetes or Docker Compose, configure `/healthz` as the liveness probe and 
 
 ### Metrics
 
-`GET /metrics` exposes Prometheus metrics — `http_requests_total` and `http_request_duration_seconds` (labeled by method, matched route, and status) plus the standard Go runtime and process collectors. The route label uses the matched Chi pattern (e.g. `/api/users/{id}`), so cardinality stays bounded. The endpoint is unauthenticated; restrict it at the network or ingress layer if the deployment is internet-facing.
+`GET /metrics` exposes Prometheus metrics:
+
+- **HTTP** — `http_requests_total` and `http_request_duration_seconds` (labeled by method, matched route, and status). The route label uses the matched Chi pattern (e.g. `/api/users/{id}`), so cardinality stays bounded.
+- **Auth** — `auth_rate_limit_rejections_total`, the count of requests rejected by the auth rate limiter (HTTP 429).
+- **Database pool** — `db_pool_connections{state}` (total/idle/acquired/constructing/max) plus `db_pool_acquire_total`, `db_pool_empty_acquire_total` (a saturation signal), and `db_pool_canceled_acquire_total`.
+- **Background jobs** — `river_jobs{state}` (available/running/discarded/…), a queue-backlog and dead-letter gauge read from the shared `river_job` table. It degrades to nothing when the table is absent (River migrations not run).
+- The standard Go runtime and process collectors.
+
+The endpoint is unauthenticated; restrict it at the network or ingress layer if the deployment is internet-facing.
 
 ### Tracing
 
-The service is instrumented with OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP/HTTP collector URL (e.g. `http://localhost:4318`) to export traces; leave it unset and tracing is a no-op with negligible overhead — no collector required. Each HTTP request becomes a server span named by its matched route (`GET /api/users/{id}`), and database queries are recorded as child spans. Incoming W3C `traceparent` headers are honored, so traces join up across services.
+The service is instrumented with OpenTelemetry. Set `OTEL_EXPORTER_OTLP_ENDPOINT` to an OTLP/HTTP collector URL (e.g. `http://localhost:4318`) to export traces; leave it unset and tracing is a no-op with negligible overhead — no collector required. Each HTTP request becomes a server span named by its matched route (`GET /api/users/{id}`), and database queries are recorded as child spans. Incoming W3C `traceparent` headers are honored, so traces join up across services. When a span is active, each `http_request` log line also carries its `trace_id` and `span_id`, so logs and traces cross-link in your backend.
 
 ### Local Grafana + Jaeger stack
 

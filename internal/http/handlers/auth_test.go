@@ -337,7 +337,7 @@ func TestAuthRateLimitIgnoresForwardedHeaders(t *testing.T) {
 		Window:   time.Minute,
 		Burst:    1,
 	})
-	router := newProjectAuthTestRouterWithMiddlewares(authSvc, httpmiddleware.AuthRateLimit(limiter))
+	router := newProjectAuthTestRouterWithMiddlewares(authSvc, httpmiddleware.AuthRateLimit(limiter, nil))
 
 	first := postJSONFromRemote(router, "/api/auth/sign-in", map[string]string{
 		"email":    "demo@wow-dashboard.test",
