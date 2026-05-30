@@ -76,7 +76,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `DB_HEALTH_TIMEOUT_SECONDS` | `3` | Timeout for pinging the database health |
 | `DB_STATEMENT_TIMEOUT_SECONDS` | `30` | Per-statement `statement_timeout` applied to every pooled connection so a stuck query cannot pin a connection forever; must be > 0 |
 | `DB_HEALTH_CHECK_PERIOD_SECONDS` | `30` | How often the pool probes idle connections to prune dead ones and top up to `DB_MIN_CONNS`; must be > 0 |
-| `AUTH_RATE_LIMIT_ENABLED` | `true` | Enable per-IP application rate limiting for auth sign-in/sign-up |
+| `AUTH_RATE_LIMIT_ENABLED` | `true` | Enable per-IP application rate limiting for the sensitive auth endpoints (sign-in, sign-up, change/forgot/reset password, verify/resend email) |
 | `AUTH_RATE_LIMIT_REQUESTS` | `10` | Sustained auth requests allowed per window per IP |
 | `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `60` | Auth rate limit window in seconds |
 | `AUTH_RATE_LIMIT_BURST` | `5` | Auth requests allowed immediately before throttling per IP |
@@ -188,7 +188,7 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 | `POST` | `/api/auth/resend-verification` | Re-send the email-verification link for the bearer-token user |
 | `GET` | `/api/auth/me` | Return `{ "user": ... }` — including the caller's `roles`, effective `permissions`, and `emailVerified` — for `Authorization: Bearer <accessToken>` |
 
-`sign-up` and `sign-in` are protected by a per-IP rate limiter. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header. The limiter is in-memory and per-instance by default; set `REDIS_URL` (e.g. `redis://localhost:6379/0`) to share the limit across instances via a Redis fixed-window counter. The Redis limiter fails open — if Redis is unreachable, requests are allowed rather than blocked.
+The sensitive auth endpoints — `sign-up`, `sign-in`, `change-password`, `forgot-password`, `reset-password`, `verify-email`, and `resend-verification` — are protected by a shared per-IP rate limiter, so credential stuffing, password-reset email bombing, and token brute-forcing all draw from one budget per client IP. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header. High-frequency read/session endpoints (`refresh`, `GET /me`) are intentionally excluded so normal sessions are never throttled. The password-reset and email-verification flows additionally emit audit events — `auth.password.reset_requested`, `auth.password.reset_failed`, and `auth.email.verification_failed` — so abuse attempts are visible in the system-events log. The limiter is in-memory and per-instance by default; set `REDIS_URL` (e.g. `redis://localhost:6379/0`) to share the limit across instances via a Redis fixed-window counter. The Redis limiter fails open — if Redis is unreachable, requests are allowed rather than blocked.
 
 Sign-in additionally enforces a per-account lockout: after 10 consecutive failed attempts an account is locked for 15 minutes (self-healing — the lock simply expires). A locked account returns the same generic invalid-credentials error so the lock state cannot be probed; a successful sign-in clears the counter.
 

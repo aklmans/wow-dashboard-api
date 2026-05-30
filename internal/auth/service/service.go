@@ -741,6 +741,8 @@ func (s *Service) ForgotPassword(ctx context.Context, rawEmail string) error {
 		return fmt.Errorf("auth: failed to store reset token: %w", err)
 	}
 
+	s.recordPasswordResetRequested(ctx, AuditMetadata{Email: emailAddr, UserID: user.ID.String()})
+
 	if err := s.emailSender.Send(ctx, email.Message{
 		To:      user.Email,
 		Subject: "Reset your password",
@@ -767,6 +769,7 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPasswor
 
 	authToken, err := s.consumeAuthToken(ctx, domain.AuthTokenPurposePasswordReset, rawToken)
 	if err != nil {
+		s.recordPasswordResetFailed(ctx, AuditMetadata{Reason: AuditReasonInvalidToken})
 		return err
 	}
 
@@ -798,6 +801,7 @@ func (s *Service) VerifyEmail(ctx context.Context, rawToken string) error {
 	}
 	authToken, err := s.consumeAuthToken(ctx, domain.AuthTokenPurposeEmailVerification, rawToken)
 	if err != nil {
+		s.recordEmailVerificationFailed(ctx, AuditMetadata{Reason: AuditReasonInvalidToken})
 		return err
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)

@@ -14,14 +14,25 @@ const (
 	EventAuthSignInSucceeded = "auth.sign_in.succeeded"
 	EventAuthSignInFailed    = "auth.sign_in.failed"
 	EventAuthPasswordChanged = "auth.password.changed"
-	EventAuthPasswordReset   = "auth.password.reset"
-	EventAuthEmailVerified   = "auth.email.verified"
+	// EventAuthPasswordResetRequested is recorded when a password reset link is
+	// issued for an active account (the forgot-password flow). It gives operators
+	// visibility into reset-request volume — e.g. an email-bombing attempt.
+	EventAuthPasswordResetRequested = "auth.password.reset_requested"
+	EventAuthPasswordReset          = "auth.password.reset"
+	// EventAuthPasswordResetFailed is recorded when a reset token is rejected
+	// (invalid, expired, or already used) — a signal of token brute-forcing.
+	EventAuthPasswordResetFailed = "auth.password.reset_failed"
+	EventAuthEmailVerified       = "auth.email.verified"
+	// EventAuthEmailVerificationFailed is recorded when a verification token is
+	// rejected — a signal of token brute-forcing.
+	EventAuthEmailVerificationFailed = "auth.email.verification_failed"
 
 	AuditReasonInvalidInput       = "invalid_input"
 	AuditReasonEmailAlreadyExists = "email_already_exists"
 	AuditReasonInvalidCredentials = "invalid_credentials"
 	AuditReasonUserDisabled       = "user_disabled"
 	AuditReasonAccountLocked      = "account_locked"
+	AuditReasonInvalidToken       = "invalid_token"
 	AuditReasonInternalError      = "internal_error"
 )
 
@@ -120,6 +131,14 @@ func (s *Service) recordPasswordChanged(ctx context.Context, metadata AuditMetad
 	})
 }
 
+func (s *Service) recordPasswordResetRequested(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthPasswordResetRequested,
+		Message:   "Auth password reset requested.",
+		Metadata:  metadata,
+	})
+}
+
 func (s *Service) recordPasswordReset(ctx context.Context, metadata AuditMetadata) {
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventAuthPasswordReset,
@@ -128,10 +147,26 @@ func (s *Service) recordPasswordReset(ctx context.Context, metadata AuditMetadat
 	})
 }
 
+func (s *Service) recordPasswordResetFailed(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthPasswordResetFailed,
+		Message:   "Auth password reset failed.",
+		Metadata:  metadata,
+	})
+}
+
 func (s *Service) recordEmailVerified(ctx context.Context, metadata AuditMetadata) {
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventAuthEmailVerified,
 		Message:   "Auth email verified.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordEmailVerificationFailed(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthEmailVerificationFailed,
+		Message:   "Auth email verification failed.",
 		Metadata:  metadata,
 	})
 }

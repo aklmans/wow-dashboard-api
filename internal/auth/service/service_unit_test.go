@@ -982,6 +982,65 @@ func TestServiceVerifyEmail(t *testing.T) {
 	})
 }
 
+func TestServiceResetVerifyAuditEvents(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	hasEvent := func(events []service.AuditEvent, eventType string) bool {
+		for _, e := range events {
+			if e.EventType == eventType {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("forgot-password records reset_requested for a known user", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "pw"),
+		}
+		audit := &fakeAuditRecorder{}
+		authSvc := service.NewService(store, &fakeTokenManager{},
+			service.WithAuthTokenStore(&fakeAuthTokenStore{}),
+			service.WithEmailSender(&captureEmailSender{}),
+			service.WithAuditRecorder(audit))
+
+		if err := authSvc.ForgotPassword(context.Background(), "Demo@example.com"); err != nil {
+			t.Fatalf("ForgotPassword returned error: %v", err)
+		}
+		if !hasEvent(audit.events, service.EventAuthPasswordResetRequested) {
+			t.Fatalf("audit events = %#v, want a %s", audit.events, service.EventAuthPasswordResetRequested)
+		}
+	})
+
+	t.Run("reset-password records reset_failed on a bad token", func(t *testing.T) {
+		audit := &fakeAuditRecorder{}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{},
+			service.WithAuthTokenStore(&fakeAuthTokenStore{getErr: domain.ErrAuthTokenNotFound}),
+			service.WithAuditRecorder(audit))
+
+		if err := authSvc.ResetPassword(context.Background(), "raw-token", "new-password-123"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("ResetPassword error = %v, want ErrInvalidToken", err)
+		}
+		if !hasEvent(audit.events, service.EventAuthPasswordResetFailed) {
+			t.Fatalf("audit events = %#v, want a %s", audit.events, service.EventAuthPasswordResetFailed)
+		}
+	})
+
+	t.Run("verify-email records verification_failed on a bad token", func(t *testing.T) {
+		audit := &fakeAuditRecorder{}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{},
+			service.WithAuthTokenStore(&fakeAuthTokenStore{getErr: domain.ErrAuthTokenNotFound}),
+			service.WithAuditRecorder(audit))
+
+		if err := authSvc.VerifyEmail(context.Background(), "raw-token"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("VerifyEmail error = %v, want ErrInvalidToken", err)
+		}
+		if !hasEvent(audit.events, service.EventAuthEmailVerificationFailed) {
+			t.Fatalf("audit events = %#v, want a %s", audit.events, service.EventAuthEmailVerificationFailed)
+		}
+	})
+}
+
 func TestServiceUpdateMyProfile(t *testing.T) {
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 	baseUser := domain.User{
