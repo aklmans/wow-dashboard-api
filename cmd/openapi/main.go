@@ -8,9 +8,12 @@ import (
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/aklmans/wow-dashboard-api/internal/app"
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
+	notificationsdomain "github.com/aklmans/wow-dashboard-api/internal/notifications/domain"
+	notificationsservice "github.com/aklmans/wow-dashboard-api/internal/notifications/service"
 	projectsdomain "github.com/aklmans/wow-dashboard-api/internal/projects/domain"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
 	rolesdomain "github.com/aklmans/wow-dashboard-api/internal/roles/domain"
@@ -30,12 +33,13 @@ func main() {
 	api := app.NewAPI(router, true)
 
 	app.RegisterRoutes(api, app.Dependencies{
-		AuthService:         openAPIAuthService{},
-		UsersService:        openAPIUsersService{},
-		RolesService:        openAPIRolesService{},
-		ProjectsService:     openAPIProjectsService{},
-		SystemEventsService: openAPISystemEventsService{},
-		ReadyChecker:        openAPIReadyChecker{},
+		AuthService:          openAPIAuthService{},
+		UsersService:         openAPIUsersService{},
+		RolesService:         openAPIRolesService{},
+		ProjectsService:      openAPIProjectsService{},
+		SystemEventsService:  openAPISystemEventsService{},
+		NotificationsService: openAPINotificationsService{},
+		ReadyChecker:         openAPIReadyChecker{},
 	})
 
 	spec := api.OpenAPI()
@@ -65,6 +69,8 @@ type openAPIAuthService struct{}
 type openAPIUsersService struct{}
 
 type openAPISystemEventsService struct{}
+
+type openAPINotificationsService struct{}
 
 type openAPIReadyChecker struct{}
 
@@ -190,4 +196,16 @@ func (openAPIProjectsService) RemoveMember(context.Context, string, string, stri
 
 func (openAPISystemEventsService) ListEvents(context.Context, systemeventsservice.ListEventsInput) (systemeventsdomain.ListEventsResult, error) {
 	return systemeventsdomain.ListEventsResult{}, nil
+}
+
+func (openAPINotificationsService) List(context.Context, notificationsservice.ListInput) (notificationsdomain.ListResult, error) {
+	return notificationsdomain.ListResult{}, nil
+}
+
+func (openAPINotificationsService) MarkRead(context.Context, uuid.UUID, uuid.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (openAPINotificationsService) MarkAllRead(context.Context, uuid.UUID) (int64, error) {
+	return 0, nil
 }
