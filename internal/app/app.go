@@ -207,7 +207,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)),
 		userservice.WithUnitOfWork(usersrepo.NewUnitOfWork(pool)))
 	rolesSvc := rolesservice.NewService(rolesrepo.NewRoleStore(pool),
-		rolesservice.WithAuditRecorder(rolesrepo.NewSystemEventRecorder(queries)))
+		rolesservice.WithAuditRecorder(rolesrepo.NewSystemEventRecorder(queries)),
+		rolesservice.WithUnitOfWork(rolesrepo.NewUnitOfWork(pool)))
 	projectsSvc := projectservice.NewService(projectsrepo.NewProjectStore(queries),
 		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)))
 	systemEventsSvc := systemeventsservice.NewService(systemeventsrepo.NewEventStore(queries))

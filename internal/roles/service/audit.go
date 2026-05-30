@@ -54,8 +54,11 @@ func WithAuditRecorder(recorder AuditRecorder) Option {
 	}
 }
 
-func (s *Service) recordRoleEvent(ctx context.Context, eventType string, message string, role domain.Role, actorUserID string) {
-	event := AuditEvent{
+// buildRoleEvent assembles a role audit event, stamping the request id from
+// context. Shared by the best-effort and transactional recording paths so both
+// produce identical events.
+func buildRoleEvent(ctx context.Context, eventType string, message string, role domain.Role, actorUserID string) AuditEvent {
+	return AuditEvent{
 		EventType: eventType,
 		Message:   message,
 		Metadata: AuditMetadata{
@@ -65,6 +68,10 @@ func (s *Service) recordRoleEvent(ctx context.Context, eventType string, message
 			RequestID:   middleware.GetReqID(ctx),
 		},
 	}
+}
+
+func (s *Service) recordRoleEvent(ctx context.Context, eventType string, message string, role domain.Role, actorUserID string) {
+	event := buildRoleEvent(ctx, eventType, message, role, actorUserID)
 	if err := s.auditRecorder.RecordRoleEvent(ctx, event); err != nil {
 		slog.ErrorContext(ctx, "failed to record roles audit event",
 			"event_type", event.EventType,
