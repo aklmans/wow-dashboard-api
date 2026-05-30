@@ -48,7 +48,15 @@ func (s *RoleStore) ListRoles(ctx context.Context) ([]domain.Role, error) {
 }
 
 func (s *RoleStore) GetRoleByID(ctx context.Context, id uuid.UUID) (domain.Role, error) {
-	row, err := s.queries.GetRoleByID(ctx, pgUUID(id))
+	return getRoleByID(ctx, s.queries, id)
+}
+
+// getRoleByID reads a role using the provided queries, which may be pool- or
+// transaction-scoped. Inside a transaction it sees that transaction's own
+// uncommitted writes, so the create/update paths can read back the row they
+// just wrote before the commit.
+func getRoleByID(ctx context.Context, q *query.Queries, id uuid.UUID) (domain.Role, error) {
+	row, err := q.GetRoleByID(ctx, pgUUID(id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Role{}, domain.ErrRoleNotFound
@@ -70,8 +78,21 @@ func (s *RoleStore) CreateRole(ctx context.Context, input domain.CreateRoleInput
 		return domain.Role{}, fmt.Errorf("rolesrepo: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	q := query.New(tx)
 
+	role, err := createRoleOnTx(ctx, query.New(tx), input)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Role{}, fmt.Errorf("rolesrepo: commit: %w", err)
+	}
+	return role, nil
+}
+
+// createRoleOnTx inserts the role and its permissions using the caller-scoped
+// queries, performing no Begin/Commit so it can run inside a service-level unit
+// of work that records the audit event in the same transaction.
+func createRoleOnTx(ctx context.Context, q *query.Queries, input domain.CreateRoleInput) (domain.Role, error) {
 	if _, err := q.CreateRole(ctx, query.CreateRoleParams{
 		ID:          pgUUID(input.ID),
 		Name:        input.Name,
@@ -87,10 +108,7 @@ func (s *RoleStore) CreateRole(ctx context.Context, input domain.CreateRoleInput
 	}); err != nil {
 		return domain.Role{}, fmt.Errorf("rolesrepo: add role permissions: %w", err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return domain.Role{}, fmt.Errorf("rolesrepo: commit: %w", err)
-	}
-	return s.GetRoleByID(ctx, input.ID)
+	return getRoleByID(ctx, q, input.ID)
 }
 
 // UpdateRole applies the role detail and/or permission-set changes in one
@@ -102,8 +120,20 @@ func (s *RoleStore) UpdateRole(ctx context.Context, input domain.UpdateRoleInput
 		return domain.Role{}, fmt.Errorf("rolesrepo: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	q := query.New(tx)
 
+	role, err := updateRoleOnTx(ctx, query.New(tx), input)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Role{}, fmt.Errorf("rolesrepo: commit: %w", err)
+	}
+	return role, nil
+}
+
+// updateRoleOnTx applies the role detail and/or permission-set changes using
+// the caller-scoped queries, performing no Begin/Commit.
+func updateRoleOnTx(ctx context.Context, q *query.Queries, input domain.UpdateRoleInput) (domain.Role, error) {
 	if input.Name != nil || input.Description != nil {
 		if err := q.UpdateRoleDetails(ctx, query.UpdateRoleDetailsParams{
 			ID:          pgUUID(input.ID),
@@ -122,17 +152,21 @@ func (s *RoleStore) UpdateRole(ctx context.Context, input domain.UpdateRoleInput
 			return domain.Role{}, fmt.Errorf("rolesrepo: replace role permissions: %w", err)
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return domain.Role{}, fmt.Errorf("rolesrepo: commit: %w", err)
-	}
-	return s.GetRoleByID(ctx, input.ID)
+	return getRoleByID(ctx, q, input.ID)
 }
 
 // DeleteRole deletes a non-system role that has no users assigned. The caller
 // validates existence and the system-role guard first; a zero-row result here
 // therefore means a user was assigned after that check.
 func (s *RoleStore) DeleteRole(ctx context.Context, id uuid.UUID) error {
-	rows, err := s.queries.DeleteRole(ctx, pgUUID(id))
+	return deleteRoleOnTx(ctx, s.queries, id)
+}
+
+// deleteRoleOnTx deletes the role using the caller-scoped queries. Delete is a
+// single statement, so it needs no transaction of its own, but accepting the
+// queries lets a unit of work run it on the same transaction as the audit event.
+func deleteRoleOnTx(ctx context.Context, q *query.Queries, id uuid.UUID) error {
+	rows, err := q.DeleteRole(ctx, pgUUID(id))
 	if err != nil {
 		return fmt.Errorf("rolesrepo: delete role: %w", err)
 	}

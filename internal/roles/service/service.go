@@ -40,6 +40,28 @@ type RoleStore interface {
 	DeleteRole(ctx context.Context, id uuid.UUID) error
 }
 
+// RoleMutator is the transactional subset of role store operations a unit of
+// work exposes. It runs on the unit of work's transaction, not the pool.
+type RoleMutator interface {
+	CreateRole(ctx context.Context, input domain.CreateRoleInput) (domain.Role, error)
+	UpdateRole(ctx context.Context, input domain.UpdateRoleInput) (domain.Role, error)
+	DeleteRole(ctx context.Context, id uuid.UUID) error
+}
+
+// WorkDeps contains transaction-scoped dependencies for a unit of work. The
+// mutator and the audit recorder share one transaction, so a mutation and its
+// audit event commit or roll back together.
+type WorkDeps struct {
+	Roles RoleMutator
+	Audit AuditRecorder
+}
+
+// UnitOfWork runs fn inside a single database transaction. When configured, it
+// makes role mutations and their audit events atomic.
+type UnitOfWork interface {
+	Do(ctx context.Context, fn func(context.Context, WorkDeps) error) error
+}
+
 // CreateRoleInput is the raw create input the handler passes to the service.
 type CreateRoleInput struct {
 	ActorUserID string
@@ -62,6 +84,7 @@ type UpdateRoleInput struct {
 type Service struct {
 	store         RoleStore
 	auditRecorder AuditRecorder
+	unitOfWork    UnitOfWork
 	now           func() time.Time
 }
 
@@ -73,6 +96,18 @@ func WithClock(now func() time.Time) Option {
 	return func(s *Service) {
 		if now != nil {
 			s.now = now
+		}
+	}
+}
+
+// WithUnitOfWork configures transactional role mutations. When set, each
+// mutation records its audit event in the same transaction as the mutation, so
+// the two commit or roll back together. Without it, the service falls back to a
+// best-effort audit write after the mutation commits.
+func WithUnitOfWork(uow UnitOfWork) Option {
+	return func(s *Service) {
+		if uow != nil {
+			s.unitOfWork = uow
 		}
 	}
 }
@@ -133,21 +168,41 @@ func (s *Service) CreateRole(ctx context.Context, input CreateRoleInput) (domain
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
-	role, err := s.store.CreateRole(ctx, domain.CreateRoleInput{
+	createInput := domain.CreateRoleInput{
 		ID:          uuid.New(),
 		Name:        name,
 		Description: description,
 		Permissions: permissions,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	})
-	if err != nil {
+	}
+	mapErr := func(err error) error {
 		if errors.Is(err, domain.ErrNameConflict) {
-			return domain.Role{}, ErrNameConflict
+			return ErrNameConflict
 		}
-		return domain.Role{}, err
+		return err
 	}
 
+	if s.unitOfWork != nil {
+		var result domain.Role
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			role, err := deps.Roles.CreateRole(ctx, createInput)
+			if err != nil {
+				return err
+			}
+			result = role
+			return deps.Audit.RecordRoleEvent(ctx, buildRoleEvent(ctx, EventRoleCreated, "Role created.", role, input.ActorUserID))
+		})
+		if err != nil {
+			return domain.Role{}, mapErr(err)
+		}
+		return result, nil
+	}
+
+	role, err := s.store.CreateRole(ctx, createInput)
+	if err != nil {
+		return domain.Role{}, mapErr(err)
+	}
 	s.recordRoleEvent(ctx, EventRoleCreated, "Role created.", role, input.ActorUserID)
 	return role, nil
 }
@@ -201,17 +256,36 @@ func (s *Service) UpdateRole(ctx context.Context, input UpdateRoleInput) (domain
 		update.Permissions = &permissions
 	}
 
-	role, err := s.store.UpdateRole(ctx, update)
-	if err != nil {
+	mapErr := func(err error) error {
 		if errors.Is(err, domain.ErrNameConflict) {
-			return domain.Role{}, ErrNameConflict
+			return ErrNameConflict
 		}
 		if errors.Is(err, domain.ErrRoleNotFound) {
-			return domain.Role{}, ErrNotFound
+			return ErrNotFound
 		}
-		return domain.Role{}, err
+		return err
 	}
 
+	if s.unitOfWork != nil {
+		var result domain.Role
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			role, err := deps.Roles.UpdateRole(ctx, update)
+			if err != nil {
+				return err
+			}
+			result = role
+			return deps.Audit.RecordRoleEvent(ctx, buildRoleEvent(ctx, EventRoleUpdated, "Role updated.", role, input.ActorUserID))
+		})
+		if err != nil {
+			return domain.Role{}, mapErr(err)
+		}
+		return result, nil
+	}
+
+	role, err := s.store.UpdateRole(ctx, update)
+	if err != nil {
+		return domain.Role{}, mapErr(err)
+	}
 	s.recordRoleEvent(ctx, EventRoleUpdated, "Role updated.", role, input.ActorUserID)
 	return role, nil
 }
@@ -242,13 +316,29 @@ func (s *Service) DeleteRole(ctx context.Context, actorUserID string, id string)
 		return ErrRoleInUse
 	}
 
-	if err := s.store.DeleteRole(ctx, roleID); err != nil {
+	mapErr := func(err error) error {
 		if errors.Is(err, domain.ErrRoleInUse) {
 			return ErrRoleInUse
 		}
 		return err
 	}
 
+	if s.unitOfWork != nil {
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			if err := deps.Roles.DeleteRole(ctx, roleID); err != nil {
+				return err
+			}
+			return deps.Audit.RecordRoleEvent(ctx, buildRoleEvent(ctx, EventRoleDeleted, "Role deleted.", existing, actorUserID))
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		return nil
+	}
+
+	if err := s.store.DeleteRole(ctx, roleID); err != nil {
+		return mapErr(err)
+	}
 	s.recordRoleEvent(ctx, EventRoleDeleted, "Role deleted.", existing, actorUserID)
 	return nil
 }

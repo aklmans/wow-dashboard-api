@@ -208,15 +208,79 @@ func TestServiceDeleteRoleRejectsSystemAndInUse(t *testing.T) {
 	})
 }
 
+// --- Transactional audit (unit of work) ------------------------------------
+
+func TestServiceCreateRoleTransactionalRecordsAuditInSameUnit(t *testing.T) {
+	store := &fakeRoleStore{createResult: domain.Role{ID: uuid.New(), Name: "auditor", Permissions: []string{"system_events:read"}}}
+	audit := &fakeRoleAuditRecorder{}
+	uow := &fakeRoleUnitOfWork{mutator: store, recorder: audit}
+	svc := service.NewService(&fakeRoleStore{}, service.WithUnitOfWork(uow))
+
+	if _, err := svc.CreateRole(context.Background(), service.CreateRoleInput{
+		ActorUserID: uuid.New().String(),
+		Name:        "auditor",
+		Permissions: []string{"system_events:read"},
+	}); err != nil {
+		t.Fatalf("CreateRole returned error: %v", err)
+	}
+	if !uow.committed {
+		t.Fatal("unit of work did not commit")
+	}
+	if !store.createCalled {
+		t.Fatal("mutation did not run inside the unit of work")
+	}
+	if len(audit.events) != 1 || audit.events[0].EventType != service.EventRoleCreated {
+		t.Fatalf("audit = %#v, want one roles.role.created in the same unit", audit.events)
+	}
+}
+
+func TestServiceCreateRoleTransactionalAuditFailureRollsBack(t *testing.T) {
+	store := &fakeRoleStore{createResult: domain.Role{ID: uuid.New(), Name: "auditor"}}
+	audit := &fakeRoleAuditRecorder{err: errors.New("audit insert failed")}
+	uow := &fakeRoleUnitOfWork{mutator: store, recorder: audit}
+	svc := service.NewService(&fakeRoleStore{}, service.WithUnitOfWork(uow))
+
+	if _, err := svc.CreateRole(context.Background(), service.CreateRoleInput{
+		ActorUserID: uuid.New().String(),
+		Name:        "auditor",
+		Permissions: []string{"system_events:read"},
+	}); err == nil {
+		t.Fatal("CreateRole should fail when the audit write fails in the unit of work")
+	}
+	if !store.createCalled {
+		t.Fatal("mutation should have been attempted inside the unit of work")
+	}
+	if uow.committed {
+		t.Fatal("unit of work must not commit when the audit write fails")
+	}
+}
+
 // --- fakes ------------------------------------------------------------------
+
+// fakeRoleUnitOfWork runs the work function with the configured mutator and
+// recorder, committing only when the function returns nil.
+type fakeRoleUnitOfWork struct {
+	mutator   service.RoleMutator
+	recorder  service.AuditRecorder
+	committed bool
+}
+
+func (f *fakeRoleUnitOfWork) Do(ctx context.Context, fn func(context.Context, service.WorkDeps) error) error {
+	if err := fn(ctx, service.WorkDeps{Roles: f.mutator, Audit: f.recorder}); err != nil {
+		return err
+	}
+	f.committed = true
+	return nil
+}
 
 type fakeRoleAuditRecorder struct {
 	events []service.AuditEvent
+	err    error
 }
 
 func (f *fakeRoleAuditRecorder) RecordRoleEvent(ctx context.Context, event service.AuditEvent) error {
 	f.events = append(f.events, event)
-	return nil
+	return f.err
 }
 
 type fakeRoleStore struct {

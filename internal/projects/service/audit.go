@@ -69,6 +69,18 @@ func (s *Service) recordAudit(ctx context.Context, event AuditEvent) {
 	}
 }
 
+// recordProjectEventTx records an event on the given transaction-scoped
+// recorder, stamping the request id, and returns the error so a unit of work
+// rolls back when the audit write fails. It is the transactional counterpart of
+// recordAudit (which is best-effort and only logs).
+func recordProjectEventTx(ctx context.Context, recorder AuditRecorder, eventType string, message string, metadata AuditMetadata) error {
+	return recorder.RecordProjectEvent(ctx, AuditEvent{
+		EventType: eventType,
+		Message:   message,
+		Metadata:  withAuditRequestID(ctx, metadata),
+	})
+}
+
 func (s *Service) recordProjectCreated(ctx context.Context, metadata AuditMetadata) {
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventProjectCreated,

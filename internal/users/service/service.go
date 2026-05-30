@@ -43,6 +43,26 @@ type UserStore interface {
 	UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error)
 }
 
+// UserMutator is the transactional subset of user store operations a unit of
+// work exposes. It runs on the unit of work's transaction, not the pool.
+type UserMutator interface {
+	UpdateUser(ctx context.Context, input domain.UpdateUserInput) (domain.User, error)
+}
+
+// WorkDeps contains transaction-scoped dependencies for a unit of work. The
+// mutator and the audit recorder share one transaction, so a mutation and its
+// audit event commit or roll back together.
+type WorkDeps struct {
+	Users UserMutator
+	Audit AuditRecorder
+}
+
+// UnitOfWork runs fn inside a single database transaction. When configured, it
+// makes user mutations and their audit events atomic.
+type UnitOfWork interface {
+	Do(ctx context.Context, fn func(context.Context, WorkDeps) error) error
+}
+
 // UpdateUserInput is the raw admin update input the handler passes to the
 // service. Status and RoleIDs are pointers so an omitted field stays
 // unchanged; at least one must be provided. RoleIDs, when provided, replaces
@@ -63,6 +83,7 @@ type UpdateUserInput struct {
 type Service struct {
 	store         UserStore
 	auditRecorder AuditRecorder
+	unitOfWork    UnitOfWork
 	now           func() time.Time
 }
 
@@ -74,6 +95,18 @@ func WithClock(now func() time.Time) Option {
 	return func(s *Service) {
 		if now != nil {
 			s.now = now
+		}
+	}
+}
+
+// WithUnitOfWork configures transactional user mutations. When set, UpdateUser
+// records its audit event in the same transaction as the mutation, so the two
+// commit or roll back together. Without it, the service falls back to a
+// best-effort audit write after the mutation commits.
+func WithUnitOfWork(uow UnitOfWork) Option {
+	return func(s *Service) {
+		if uow != nil {
+			s.unitOfWork = uow
 		}
 	}
 }
@@ -190,25 +223,54 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		}
 	}
 
-	user, err := s.store.UpdateUser(ctx, update)
-	if err != nil {
-		if errors.Is(err, domain.ErrUserNotFound) {
-			return domain.User{}, ErrNotFound
+	metadata := func(user domain.User) AuditMetadata {
+		return AuditMetadata{
+			TargetUserID:  targetID.String(),
+			ActorUserID:   actorID.String(),
+			ChangedFields: changedFields,
+			Status:        string(user.Status),
+			RoleIDs:       auditRoleIDs,
 		}
-		if errors.Is(err, domain.ErrRoleNotFound) {
-			return domain.User{}, fmt.Errorf("%w: one or more role ids do not exist", ErrInvalidInput)
-		}
-		return domain.User{}, err
 	}
 
-	s.recordUserUpdated(ctx, AuditMetadata{
-		TargetUserID:  targetID.String(),
-		ActorUserID:   actorID.String(),
-		ChangedFields: changedFields,
-		Status:        string(user.Status),
-		RoleIDs:       auditRoleIDs,
-	})
+	// Transactional path: the mutation and its audit event share one
+	// transaction, so a failed audit write rolls back the update.
+	if s.unitOfWork != nil {
+		var result domain.User
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			user, err := deps.Users.UpdateUser(ctx, update)
+			if err != nil {
+				return err
+			}
+			result = user
+			return deps.Audit.RecordUserEvent(ctx, buildUserUpdatedEvent(ctx, metadata(user)))
+		})
+		if err != nil {
+			return domain.User{}, mapUpdateUserError(err)
+		}
+		return result, nil
+	}
+
+	// Fallback path: the mutation commits in the store, then the audit event is
+	// recorded best-effort (a failure is logged but does not fail the update).
+	user, err := s.store.UpdateUser(ctx, update)
+	if err != nil {
+		return domain.User{}, mapUpdateUserError(err)
+	}
+	s.recordUserUpdated(ctx, metadata(user))
 	return user, nil
+}
+
+// mapUpdateUserError translates store/domain errors into the service's
+// client-facing sentinel errors.
+func mapUpdateUserError(err error) error {
+	if errors.Is(err, domain.ErrUserNotFound) {
+		return ErrNotFound
+	}
+	if errors.Is(err, domain.ErrRoleNotFound) {
+		return fmt.Errorf("%w: one or more role ids do not exist", ErrInvalidInput)
+	}
+	return err
 }
 
 func actorCanGrantSystemAdmin(roles []string, permissions []string) bool {
