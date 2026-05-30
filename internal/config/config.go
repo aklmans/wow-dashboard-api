@@ -35,6 +35,14 @@ type Config struct {
 	IdleTimeoutSeconds         int `env:"IDLE_TIMEOUT_SECONDS" envDefault:"60"`
 	HTTPShutdownTimeoutSeconds int `env:"HTTP_SHUTDOWN_TIMEOUT_SECONDS" envDefault:"10"`
 
+	// RequestBodyMaxBytes caps the request body accepted at the transport edge
+	// (before routing) for every route, returning 413 when exceeded. It is a
+	// coarse backstop in front of Huma, which additionally caps each operation's
+	// parsed body at 1 MiB by default; the default here matches that so the two
+	// layers agree. Lower it to tighten the global ceiling. 0 disables the edge
+	// check (Huma's per-operation cap still applies).
+	RequestBodyMaxBytes int64 `env:"REQUEST_BODY_MAX_BYTES" envDefault:"1048576"`
+
 	// CORS allowed origins, comma-separated.
 	CORS []string `env:"CORS_ALLOWED_ORIGINS" envSeparator:"," envDefault:"http://localhost:3000,http://localhost:5173,http://localhost:8082,http://localhost:8083,http://localhost:8084,http://localhost:8085"`
 
@@ -45,6 +53,14 @@ type Config struct {
 	DBMaxConnLifetimeSeconds int    `env:"DB_MAX_CONN_LIFETIME_SECONDS" envDefault:"1800"`
 	DBMaxConnIdleTimeSeconds int    `env:"DB_MAX_CONN_IDLE_TIME_SECONDS" envDefault:"300"`
 	DBHealthTimeoutSeconds   int    `env:"DB_HEALTH_TIMEOUT_SECONDS" envDefault:"3"`
+
+	// DBStatementTimeoutSeconds bounds how long any single SQL statement may run
+	// before PostgreSQL aborts it (applied as the per-connection statement_timeout
+	// runtime parameter). It stops a slow or stuck query from pinning a pooled
+	// connection indefinitely. DBHealthCheckPeriodSeconds is how often the pool
+	// probes idle connections to prune dead ones and top up to MinConns.
+	DBStatementTimeoutSeconds  int `env:"DB_STATEMENT_TIMEOUT_SECONDS" envDefault:"30"`
+	DBHealthCheckPeriodSeconds int `env:"DB_HEALTH_CHECK_PERIOD_SECONDS" envDefault:"30"`
 
 	// Auth rate limiting configuration.
 	AuthRateLimitEnabled       bool `env:"AUTH_RATE_LIMIT_ENABLED" envDefault:"true"`
@@ -290,6 +306,16 @@ func (c *Config) DBHealthTimeout() time.Duration {
 	return time.Duration(c.DBHealthTimeoutSeconds) * time.Second
 }
 
+// DBStatementTimeout returns the per-statement timeout as a time.Duration.
+func (c *Config) DBStatementTimeout() time.Duration {
+	return time.Duration(c.DBStatementTimeoutSeconds) * time.Second
+}
+
+// DBHealthCheckPeriod returns the pool's idle-connection health-check interval.
+func (c *Config) DBHealthCheckPeriod() time.Duration {
+	return time.Duration(c.DBHealthCheckPeriodSeconds) * time.Second
+}
+
 // AuthRateLimitWindow returns the auth rate limit window as a time.Duration.
 func (c *Config) AuthRateLimitWindow() time.Duration {
 	return time.Duration(c.AuthRateLimitWindowSeconds) * time.Second
@@ -385,6 +411,9 @@ func Load() (*Config, error) {
 	if cfg.HTTPShutdownTimeoutSeconds <= 0 {
 		return nil, fmt.Errorf("HTTP_SHUTDOWN_TIMEOUT_SECONDS must be greater than 0")
 	}
+	if cfg.RequestBodyMaxBytes < 0 {
+		return nil, fmt.Errorf("REQUEST_BODY_MAX_BYTES must be greater than or equal to 0")
+	}
 	if cfg.DBMaxConnLifetimeSeconds <= 0 {
 		return nil, fmt.Errorf("DB_MAX_CONN_LIFETIME_SECONDS must be greater than 0")
 	}
@@ -393,6 +422,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.DBHealthTimeoutSeconds <= 0 {
 		return nil, fmt.Errorf("DB_HEALTH_TIMEOUT_SECONDS must be greater than 0")
+	}
+	if cfg.DBStatementTimeoutSeconds <= 0 {
+		return nil, fmt.Errorf("DB_STATEMENT_TIMEOUT_SECONDS must be greater than 0")
+	}
+	if cfg.DBHealthCheckPeriodSeconds <= 0 {
+		return nil, fmt.Errorf("DB_HEALTH_CHECK_PERIOD_SECONDS must be greater than 0")
 	}
 	if cfg.AuthRateLimitWindowSeconds <= 0 {
 		return nil, fmt.Errorf("AUTH_RATE_LIMIT_WINDOW_SECONDS must be greater than 0")

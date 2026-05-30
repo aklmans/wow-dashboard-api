@@ -46,12 +46,14 @@ func TestPostgresPoolIntegration(t *testing.T) {
 
 	// Create config with connection URL and pool settings
 	cfg := &config.Config{
-		DatabaseURL:              connStr,
-		DBMaxConns:               5,
-		DBMinConns:               1,
-		DBMaxConnLifetimeSeconds: 1800,
-		DBMaxConnIdleTimeSeconds: 300,
-		DBHealthTimeoutSeconds:   5,
+		DatabaseURL:                connStr,
+		DBMaxConns:                 5,
+		DBMinConns:                 1,
+		DBMaxConnLifetimeSeconds:   1800,
+		DBMaxConnIdleTimeSeconds:   300,
+		DBHealthTimeoutSeconds:     5,
+		DBStatementTimeoutSeconds:  7,
+		DBHealthCheckPeriodSeconds: 30,
 	}
 
 	pool, err := store.NewPool(ctx, cfg)
@@ -69,6 +71,17 @@ func TestPostgresPoolIntegration(t *testing.T) {
 
 	if version == "" {
 		t.Error("expected version to be non-empty")
+	}
+
+	// The configured statement_timeout must have been applied as a startup
+	// runtime parameter on every pooled connection. PostgreSQL normalizes
+	// 7000ms to "7s".
+	var statementTimeout string
+	if err := pool.QueryRow(ctx, "SHOW statement_timeout").Scan(&statementTimeout); err != nil {
+		t.Fatalf("failed to read statement_timeout: %v", err)
+	}
+	if statementTimeout != "7s" {
+		t.Errorf("statement_timeout = %q, want %q", statementTimeout, "7s")
 	}
 
 	t.Logf("Successfully connected to Postgres container. Version: %s", version)

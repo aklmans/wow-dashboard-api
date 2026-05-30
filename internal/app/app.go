@@ -128,6 +128,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Apply our Custom CORS Middleware
 	router.Use(httpmiddleware.CORS(cfg.CORS))
 
+	// Reject oversized request bodies at the edge (after CORS so the 413 still
+	// carries CORS headers the browser can read). A coarse backstop in front of
+	// Huma's per-operation body cap.
+	router.Use(httpmiddleware.RequestBodyLimit(cfg.RequestBodyMaxBytes))
+
 	// Baseline security response headers; HSTS only in production (HTTPS).
 	router.Use(httpmiddleware.SecurityHeaders(cfg.Env == "production"))
 

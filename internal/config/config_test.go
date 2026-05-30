@@ -20,6 +20,7 @@ var configEnvKeys = []string{
 	"IDLE_TIMEOUT_SECONDS",
 	"HTTP_SHUTDOWN_TIMEOUT_SECONDS",
 	"SHUTDOWN_TIMEOUT_SECONDS",
+	"REQUEST_BODY_MAX_BYTES",
 	"CORS_ALLOWED_ORIGINS",
 	"DATABASE_URL",
 	"DB_MAX_CONNS",
@@ -27,6 +28,8 @@ var configEnvKeys = []string{
 	"DB_MAX_CONN_LIFETIME_SECONDS",
 	"DB_MAX_CONN_IDLE_TIME_SECONDS",
 	"DB_HEALTH_TIMEOUT_SECONDS",
+	"DB_STATEMENT_TIMEOUT_SECONDS",
+	"DB_HEALTH_CHECK_PERIOD_SECONDS",
 	"AUTH_RATE_LIMIT_ENABLED",
 	"AUTH_RATE_LIMIT_REQUESTS",
 	"AUTH_RATE_LIMIT_WINDOW_SECONDS",
@@ -113,6 +116,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.HTTPShutdownTimeoutSeconds != 10 {
 		t.Errorf("HTTPShutdownTimeoutSeconds = %d, want %d", cfg.HTTPShutdownTimeoutSeconds, 10)
 	}
+	if cfg.RequestBodyMaxBytes != 1048576 {
+		t.Errorf("RequestBodyMaxBytes = %d, want %d", cfg.RequestBodyMaxBytes, 1048576)
+	}
 	wantCORS := []string{
 		"http://localhost:3000",
 		"http://localhost:5173",
@@ -146,6 +152,12 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.DBHealthTimeoutSeconds != 3 {
 		t.Errorf("DBHealthTimeoutSeconds = %d, want 3", cfg.DBHealthTimeoutSeconds)
+	}
+	if cfg.DBStatementTimeoutSeconds != 30 {
+		t.Errorf("DBStatementTimeoutSeconds = %d, want 30", cfg.DBStatementTimeoutSeconds)
+	}
+	if cfg.DBHealthCheckPeriodSeconds != 30 {
+		t.Errorf("DBHealthCheckPeriodSeconds = %d, want 30", cfg.DBHealthCheckPeriodSeconds)
 	}
 	if !cfg.AuthRateLimitEnabled {
 		t.Error("AuthRateLimitEnabled = false, want true")
@@ -583,6 +595,8 @@ func TestConfig_DurationHelpers(t *testing.T) {
 		DBMaxConnLifetimeSeconds:   1800,
 		DBMaxConnIdleTimeSeconds:   300,
 		DBHealthTimeoutSeconds:     3,
+		DBStatementTimeoutSeconds:  30,
+		DBHealthCheckPeriodSeconds: 45,
 		AuthRateLimitWindowSeconds: 60,
 		JWTAccessTokenTTLSeconds:   900,
 		RefreshTokenTTLSeconds:     1209600,
@@ -601,6 +615,8 @@ func TestConfig_DurationHelpers(t *testing.T) {
 		{"DBMaxConnLifetime", cfg.DBMaxConnLifetime(), 1800 * time.Second},
 		{"DBMaxConnIdleTime", cfg.DBMaxConnIdleTime(), 300 * time.Second},
 		{"DBHealthTimeout", cfg.DBHealthTimeout(), 3 * time.Second},
+		{"DBStatementTimeout", cfg.DBStatementTimeout(), 30 * time.Second},
+		{"DBHealthCheckPeriod", cfg.DBHealthCheckPeriod(), 45 * time.Second},
 		{"AuthRateLimitWindow", cfg.AuthRateLimitWindow(), time.Minute},
 		{"JWTAccessTokenTTL", cfg.JWTAccessTokenTTL(), 900 * time.Second},
 		{"RefreshTokenTTL", cfg.RefreshTokenTTL(), 1209600 * time.Second},
@@ -1189,6 +1205,8 @@ func TestLoad_TimeoutValidation(t *testing.T) {
 		"DB_MAX_CONN_LIFETIME_SECONDS",
 		"DB_MAX_CONN_IDLE_TIME_SECONDS",
 		"DB_HEALTH_TIMEOUT_SECONDS",
+		"DB_STATEMENT_TIMEOUT_SECONDS",
+		"DB_HEALTH_CHECK_PERIOD_SECONDS",
 		"AUTH_RATE_LIMIT_WINDOW_SECONDS",
 		"REFRESH_TOKEN_TTL_SECONDS",
 		"SYSTEM_EVENTS_RETENTION_DAYS",
@@ -1215,6 +1233,43 @@ func TestLoad_TimeoutValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoad_RequestBodyMaxBytesValidation(t *testing.T) {
+	t.Run("negative rejected", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("REQUEST_BODY_MAX_BYTES", "-1")
+
+		if _, err := Load(); err == nil {
+			t.Error("Load() should return error when REQUEST_BODY_MAX_BYTES is negative, got nil")
+		}
+	})
+
+	t.Run("zero allowed (disables the edge check)", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("REQUEST_BODY_MAX_BYTES", "0")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned unexpected error for REQUEST_BODY_MAX_BYTES=0: %v", err)
+		}
+		if cfg.RequestBodyMaxBytes != 0 {
+			t.Errorf("RequestBodyMaxBytes = %d, want 0", cfg.RequestBodyMaxBytes)
+		}
+	})
+
+	t.Run("override honored", func(t *testing.T) {
+		clearConfigEnv(t)
+		t.Setenv("REQUEST_BODY_MAX_BYTES", "2097152")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned unexpected error: %v", err)
+		}
+		if cfg.RequestBodyMaxBytes != 2097152 {
+			t.Errorf("RequestBodyMaxBytes = %d, want 2097152", cfg.RequestBodyMaxBytes)
+		}
+	})
 }
 
 func TestLoad_ProductionDATABASE_URL(t *testing.T) {

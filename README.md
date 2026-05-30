@@ -66,6 +66,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `WRITE_TIMEOUT_SECONDS` | `15` | HTTP server write timeout |
 | `IDLE_TIMEOUT_SECONDS` | `60` | HTTP server idle timeout |
 | `HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown deadline for draining in-flight HTTP requests |
+| `REQUEST_BODY_MAX_BYTES` | `1048576` | Max request body accepted at the transport edge for every route (413 when exceeded); must be >= 0, `0` disables the edge check. Default 1 MiB matches Huma's per-operation body cap |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173,http://localhost:8082,http://localhost:8083,http://localhost:8084,http://localhost:8085` | Comma-separated allowed origins |
 | `DATABASE_URL` | `postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable` | PostgreSQL database connection URL for local Compose (masks credentials in errors/logs) |
 | `DB_MAX_CONNS` | `10` | Maximum number of open connections in the pool |
@@ -73,6 +74,8 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `DB_MAX_CONN_LIFETIME_SECONDS` | `1800` | Maximum amount of time a connection may be reused |
 | `DB_MAX_CONN_IDLE_TIME_SECONDS` | `300` | Maximum amount of time a connection may be idle |
 | `DB_HEALTH_TIMEOUT_SECONDS` | `3` | Timeout for pinging the database health |
+| `DB_STATEMENT_TIMEOUT_SECONDS` | `30` | Per-statement `statement_timeout` applied to every pooled connection so a stuck query cannot pin a connection forever; must be > 0 |
+| `DB_HEALTH_CHECK_PERIOD_SECONDS` | `30` | How often the pool probes idle connections to prune dead ones and top up to `DB_MIN_CONNS`; must be > 0 |
 | `AUTH_RATE_LIMIT_ENABLED` | `true` | Enable per-IP application rate limiting for auth sign-in/sign-up |
 | `AUTH_RATE_LIMIT_REQUESTS` | `10` | Sustained auth requests allowed per window per IP |
 | `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `60` | Auth rate limit window in seconds |
