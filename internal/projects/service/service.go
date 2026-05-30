@@ -79,11 +79,37 @@ type ProjectStore interface {
 	FindUserByEmail(ctx context.Context, email string) (uuid.UUID, error)
 }
 
+// ProjectMutator is the transactional subset of project store operations a
+// unit of work exposes. It runs on the unit of work's transaction, not the pool.
+type ProjectMutator interface {
+	CreateProject(ctx context.Context, input domain.CreateProjectInput) (domain.Project, error)
+	UpdateProject(ctx context.Context, input domain.UpdateProjectInput) (domain.Project, error)
+	ArchiveProject(ctx context.Context, ownerUserID uuid.UUID, id uuid.UUID, updatedAt time.Time) (domain.Project, error)
+	AddProjectMember(ctx context.Context, input domain.AddProjectMemberInput) (domain.ProjectMember, error)
+	UpdateProjectMemberRole(ctx context.Context, input domain.UpdateProjectMemberRoleInput) (domain.ProjectMember, error)
+	RemoveProjectMember(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) error
+}
+
+// WorkDeps contains transaction-scoped dependencies for a unit of work. The
+// mutator and the audit recorder share one transaction, so a mutation and its
+// audit event commit or roll back together.
+type WorkDeps struct {
+	Projects ProjectMutator
+	Audit    AuditRecorder
+}
+
+// UnitOfWork runs fn inside a single database transaction. When configured, it
+// makes project mutations and their audit events atomic.
+type UnitOfWork interface {
+	Do(ctx context.Context, fn func(context.Context, WorkDeps) error) error
+}
+
 // Service orchestrates the project use cases.
 type Service struct {
 	store         ProjectStore
 	now           func() time.Time
 	auditRecorder AuditRecorder
+	unitOfWork    UnitOfWork
 }
 
 // Option configures Service dependencies.
@@ -94,6 +120,18 @@ func WithClock(now func() time.Time) Option {
 	return func(s *Service) {
 		if now != nil {
 			s.now = now
+		}
+	}
+}
+
+// WithUnitOfWork configures transactional project mutations. When set, each
+// mutation records its audit event in the same transaction as the mutation, so
+// the two commit or roll back together. Without it, the service falls back to a
+// best-effort audit write after the mutation commits.
+func WithUnitOfWork(uow UnitOfWork) Option {
+	return func(s *Service) {
+		if uow != nil {
+			s.unitOfWork = uow
 		}
 	}
 }
@@ -213,7 +251,7 @@ func (s *Service) CreateProject(ctx context.Context, input CreateProjectInput) (
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
-	project, err := s.store.CreateProject(ctx, domain.CreateProjectInput{
+	createInput := domain.CreateProjectInput{
 		ID:          uuid.New(),
 		Name:        name,
 		Description: description,
@@ -221,19 +259,42 @@ func (s *Service) CreateProject(ctx context.Context, input CreateProjectInput) (
 		OwnerUserID: ownerID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-	})
-	if err != nil {
+	}
+	mapErr := func(err error) error {
 		if errors.Is(err, domain.ErrProjectNameAlreadyExists) {
-			return domain.Project{}, ErrNameConflict
+			return ErrNameConflict
 		}
-		return domain.Project{}, err
+		return err
+	}
+	auditMeta := func(project domain.Project) AuditMetadata {
+		return AuditMetadata{
+			ProjectID:   project.ID.String(),
+			OwnerUserID: project.OwnerUserID.String(),
+			Status:      string(project.Status),
+		}
 	}
 
-	s.recordProjectCreated(ctx, AuditMetadata{
-		ProjectID:   project.ID.String(),
-		OwnerUserID: project.OwnerUserID.String(),
-		Status:      string(project.Status),
-	})
+	if s.unitOfWork != nil {
+		var result domain.Project
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			project, err := deps.Projects.CreateProject(ctx, createInput)
+			if err != nil {
+				return err
+			}
+			result = project
+			return recordProjectEventTx(ctx, deps.Audit, EventProjectCreated, "Project created.", auditMeta(project))
+		})
+		if err != nil {
+			return domain.Project{}, mapErr(err)
+		}
+		return result, nil
+	}
+
+	project, err := s.store.CreateProject(ctx, createInput)
+	if err != nil {
+		return domain.Project{}, mapErr(err)
+	}
+	s.recordProjectCreated(ctx, auditMeta(project))
 	return project, nil
 }
 
@@ -306,23 +367,45 @@ func (s *Service) UpdateProject(ctx context.Context, input UpdateProjectInput) (
 		changedFields = append(changedFields, "status")
 	}
 
-	project, err := s.store.UpdateProject(ctx, update)
-	if err != nil {
+	mapErr := func(err error) error {
 		if errors.Is(err, domain.ErrProjectNameAlreadyExists) {
-			return domain.Project{}, ErrNameConflict
+			return ErrNameConflict
 		}
 		if errors.Is(err, domain.ErrProjectNotFound) {
-			return domain.Project{}, ErrNotFound
+			return ErrNotFound
 		}
-		return domain.Project{}, err
+		return err
+	}
+	auditMeta := func(project domain.Project) AuditMetadata {
+		return AuditMetadata{
+			ProjectID:     project.ID.String(),
+			OwnerUserID:   project.OwnerUserID.String(),
+			Status:        string(project.Status),
+			ChangedFields: changedFields,
+		}
 	}
 
-	s.recordProjectUpdated(ctx, AuditMetadata{
-		ProjectID:     project.ID.String(),
-		OwnerUserID:   project.OwnerUserID.String(),
-		Status:        string(project.Status),
-		ChangedFields: changedFields,
-	})
+	if s.unitOfWork != nil {
+		var result domain.Project
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			project, err := deps.Projects.UpdateProject(ctx, update)
+			if err != nil {
+				return err
+			}
+			result = project
+			return recordProjectEventTx(ctx, deps.Audit, EventProjectUpdated, "Project updated.", auditMeta(project))
+		})
+		if err != nil {
+			return domain.Project{}, mapErr(err)
+		}
+		return result, nil
+	}
+
+	project, err := s.store.UpdateProject(ctx, update)
+	if err != nil {
+		return domain.Project{}, mapErr(err)
+	}
+	s.recordProjectUpdated(ctx, auditMeta(project))
 	return project, nil
 }
 
@@ -354,19 +437,41 @@ func (s *Service) ArchiveProject(ctx context.Context, userID string, id string) 
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
-	project, err := s.store.ArchiveProject(ctx, parsedUser, parsedID, now)
-	if err != nil {
+	mapErr := func(err error) error {
 		if errors.Is(err, domain.ErrProjectNotFound) {
-			return domain.Project{}, ErrNotFound
+			return ErrNotFound
 		}
-		return domain.Project{}, err
+		return err
+	}
+	auditMeta := func(project domain.Project) AuditMetadata {
+		return AuditMetadata{
+			ProjectID:   project.ID.String(),
+			OwnerUserID: project.OwnerUserID.String(),
+			Status:      string(project.Status),
+		}
 	}
 
-	s.recordProjectArchived(ctx, AuditMetadata{
-		ProjectID:   project.ID.String(),
-		OwnerUserID: project.OwnerUserID.String(),
-		Status:      string(project.Status),
-	})
+	if s.unitOfWork != nil {
+		var result domain.Project
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			project, err := deps.Projects.ArchiveProject(ctx, parsedUser, parsedID, now)
+			if err != nil {
+				return err
+			}
+			result = project
+			return recordProjectEventTx(ctx, deps.Audit, EventProjectArchived, "Project archived.", auditMeta(project))
+		})
+		if err != nil {
+			return domain.Project{}, mapErr(err)
+		}
+		return result, nil
+	}
+
+	project, err := s.store.ArchiveProject(ctx, parsedUser, parsedID, now)
+	if err != nil {
+		return domain.Project{}, mapErr(err)
+	}
+	s.recordProjectArchived(ctx, auditMeta(project))
 	return project, nil
 }
 

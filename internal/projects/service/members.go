@@ -83,26 +83,47 @@ func (s *Service) AddMember(ctx context.Context, input AddMemberInput) (domain.P
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
-	member, err := s.store.AddProjectMember(ctx, domain.AddProjectMemberInput{
+	addInput := domain.AddProjectMemberInput{
 		ProjectID: access.Project.ID,
 		UserID:    targetID,
 		Role:      role,
 		CreatedAt: now,
 		UpdatedAt: now,
-	})
-	if err != nil {
-		if errors.Is(err, domain.ErrMemberAlreadyExists) {
-			return domain.ProjectMember{}, ErrMemberConflict
-		}
-		return domain.ProjectMember{}, err
 	}
-
-	s.recordMemberAdded(ctx, AuditMetadata{
+	mapErr := func(err error) error {
+		if errors.Is(err, domain.ErrMemberAlreadyExists) {
+			return ErrMemberConflict
+		}
+		return err
+	}
+	auditMeta := AuditMetadata{
 		ProjectID:    access.Project.ID.String(),
 		OwnerUserID:  access.Project.OwnerUserID.String(),
 		TargetUserID: targetID.String(),
 		Role:         string(role),
-	})
+	}
+
+	if s.unitOfWork != nil {
+		var result domain.ProjectMember
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			member, err := deps.Projects.AddProjectMember(ctx, addInput)
+			if err != nil {
+				return err
+			}
+			result = member
+			return recordProjectEventTx(ctx, deps.Audit, EventMemberAdded, "Project member added.", auditMeta)
+		})
+		if err != nil {
+			return domain.ProjectMember{}, mapErr(err)
+		}
+		return result, nil
+	}
+
+	member, err := s.store.AddProjectMember(ctx, addInput)
+	if err != nil {
+		return domain.ProjectMember{}, mapErr(err)
+	}
+	s.recordMemberAdded(ctx, auditMeta)
 	return member, nil
 }
 
@@ -128,25 +149,46 @@ func (s *Service) UpdateMemberRole(ctx context.Context, input UpdateMemberRoleIn
 		return domain.ProjectMember{}, err
 	}
 
-	member, err := s.store.UpdateProjectMemberRole(ctx, domain.UpdateProjectMemberRoleInput{
+	updateInput := domain.UpdateProjectMemberRoleInput{
 		ProjectID: access.Project.ID,
 		UserID:    targetID,
 		Role:      role,
 		UpdatedAt: s.now().UTC().Truncate(time.Microsecond),
-	})
-	if err != nil {
-		if errors.Is(err, domain.ErrProjectMemberNotFound) {
-			return domain.ProjectMember{}, ErrNotFound
-		}
-		return domain.ProjectMember{}, err
 	}
-
-	s.recordMemberRoleChanged(ctx, AuditMetadata{
+	mapErr := func(err error) error {
+		if errors.Is(err, domain.ErrProjectMemberNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	auditMeta := AuditMetadata{
 		ProjectID:    access.Project.ID.String(),
 		OwnerUserID:  access.Project.OwnerUserID.String(),
 		TargetUserID: targetID.String(),
 		Role:         string(role),
-	})
+	}
+
+	if s.unitOfWork != nil {
+		var result domain.ProjectMember
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			member, err := deps.Projects.UpdateProjectMemberRole(ctx, updateInput)
+			if err != nil {
+				return err
+			}
+			result = member
+			return recordProjectEventTx(ctx, deps.Audit, EventMemberRoleChanged, "Project member role changed.", auditMeta)
+		})
+		if err != nil {
+			return domain.ProjectMember{}, mapErr(err)
+		}
+		return result, nil
+	}
+
+	member, err := s.store.UpdateProjectMemberRole(ctx, updateInput)
+	if err != nil {
+		return domain.ProjectMember{}, mapErr(err)
+	}
+	s.recordMemberRoleChanged(ctx, auditMeta)
 	return member, nil
 }
 
@@ -167,18 +209,35 @@ func (s *Service) RemoveMember(ctx context.Context, requestingUserID string, pro
 		return err
 	}
 
-	if err := s.store.RemoveProjectMember(ctx, access.Project.ID, targetID); err != nil {
+	mapErr := func(err error) error {
 		if errors.Is(err, domain.ErrProjectMemberNotFound) {
 			return ErrNotFound
 		}
 		return err
 	}
-
-	s.recordMemberRemoved(ctx, AuditMetadata{
+	auditMeta := AuditMetadata{
 		ProjectID:    access.Project.ID.String(),
 		OwnerUserID:  access.Project.OwnerUserID.String(),
 		TargetUserID: targetID.String(),
-	})
+	}
+
+	if s.unitOfWork != nil {
+		err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			if err := deps.Projects.RemoveProjectMember(ctx, access.Project.ID, targetID); err != nil {
+				return err
+			}
+			return recordProjectEventTx(ctx, deps.Audit, EventMemberRemoved, "Project member removed.", auditMeta)
+		})
+		if err != nil {
+			return mapErr(err)
+		}
+		return nil
+	}
+
+	if err := s.store.RemoveProjectMember(ctx, access.Project.ID, targetID); err != nil {
+		return mapErr(err)
+	}
+	s.recordMemberRemoved(ctx, auditMeta)
 	return nil
 }
 

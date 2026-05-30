@@ -210,7 +210,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		rolesservice.WithAuditRecorder(rolesrepo.NewSystemEventRecorder(queries)),
 		rolesservice.WithUnitOfWork(rolesrepo.NewUnitOfWork(pool)))
 	projectsSvc := projectservice.NewService(projectsrepo.NewProjectStore(queries),
-		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)))
+		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)),
+		projectservice.WithUnitOfWork(projectsrepo.NewUnitOfWork(pool)))
 	systemEventsSvc := systemeventsservice.NewService(systemeventsrepo.NewEventStore(queries))
 	rateLimitConfig := httpmiddleware.RateLimitConfig{
 		Enabled:  cfg.AuthRateLimitEnabled,

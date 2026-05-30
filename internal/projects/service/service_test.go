@@ -499,7 +499,71 @@ func TestServiceAuditMetadataDoesNotLeakBusinessText(t *testing.T) {
 	}
 }
 
+// --- Transactional audit (unit of work) ------------------------------------
+
+func TestServiceCreateProjectTransactionalRecordsAuditInSameUnit(t *testing.T) {
+	owner := uuid.New()
+	created := domain.Project{ID: uuid.New(), OwnerUserID: owner, Status: domain.ProjectStatusActive}
+	store := &fakeProjectStore{createResult: created}
+	audit := &fakeAuditRecorder{}
+	uow := &fakeProjectUnitOfWork{mutator: store, recorder: audit}
+	svc := service.NewService(&fakeProjectStore{}, service.WithUnitOfWork(uow))
+
+	if _, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
+		OwnerUserID: owner.String(),
+		Name:        "Demo",
+	}); err != nil {
+		t.Fatalf("CreateProject error: %v", err)
+	}
+	if !uow.committed {
+		t.Fatal("unit of work did not commit")
+	}
+	if !store.createCalled {
+		t.Fatal("mutation did not run inside the unit of work")
+	}
+	if len(audit.calls) != 1 || audit.calls[0].EventType != service.EventProjectCreated {
+		t.Fatalf("audit = %#v, want one project.created in the same unit", audit.calls)
+	}
+}
+
+func TestServiceCreateProjectTransactionalAuditFailureRollsBack(t *testing.T) {
+	owner := uuid.New()
+	store := &fakeProjectStore{createResult: domain.Project{ID: uuid.New(), OwnerUserID: owner, Status: domain.ProjectStatusActive}}
+	audit := &fakeAuditRecorder{err: errors.New("audit insert failed")}
+	uow := &fakeProjectUnitOfWork{mutator: store, recorder: audit}
+	svc := service.NewService(&fakeProjectStore{}, service.WithUnitOfWork(uow))
+
+	if _, err := svc.CreateProject(context.Background(), service.CreateProjectInput{
+		OwnerUserID: owner.String(),
+		Name:        "Demo",
+	}); err == nil {
+		t.Fatal("CreateProject should fail when the audit write fails in the unit of work")
+	}
+	if !store.createCalled {
+		t.Fatal("mutation should have been attempted inside the unit of work")
+	}
+	if uow.committed {
+		t.Fatal("unit of work must not commit when the audit write fails")
+	}
+}
+
 // --- fakes ------------------------------------------------------------------
+
+// fakeProjectUnitOfWork runs the work function with the configured mutator and
+// recorder, committing only when the function returns nil.
+type fakeProjectUnitOfWork struct {
+	mutator   service.ProjectMutator
+	recorder  service.AuditRecorder
+	committed bool
+}
+
+func (f *fakeProjectUnitOfWork) Do(ctx context.Context, fn func(context.Context, service.WorkDeps) error) error {
+	if err := fn(ctx, service.WorkDeps{Projects: f.mutator, Audit: f.recorder}); err != nil {
+		return err
+	}
+	f.committed = true
+	return nil
+}
 
 type fakeAuditRecorder struct {
 	calls []service.AuditEvent
