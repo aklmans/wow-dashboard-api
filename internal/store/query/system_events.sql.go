@@ -109,3 +109,64 @@ func (q *Queries) ListSystemEvents(ctx context.Context, limit int32) ([]SystemEv
 	}
 	return items, nil
 }
+
+const listSystemEventsPage = `-- name: ListSystemEventsPage :many
+SELECT id, event_type, message, metadata, created_at
+FROM system_events
+WHERE ($1::text IS NULL OR event_type = $1)
+  AND ($2::timestamptz IS NULL OR created_at >= $2)
+  AND ($3::timestamptz IS NULL OR created_at < $3)
+  AND (
+    $4::timestamptz IS NULL
+    OR created_at < $4
+    OR (created_at = $4 AND id < $5)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $6
+`
+
+type ListSystemEventsPageParams struct {
+	EventType       pgtype.Text
+	CreatedAfter    pgtype.Timestamptz
+	CreatedBefore   pgtype.Timestamptz
+	CursorCreatedAt pgtype.Timestamptz
+	CursorID        pgtype.UUID
+	RowLimit        int32
+}
+
+// Keyset pagination over the audit log, newest first. Optional filters narrow
+// by event type and created_at range; the (cursor_created_at, cursor_id) pair
+// pages strictly past the previous page's last row. Callers fetch one extra row
+// to detect whether a further page exists.
+func (q *Queries) ListSystemEventsPage(ctx context.Context, arg ListSystemEventsPageParams) ([]SystemEvent, error) {
+	rows, err := q.db.Query(ctx, listSystemEventsPage,
+		arg.EventType,
+		arg.CreatedAfter,
+		arg.CreatedBefore,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SystemEvent
+	for rows.Next() {
+		var i SystemEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Message,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

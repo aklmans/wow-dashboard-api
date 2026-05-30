@@ -317,9 +317,9 @@ System audit event read endpoints live under `/api/system-events` and require `A
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/system-events` | Return recent system audit events as `{ "events": [...], "limit": 20 }` |
+| `GET` | `/api/system-events` | List system audit events (newest first) as `{ "events": [...], "limit": 20, "nextCursor": "…" }`; supports keyset pagination and filtering |
 
-`GET /api/system-events` supports `limit` (default `20`, min `1`, max `100`). The endpoint is read-only and only exposes events already written by audit producers such as auth sign-up/sign-in and project create/update/archive flows. The `events` array is non-nullable; an empty result returns `[]`.
+`GET /api/system-events` returns events newest first with **keyset pagination**: pass `limit` (default `20`, min `1`, max `100` — enforced by the OpenAPI contract) and follow `nextCursor` from each response into the next request's `cursor` to page through history (the cursor is opaque and stable under concurrent inserts, unlike offset paging). Optional filters narrow the result: `eventType` (a single stable type) and `after` / `before` (RFC3339 timestamps; `after` inclusive, `before` exclusive). The endpoint is read-only and only exposes events already written by audit producers such as auth sign-up/sign-in and project create/update/archive flows. The `events` array is non-nullable; an empty result returns `[]`, and `nextCursor` is omitted on the last page.
 
 Each event includes `id`, `eventType`, `message`, `metadata`, and `createdAt`. `metadata` is returned as a safe JSON object from audit writers; non-object metadata is converted to an empty object rather than a string or unsafe internal value.
 

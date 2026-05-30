@@ -14,6 +14,24 @@ FROM system_events
 ORDER BY created_at DESC
 LIMIT $1;
 
+-- name: ListSystemEventsPage :many
+-- Keyset pagination over the audit log, newest first. Optional filters narrow
+-- by event type and created_at range; the (cursor_created_at, cursor_id) pair
+-- pages strictly past the previous page's last row. Callers fetch one extra row
+-- to detect whether a further page exists.
+SELECT id, event_type, message, metadata, created_at
+FROM system_events
+WHERE (sqlc.narg('event_type')::text IS NULL OR event_type = sqlc.narg('event_type'))
+  AND (sqlc.narg('created_after')::timestamptz IS NULL OR created_at >= sqlc.narg('created_after'))
+  AND (sqlc.narg('created_before')::timestamptz IS NULL OR created_at < sqlc.narg('created_before'))
+  AND (
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR created_at < sqlc.narg('cursor_created_at')
+    OR (created_at = sqlc.narg('cursor_created_at') AND id < sqlc.narg('cursor_id'))
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg('row_limit');
+
 -- name: DeleteSystemEventsBefore :execrows
 -- Retention purge: drop audit events older than the cutoff.
 DELETE FROM system_events

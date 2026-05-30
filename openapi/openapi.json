@@ -1247,7 +1247,7 @@
             "type": "string"
           },
           "events": {
-            "description": "Recent system audit events",
+            "description": "System audit events, newest first",
             "items": {
               "$ref": "#/components/schemas/SystemEventItem"
             },
@@ -1260,6 +1260,10 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "nextCursor": {
+            "description": "Opaque cursor for the next page; absent when there are no more events",
+            "type": "string"
           }
         },
         "required": [
@@ -3261,18 +3265,69 @@
             }
           },
           {
-            "description": "Maximum number of recent system events to return; defaults to 20 and must not exceed 100",
+            "description": "Maximum number of events to return per page; defaults to 20 and must not exceed 100",
             "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
               "default": 20,
-              "description": "Maximum number of recent system events to return; defaults to 20 and must not exceed 100",
+              "description": "Maximum number of events to return per page; defaults to 20 and must not exceed 100",
               "examples": [
                 20
               ],
               "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "Filter to a single stable event type",
+            "explode": false,
+            "in": "query",
+            "name": "eventType",
+            "schema": {
+              "description": "Filter to a single stable event type",
+              "examples": [
+                "projects.project.created"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only events created at or after this RFC3339 timestamp",
+            "explode": false,
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "description": "Only events created at or after this RFC3339 timestamp",
+              "examples": [
+                "2026-01-01T00:00:00Z"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only events created strictly before this RFC3339 timestamp",
+            "explode": false,
+            "in": "query",
+            "name": "before",
+            "schema": {
+              "description": "Only events created strictly before this RFC3339 timestamp",
+              "examples": [
+                "2026-02-01T00:00:00Z"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque pagination cursor from a previous response's nextCursor; returns the next page of older events",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque pagination cursor from a previous response's nextCursor; returns the next page of older events",
+              "type": "string"
             }
           }
         ],
