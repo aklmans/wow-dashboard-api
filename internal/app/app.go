@@ -159,6 +159,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 
 	queries := query.New(pool)
 
+	// Export database-pool and background-queue gauges on the metrics registry
+	// now that the pool exists, so pool saturation and job backlog are scrapable.
+	metrics.Register(
+		observability.NewPgxPoolCollector(pool),
+		observability.NewRiverQueueCollector(pool, logger),
+	)
+
 	tokenManager, err := token.NewManager(cfg.JWTAccessSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTAccessTokenTTL())
 	if err != nil {
 		return fmt.Errorf("initialize JWT token manager: %w", err)
@@ -236,7 +243,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		SystemEventsService:     systemEventsSvc,
 		RefreshCookie:           refreshCookieConfig(cfg),
 		AccessCookie:            accessCookieConfig(cfg),
-		AuthRateLimitMiddleware: httpmiddleware.AuthRateLimit(authRateLimiter),
+		AuthRateLimitMiddleware: httpmiddleware.AuthRateLimit(authRateLimiter, metrics.RecordAuthRateLimitRejection),
 		ReadyChecker:            handlers.NewDatabaseReadyChecker(pool, cfg.DBHealthTimeout()),
 	})
 

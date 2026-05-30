@@ -124,11 +124,17 @@ func (l *IPRateLimiter) pruneLocked(now time.Time) {
 }
 
 // AuthRateLimit returns a Huma operation middleware for auth-sensitive routes.
-func AuthRateLimit(limiter RateLimiter) func(ctx huma.Context, next func(huma.Context)) {
+// onReject, when non-nil, is invoked once per rejected request — used to feed a
+// Prometheus rejection counter without coupling this package to metrics.
+func AuthRateLimit(limiter RateLimiter, onReject func()) func(ctx huma.Context, next func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
 		if limiter == nil || limiter.Allow(ctx.RemoteAddr()) {
 			next(ctx)
 			return
+		}
+
+		if onReject != nil {
+			onReject()
 		}
 
 		err := apierror.RateLimited(authRateLimitMessage).

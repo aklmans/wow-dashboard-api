@@ -10,7 +10,48 @@ import (
 	"testing"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"go.opentelemetry.io/otel/trace"
 )
+
+func TestRequestLoggerIncludesTraceAndSpanIDsWhenSpanActive(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	traceID := trace.TraceID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}
+	spanID := trace.SpanID{0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8}
+	sc := trace.NewSpanContext(trace.SpanContextConfig{TraceID: traceID, SpanID: spanID, TraceFlags: trace.FlagsSampled})
+
+	handler := RequestLogger(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req = req.WithContext(trace.ContextWithSpanContext(req.Context(), sc))
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(logs.String())), &entry); err != nil {
+		t.Fatalf("request log is not JSON: %v; log=%s", err, logs.String())
+	}
+	assertStringField(t, entry, "trace_id", traceID.String())
+	assertStringField(t, entry, "span_id", spanID.String())
+}
+
+func TestRequestLoggerOmitsTraceIDsWithoutSpan(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	handler := RequestLogger(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/health", nil))
+
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(logs.String())), &entry); err != nil {
+		t.Fatalf("request log is not JSON: %v; log=%s", err, logs.String())
+	}
+	if _, ok := entry["trace_id"]; ok {
+		t.Fatal("trace_id should be omitted when no span is active")
+	}
+}
 
 func TestRequestLoggerRecordsStructuredFieldsAndRedactsSensitiveInput(t *testing.T) {
 	var logs bytes.Buffer

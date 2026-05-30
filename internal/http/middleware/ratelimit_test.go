@@ -123,7 +123,7 @@ func newRateLimitTestHandler(limiter httpmiddleware.RateLimiter) http.Handler {
 		OperationID: "post-limited",
 		Method:      http.MethodPost,
 		Path:        "/limited",
-		Middlewares: huma.Middlewares{httpmiddleware.AuthRateLimit(limiter)},
+		Middlewares: huma.Middlewares{httpmiddleware.AuthRateLimit(limiter, nil)},
 	}, func(context.Context, *struct{}) (*rateLimitTestResponse, error) {
 		resp := &rateLimitTestResponse{}
 		resp.Body.Status = "ok"
@@ -131,6 +131,41 @@ func newRateLimitTestHandler(limiter httpmiddleware.RateLimiter) http.Handler {
 	})
 
 	return router
+}
+
+func TestAuthRateLimitInvokesOnRejectCallback(t *testing.T) {
+	limiter := httpmiddleware.NewIPRateLimiter(httpmiddleware.RateLimitConfig{
+		Enabled:  true,
+		Requests: 1,
+		Window:   time.Minute,
+		Burst:    1,
+	})
+	var rejections int
+	onReject := func() { rejections++ }
+
+	router := chi.NewRouter()
+	router.Use(chimiddleware.RequestID)
+	router.Use(chimiddleware.RealIP)
+	api := humachi.New(router, huma.DefaultConfig("Test API", "1.0.0"))
+	huma.Register(api, huma.Operation{
+		OperationID: "post-limited-cb",
+		Method:      http.MethodPost,
+		Path:        "/limited",
+		Middlewares: huma.Middlewares{httpmiddleware.AuthRateLimit(limiter, onReject)},
+	}, func(context.Context, *struct{}) (*rateLimitTestResponse, error) {
+		resp := &rateLimitTestResponse{}
+		resp.Body.Status = "ok"
+		return resp, nil
+	})
+
+	if rec := postLimited(router, "203.0.113.5"); rec.Code != http.StatusOK {
+		t.Fatalf("first request status = %d, want 200", rec.Code)
+	}
+	assertRateLimited(t, postLimited(router, "203.0.113.5"))
+
+	if rejections != 1 {
+		t.Fatalf("onReject called %d times, want 1 (once per rejected request)", rejections)
+	}
 }
 
 type rateLimitTestResponse struct {

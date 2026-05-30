@@ -67,3 +67,37 @@ groups:
             Goroutine count has stayed above 5000 for 15 minutes — usually a
             sign of leaked workers or a stuck Wait on a channel. Capture a
             pprof goroutine dump before restarting.
+
+  - name: api-resources
+    interval: 30s
+    rules:
+      - alert: ApiDbPoolSaturation
+        expr: |
+          (
+            db_pool_connections{job="wow-dashboard-api",state="acquired"}
+            /
+            db_pool_connections{job="wow-dashboard-api",state="max"}
+          ) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database pool nearly exhausted on {{ $labels.instance }}"
+          description: |
+            More than 90% of the pgx pool's connections have been in use for 10
+            minutes. Requests will start waiting (watch `db_pool_empty_acquire_total`).
+            Check for slow queries holding connections (Jaeger DB spans) or raise
+            `DB_MAX_CONNS`.
+
+      - alert: ApiJobQueueBacklog
+        expr: river_jobs{job="wow-dashboard-api",state="available"} > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Background job backlog building"
+          description: |
+            More than 100 River jobs have been waiting in the `available` state
+            for 10 minutes — the worker is not keeping up or is down. Check the
+            worker process and `river_jobs{state="discarded"}` for dead-lettered
+            jobs.

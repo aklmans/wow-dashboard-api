@@ -19,9 +19,10 @@ const metricsScrapePath = "/metrics"
 // Metrics holds Prometheus HTTP instrumentation on a dedicated registry, so it
 // is isolated from the global default registry and safe to use in tests.
 type Metrics struct {
-	registry *prometheus.Registry
-	requests *prometheus.CounterVec
-	duration *prometheus.HistogramVec
+	registry            *prometheus.Registry
+	requests            *prometheus.CounterVec
+	duration            *prometheus.HistogramVec
+	rateLimitRejections prometheus.Counter
 }
 
 // NewMetrics builds the HTTP metrics and registers them alongside the standard
@@ -36,15 +37,37 @@ func NewMetrics() *Metrics {
 		Help:    "HTTP request latency in seconds, labeled by method and matched route.",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "route"})
+	rateLimitRejections := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "auth_rate_limit_rejections_total",
+		Help: "Total requests rejected by the auth rate limiter (HTTP 429).",
+	})
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(
 		requests,
 		duration,
+		rateLimitRejections,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
-	return &Metrics{registry: registry, requests: requests, duration: duration}
+	return &Metrics{registry: registry, requests: requests, duration: duration, rateLimitRejections: rateLimitRejections}
+}
+
+// Register adds extra collectors (e.g. database pool and job-queue gauges) to
+// the metrics registry after construction, once their dependencies exist. It
+// panics on a duplicate or inconsistent registration, matching the fail-fast
+// behaviour of the built-in collectors.
+func (m *Metrics) Register(cs ...prometheus.Collector) {
+	m.registry.MustRegister(cs...)
+}
+
+// RecordAuthRateLimitRejection increments the auth rate-limit rejection counter.
+// It is safe to call on a nil *Metrics so callers can pass it unconditionally.
+func (m *Metrics) RecordAuthRateLimitRejection() {
+	if m == nil || m.rateLimitRejections == nil {
+		return
+	}
+	m.rateLimitRejections.Inc()
 }
 
 // Middleware records request count and latency for every request other than
