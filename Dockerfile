@@ -1,4 +1,8 @@
-FROM golang:1.26.3-alpine AS builder
+# Pin the builder to the native build platform so the Go toolchain runs
+# un-emulated and cross-compiles to TARGETARCH (CGO is off below). Without this,
+# `docker buildx --platform linux/arm64` would emulate the whole builder under
+# QEMU — correct but far slower.
+FROM --platform=$BUILDPLATFORM golang:1.26.3-alpine AS builder
 
 RUN apk add --no-cache git
 

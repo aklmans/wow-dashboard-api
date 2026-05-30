@@ -2,8 +2,9 @@ name: Container
 
 # Builds the runtime image and scans it with Trivy on every PR (gate only — no
 # publish). On pushes to main and version tags it additionally builds the
-# multi-arch image and publishes it to GHCR. The scan runs before any push, so
-# a CRITICAL/HIGH (fixable) vulnerability fails the job and nothing is shipped.
+# multi-arch image and publishes it to GHCR. The scan runs before any push, and
+# covers every platform that ships (amd64 + arm64), so a CRITICAL/HIGH (fixable)
+# vulnerability in either variant fails the job and nothing is published.
 #
 # Trivy results are surfaced as the job log table rather than uploaded as SARIF:
 # code scanning (the Security tab) needs GitHub Advanced Security on a private
@@ -25,6 +26,7 @@ permissions:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
+  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   build-scan:
@@ -38,24 +40,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # QEMU lets the amd64 runner build (and load, for scanning) the arm64
+      # variant. The Dockerfile cross-compiles the Go binaries on the native
+      # build platform, so this is only needed to assemble the arm64 image.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build a single-arch (host amd64) image and load it into the local daemon
-      # so Trivy can scan the exact artifact that the push step republishes.
-      - name: Build image for scanning
+      # Build each published platform as a single-arch image, load it into the
+      # local daemon, and scan it. Trivy gates on fixable CRITICAL/HIGH; the
+      # release build below republishes the same layers from the shared cache.
+      - name: Build amd64 image for scanning
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64
           load: true
-          tags: ${{ env.IMAGE }}:scan
+          tags: ${{ env.IMAGE }}:scan-amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trivy vulnerability scan (gate)
+      - name: Trivy scan (amd64, gate)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.IMAGE }}:scan
+          image-ref: ${{ env.IMAGE }}:scan-amd64
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Build arm64 image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: ${{ env.IMAGE }}:scan-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan (arm64, gate)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:scan-arm64
           format: table
           exit-code: "1"
           severity: CRITICAL,HIGH
@@ -80,6 +110,7 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=ref,event=branch
+            type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
@@ -91,7 +122,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.PLATFORMS }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
