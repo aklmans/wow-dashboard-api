@@ -54,6 +54,20 @@ func (q *Queries) DeleteAuthTokensForUser(ctx context.Context, arg DeleteAuthTok
 	return err
 }
 
+const deleteConsumedOrExpiredAuthTokens = `-- name: DeleteConsumedOrExpiredAuthTokens :execrows
+DELETE FROM auth_tokens
+WHERE used_at IS NOT NULL OR expires_at < now()
+`
+
+// Retention purge: drop tokens that are already consumed (used_at set) or expired.
+func (q *Queries) DeleteConsumedOrExpiredAuthTokens(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteConsumedOrExpiredAuthTokens)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getAuthTokenByHash = `-- name: GetAuthTokenByHash :one
 SELECT id, user_id, purpose, token_hash, expires_at, used_at, created_at
 FROM auth_tokens

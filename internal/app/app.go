@@ -166,6 +166,15 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("initialize river insert-only client: %w", err)
 	}
+	// Drain the insert client before the pool closes. Defers run LIFO, so
+	// registering this after the pool.Close defer above means it runs first.
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if stopErr := jobs.Stop(stopCtx, riverInsertClient); stopErr != nil && !errors.Is(stopErr, context.Canceled) {
+			logger.Error("River insert client stop failed", "error", stopErr)
+		}
+	}()
 	var emailSender email.Sender = jobs.NewAsyncEmailSender(riverInsertClient)
 	if cfg.EmailSMTPHost == "" {
 		logger.Warn("EMAIL_SMTP_HOST is not set; the worker will log emails to stdout instead of sending them")

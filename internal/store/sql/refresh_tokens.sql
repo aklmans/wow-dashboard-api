@@ -112,3 +112,9 @@ SET
     updated_at = @revoked_at
 WHERE user_id = @user_id
   AND revoked_at IS NULL;
+
+-- name: DeleteExpiredRefreshTokens :execrows
+-- Retention purge: drop refresh tokens that have already expired. Revoked but
+-- not-yet-expired tokens are kept so reuse detection still recognises them.
+DELETE FROM refresh_tokens
+WHERE expires_at < now();

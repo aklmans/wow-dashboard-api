@@ -3,11 +3,19 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 
 	"github.com/aklmans/wow-dashboard-api/internal/email"
+)
+
+const (
+	// emailMaxAttempts bounds retries for a failing email send (River defaults to 25).
+	emailMaxAttempts = 5
+	// emailUniquePeriod dedupes an identical email enqueued twice within this window.
+	emailUniquePeriod = 5 * time.Minute
 )
 
 // SendEmailArgs is the queue payload for a single email send. Field names
@@ -62,7 +70,18 @@ func (s *AsyncEmailSender) Send(ctx context.Context, msg email.Message) error {
 		To:      msg.To,
 		Subject: msg.Subject,
 		Body:    msg.Body,
-	}, nil); err != nil {
+	}, &river.InsertOpts{
+		// Bound retries, and dedupe an identical email (same recipient/subject/
+		// body) enqueued twice within the window — e.g. a double-submitted
+		// resend. This is insert-time dedup; it does not prevent a duplicate
+		// send if a job's transport succeeds but the job is then marked failed
+		// and retried (that needs transport-level idempotency).
+		MaxAttempts: emailMaxAttempts,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:   true,
+			ByPeriod: emailUniquePeriod,
+		},
+	}); err != nil {
 		return fmt.Errorf("jobs: enqueue send_email: %w", err)
 	}
 	return nil

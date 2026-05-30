@@ -13,3 +13,8 @@ SELECT id, event_type, message, metadata, created_at
 FROM system_events
 ORDER BY created_at DESC
 LIMIT $1;
+
+-- name: DeleteSystemEventsBefore :execrows
+-- Retention purge: drop audit events older than the cutoff.
+DELETE FROM system_events
+WHERE created_at < @cutoff;

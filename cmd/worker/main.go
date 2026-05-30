@@ -21,6 +21,7 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/jobs"
 	"github.com/aklmans/wow-dashboard-api/internal/logging"
 	"github.com/aklmans/wow-dashboard-api/internal/store"
+	"github.com/aklmans/wow-dashboard-api/internal/store/retentionrepo"
 )
 
 func main() {
@@ -65,8 +66,13 @@ func main() {
 		)
 	}
 
+	retentionStore := retentionrepo.NewStoreFromDB(pool)
 	registerWorkers := func(workers *river.Workers) {
-		jobs.RegisterAll(workers, jobs.Dependencies{EmailSender: emailSender})
+		jobs.RegisterAll(workers, jobs.Dependencies{
+			EmailSender:           emailSender,
+			Retention:             retentionStore,
+			SystemEventsRetention: cfg.SystemEventsRetention(),
+		})
 	}
 	client, err := jobs.NewWorkerClient(pool, jobs.DefaultWorkerConfig(), registerWorkers)
 	if err != nil {

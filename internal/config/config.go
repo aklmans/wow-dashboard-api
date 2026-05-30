@@ -60,6 +60,11 @@ type Config struct {
 	// tracing; empty leaves tracing as a no-op.
 	OTelExporterEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:""`
 
+	// SystemEventsRetentionDays bounds how long audit events are kept before the
+	// background retention job purges them. Refresh/auth tokens are purged on
+	// their own expiry, independent of this window.
+	SystemEventsRetentionDays int `env:"SYSTEM_EVENTS_RETENTION_DAYS" envDefault:"90"`
+
 	// JWT authentication configuration.
 	JWTAccessSecret          string `env:"JWT_ACCESS_SECRET" envDefault:"dev-only-change-me-min-32-characters"`
 	JWTIssuer                string `env:"JWT_ISSUER" envDefault:"wow-dashboard-api"`
@@ -300,6 +305,11 @@ func (c *Config) RefreshTokenTTL() time.Duration {
 	return time.Duration(c.RefreshTokenTTLSeconds) * time.Second
 }
 
+// SystemEventsRetention returns the audit-event retention window as a Duration.
+func (c *Config) SystemEventsRetention() time.Duration {
+	return time.Duration(c.SystemEventsRetentionDays) * 24 * time.Hour
+}
+
 // defaultJWTSecret is the dev-only placeholder. It must never be used in production.
 const defaultJWTSecret = "dev-only-change-me-min-32-characters"
 
@@ -389,6 +399,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.RefreshTokenTTLSeconds <= 0 {
 		return nil, fmt.Errorf("REFRESH_TOKEN_TTL_SECONDS must be greater than 0")
+	}
+	if cfg.SystemEventsRetentionDays <= 0 {
+		return nil, fmt.Errorf("SYSTEM_EVENTS_RETENTION_DAYS must be greater than 0")
 	}
 
 	// 3. DB Pool Validations

@@ -44,6 +44,20 @@ func (q *Queries) CreateSystemEvent(ctx context.Context, arg CreateSystemEventPa
 	return i, err
 }
 
+const deleteSystemEventsBefore = `-- name: DeleteSystemEventsBefore :execrows
+DELETE FROM system_events
+WHERE created_at < $1
+`
+
+// Retention purge: drop audit events older than the cutoff.
+func (q *Queries) DeleteSystemEventsBefore(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSystemEventsBefore, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getSystemEvent = `-- name: GetSystemEvent :one
 SELECT id, event_type, message, metadata, created_at
 FROM system_events

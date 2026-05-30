@@ -17,3 +17,8 @@ WHERE id = @id;
 -- one supersedes the old.
 DELETE FROM auth_tokens
 WHERE user_id = @user_id AND purpose = @purpose;
+
+-- name: DeleteConsumedOrExpiredAuthTokens :execrows
+-- Retention purge: drop tokens that are already consumed (used_at set) or expired.
+DELETE FROM auth_tokens
+WHERE used_at IS NOT NULL OR expires_at < now();
