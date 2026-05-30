@@ -1,0 +1,132 @@
+name: Container
+
+# Builds the runtime image and scans it with Trivy on every PR (gate only — no
+# publish). On pushes to main and version tags it additionally builds the
+# multi-arch image and publishes it to GHCR. The scan runs before any push, and
+# covers every platform that ships (amd64 + arm64), so a CRITICAL/HIGH (fixable)
+# vulnerability in either variant fails the job and nothing is published.
+#
+# Trivy results are surfaced as the job log table rather than uploaded as SARIF:
+# code scanning (the Security tab) needs GitHub Advanced Security on a private
+# repo, so the gating exit code is the portable signal. Flip to upload-sarif if
+# Advanced Security is enabled later.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  build-scan:
+    name: Build & scan image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # publish to GHCR on push (main / tags); unused on PRs
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # QEMU lets the amd64 runner build (and load, for scanning) the arm64
+      # variant. The Dockerfile cross-compiles the Go binaries on the native
+      # build platform, so this is only needed to assemble the arm64 image.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build each published platform as a single-arch image, load it into the
+      # local daemon, and scan it. Trivy gates on fixable CRITICAL/HIGH; the
+      # release build below republishes the same layers from the shared cache.
+      - name: Build amd64 image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:scan-amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan (amd64, gate)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:scan-amd64
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      - name: Build arm64 image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: ${{ env.IMAGE }}:scan-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan (arm64, gate)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:scan-arm64
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          vuln-type: os,library
+
+      # ---- Publish (main branch and version tags only) ----
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags and labels
+        if: github.event_name == 'push'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+          # Tag :latest only for semver releases, never for every main push.
+          flavor: latest=auto
+
+      - name: Build and push (multi-arch)
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true

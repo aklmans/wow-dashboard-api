@@ -61,6 +61,9 @@ services:
   migrate-river:
     image: ghcr.io/aklmans/wow-dashboard-api:${IMAGE_TAG:-main}
     entrypoint: ["/river-migrate"]
+    # One-shot, no HTTP server — disable the image's inherited /healthz check.
+    healthcheck:
+      disable: true
     environment:
       <<: *app-env
     depends_on:
@@ -78,15 +81,19 @@ services:
     depends_on:
       migrate-river:
         condition: service_completed_successfully
-    # The image runs distroless with no shell or HTTP client, so a compose
-    # healthcheck would need an `httpcheck` sidecar — overkill for this
-    # demo stack. Use `/healthz` and `/readyz` from your orchestrator's
-    # probes instead (Kubernetes, Nomad, etc.).
+    # The image ships a HEALTHCHECK that probes /healthz via the bundled
+    # /healthcheck binary, so this service reports liveness automatically. Use
+    # /readyz from your orchestrator (Kubernetes, Nomad, …) for the readiness
+    # gate, which additionally checks the database.
     restart: unless-stopped
 
   worker:
     image: ghcr.io/aklmans/wow-dashboard-api:${IMAGE_TAG:-main}
     entrypoint: ["/worker"]
+    # The worker serves no HTTP, so the image's /healthz HEALTHCHECK can never
+    # pass here — disable it, otherwise the container is reported unhealthy.
+    healthcheck:
+      disable: true
     environment:
       <<: *app-env
     depends_on:
