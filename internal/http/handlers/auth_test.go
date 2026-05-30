@@ -278,7 +278,7 @@ func TestAuthHandlers(t *testing.T) {
 	})
 }
 
-func TestAuthRateLimitMiddlewareAppliesToSignInAndSignUpOnly(t *testing.T) {
+func TestAuthRateLimitMiddlewareAppliesToSensitiveAuthEndpoints(t *testing.T) {
 	authSvc := &fakeAuthService{
 		signUpSession: testSession(),
 		signInSession: testSession(),
@@ -294,22 +294,30 @@ func TestAuthRateLimitMiddlewareAppliesToSignInAndSignUpOnly(t *testing.T) {
 		}
 	})
 
-	signUpRec := postJSON(router, "/api/auth/sign-up", map[string]string{
-		"email":     "hello@gmail.com",
-		"password":  "@Password",
-		"firstName": "Hello",
-		"lastName":  "Friend",
-	})
-	assertAPIError(t, signUpRec, http.StatusTooManyRequests, apierror.CodeRateLimited,
-		"Too many authentication attempts. Please try again later.")
+	// Every sensitive auth endpoint — credential, password-reset, and
+	// email-verification — must carry the rate limiter. The middleware
+	// short-circuits before the handler, so a minimal body still yields 429.
+	rateLimited := []struct {
+		path string
+		body map[string]string
+	}{
+		{"/api/auth/sign-up", map[string]string{"email": "hello@gmail.com", "password": "@Password", "firstName": "Hello", "lastName": "Friend"}},
+		{"/api/auth/sign-in", map[string]string{"email": "demo@wow-dashboard.test", "password": "@Password"}},
+		{"/api/auth/change-password", map[string]string{"currentPassword": "@Password", "newPassword": "@Password123"}},
+		{"/api/auth/forgot-password", map[string]string{"email": "demo@wow-dashboard.test"}},
+		{"/api/auth/reset-password", map[string]string{"token": "raw-token", "newPassword": "@Password123"}},
+		{"/api/auth/verify-email", map[string]string{"token": "raw-token"}},
+		{"/api/auth/resend-verification", map[string]string{}},
+	}
+	for _, tc := range rateLimited {
+		t.Run("rate limited "+tc.path, func(t *testing.T) {
+			rec := postJSON(router, tc.path, tc.body)
+			assertAPIError(t, rec, http.StatusTooManyRequests, apierror.CodeRateLimited,
+				"Too many authentication attempts. Please try again later.")
+		})
+	}
 
-	signInRec := postJSON(router, "/api/auth/sign-in", map[string]string{
-		"email":    "demo@wow-dashboard.test",
-		"password": "@Password",
-	})
-	assertAPIError(t, signInRec, http.StatusTooManyRequests, apierror.CodeRateLimited,
-		"Too many authentication attempts. Please try again later.")
-
+	// High-frequency read endpoints stay off the limiter: GET /me is reached.
 	meReq := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	meReq.Header.Set("Authorization", "Bearer access-token-123")
 	meRec := httptest.NewRecorder()
