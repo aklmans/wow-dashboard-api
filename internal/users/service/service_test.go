@@ -356,7 +356,79 @@ func TestServiceUpdateUserMapsUnknownRole(t *testing.T) {
 	}
 }
 
+// --- Transactional audit (unit of work) ------------------------------------
+
+func TestServiceUpdateUserTransactionalRecordsAuditInSameUnit(t *testing.T) {
+	mutator := &fakeUserStore{updateResult: domain.User{Status: domain.UserStatusDisabled}}
+	audit := &fakeUserAuditRecorder{}
+	uow := &fakeUnitOfWork{mutator: mutator, recorder: audit}
+	svc := service.NewService(&fakeUserStore{}, service.WithUnitOfWork(uow))
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  uuid.New().String(),
+		TargetUserID: uuid.New().String(),
+		Status:       strptr("disabled"),
+	}); err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	if !uow.called {
+		t.Fatal("unit of work was not used when configured")
+	}
+	if !uow.committed {
+		t.Fatal("unit of work did not commit")
+	}
+	if !mutator.updateCalled {
+		t.Fatal("mutation did not run inside the unit of work")
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1 (recorded in the same unit)", len(audit.events))
+	}
+	if audit.events[0].EventType != service.EventUserUpdated {
+		t.Fatalf("audit event type = %q, want %q", audit.events[0].EventType, service.EventUserUpdated)
+	}
+}
+
+func TestServiceUpdateUserTransactionalAuditFailureRollsBack(t *testing.T) {
+	mutator := &fakeUserStore{updateResult: domain.User{Status: domain.UserStatusActive}}
+	audit := &fakeUserAuditRecorder{err: errors.New("audit insert failed")}
+	uow := &fakeUnitOfWork{mutator: mutator, recorder: audit}
+	svc := service.NewService(&fakeUserStore{}, service.WithUnitOfWork(uow))
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  uuid.New().String(),
+		TargetUserID: uuid.New().String(),
+		Status:       strptr("active"),
+	}); err == nil {
+		t.Fatal("UpdateUser should fail when the audit write fails in the unit of work")
+	}
+	if !mutator.updateCalled {
+		t.Fatal("mutation should have been attempted inside the unit of work")
+	}
+	if uow.committed {
+		t.Fatal("unit of work must not commit when the audit write fails")
+	}
+}
+
 // --- fakes ------------------------------------------------------------------
+
+// fakeUnitOfWork runs the work function with the configured mutator and
+// recorder, committing only when the function returns nil — mirroring a real
+// transaction's commit/rollback semantics.
+type fakeUnitOfWork struct {
+	mutator   service.UserMutator
+	recorder  service.AuditRecorder
+	called    bool
+	committed bool
+}
+
+func (f *fakeUnitOfWork) Do(ctx context.Context, fn func(context.Context, service.WorkDeps) error) error {
+	f.called = true
+	if err := fn(ctx, service.WorkDeps{Users: f.mutator, Audit: f.recorder}); err != nil {
+		return err
+	}
+	f.committed = true
+	return nil
+}
 
 type fakeUserAuditRecorder struct {
 	events []service.AuditEvent

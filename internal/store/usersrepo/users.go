@@ -108,8 +108,24 @@ func (s *UserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput
 		return domain.User{}, fmt.Errorf("usersrepo: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	q := query.New(tx)
 
+	user, err := updateUserOnTx(ctx, query.New(tx), input)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, fmt.Errorf("usersrepo: commit: %w", err)
+	}
+	return user, nil
+}
+
+// updateUserOnTx applies the status/profile/role update using the provided
+// queries, which the caller scopes to a transaction. It performs no
+// Begin/Commit, so it runs either inside UserStore.UpdateUser's own transaction
+// or inside a service-level unit of work that records the audit event in the
+// same transaction (so the mutation and its audit row commit or roll back
+// together).
+func updateUserOnTx(ctx context.Context, q *query.Queries, input domain.UpdateUserInput) (domain.User, error) {
 	// Confirm the user exists inside the transaction so a roles-only update on
 	// a missing user reports ErrUserNotFound rather than a foreign-key failure.
 	if _, err := q.GetUserByID(ctx, pgUUIDFromDomain(input.ID)); err != nil {
@@ -151,12 +167,5 @@ func (s *UserStore) UpdateUser(ctx context.Context, input domain.UpdateUserInput
 		}
 	}
 
-	user, err := getUserByID(ctx, q, input.ID)
-	if err != nil {
-		return domain.User{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return domain.User{}, fmt.Errorf("usersrepo: commit: %w", err)
-	}
-	return user, nil
+	return getUserByID(ctx, q, input.ID)
 }

@@ -52,15 +52,22 @@ func WithAuditRecorder(recorder AuditRecorder) Option {
 	}
 }
 
-func (s *Service) recordUserUpdated(ctx context.Context, metadata AuditMetadata) {
+// buildUserUpdatedEvent assembles the user-updated audit event, stamping the
+// request id from context when absent. Shared by the best-effort and
+// transactional recording paths so both produce identical events.
+func buildUserUpdatedEvent(ctx context.Context, metadata AuditMetadata) AuditEvent {
 	if metadata.RequestID == "" {
 		metadata.RequestID = middleware.GetReqID(ctx)
 	}
-	event := AuditEvent{
+	return AuditEvent{
 		EventType: EventUserUpdated,
 		Message:   "User updated.",
 		Metadata:  metadata,
 	}
+}
+
+func (s *Service) recordUserUpdated(ctx context.Context, metadata AuditMetadata) {
+	event := buildUserUpdatedEvent(ctx, metadata)
 	if err := s.auditRecorder.RecordUserEvent(ctx, event); err != nil {
 		slog.ErrorContext(ctx, "failed to record users audit event",
 			"event_type", event.EventType,
