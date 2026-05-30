@@ -208,6 +208,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List notifications
+         * @description Returns the authenticated user's notifications, newest first, with their unread count.
+         */
+        get: operations["list-notifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark all notifications read
+         * @description Marks every unread notification for the authenticated user read.
+         */
+        post: operations["mark-all-notifications-read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a notification read
+         * @description Marks one of the authenticated user's notifications read. Idempotent; returns the updated unread count.
+         */
+        post: operations["mark-notification-read"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/permissions": {
         parameters: {
             query?: never;
@@ -738,6 +798,66 @@ export interface components {
              */
             status: string;
         };
+        NotificationItem: {
+            /**
+             * @description Optional longer text
+             * @example An administrator changed your roles.
+             */
+            body: string;
+            /**
+             * Format: date-time
+             * @description Creation timestamp
+             */
+            createdAt: string;
+            /**
+             * @description Notification identifier
+             * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
+             */
+            id: string;
+            /** @description Safe JSON object metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: date-time
+             * @description When the user read the notification; absent while unread
+             */
+            readAt?: string;
+            /**
+             * @description Short headline
+             * @example Your roles were updated
+             */
+            title: string;
+            /**
+             * @description Stable notification type
+             * @example users.roles.updated
+             */
+            type: string;
+        };
+        NotificationsListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/NotificationsListBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description Requested limit after defaulting
+             * @example 20
+             */
+            limit: number;
+            /** @description Opaque cursor for the next page; absent when there are no more notifications */
+            nextCursor?: string;
+            /** @description The user's notifications, newest first */
+            notifications: components["schemas"]["NotificationItem"][];
+            /**
+             * Format: int64
+             * @description Total unread notifications for the user, independent of this page
+             * @example 3
+             */
+            unreadCount: number;
+        };
         PatchMeInputBody: {
             /**
              * Format: uri
@@ -1116,6 +1236,20 @@ export interface components {
             limit: number;
             /** @description Opaque cursor for the next page; absent when there are no more events */
             nextCursor?: string;
+        };
+        UnreadCountBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/UnreadCountBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: int64
+             * @description The user's unread notification count after the operation
+             * @example 2
+             */
+            unreadCount: number;
         };
         UpdateProjectInputBody: {
             /**
@@ -1650,6 +1784,93 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "list-notifications": {
+        parameters: {
+            query?: {
+                /** @description Maximum number of notifications per page; defaults to 20 and must not exceed 100 */
+                limit?: number;
+                /** @description When true, return only unread notifications */
+                unreadOnly?: boolean;
+                /** @description Opaque pagination cursor from a previous response's nextCursor; returns the next page of older notifications */
+                cursor?: string;
+            };
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationsListBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "mark-all-notifications-read": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "mark-notification-read": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Notification identifier */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountBody"];
                 };
             };
             401: components["responses"]["APIError"];

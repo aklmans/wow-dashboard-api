@@ -25,11 +25,13 @@ import (
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
 	"github.com/aklmans/wow-dashboard-api/internal/jobs"
 	"github.com/aklmans/wow-dashboard-api/internal/logging"
+	notificationsservice "github.com/aklmans/wow-dashboard-api/internal/notifications/service"
 	"github.com/aklmans/wow-dashboard-api/internal/observability"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
 	rolesservice "github.com/aklmans/wow-dashboard-api/internal/roles/service"
 	"github.com/aklmans/wow-dashboard-api/internal/store"
 	"github.com/aklmans/wow-dashboard-api/internal/store/authrepo"
+	"github.com/aklmans/wow-dashboard-api/internal/store/notificationsrepo"
 	"github.com/aklmans/wow-dashboard-api/internal/store/projectsrepo"
 	"github.com/aklmans/wow-dashboard-api/internal/store/query"
 	"github.com/aklmans/wow-dashboard-api/internal/store/rolesrepo"
@@ -46,6 +48,7 @@ type Dependencies struct {
 	RolesService            handlers.RolesService
 	ProjectsService         handlers.ProjectsService
 	SystemEventsService     handlers.SystemEventsService
+	NotificationsService    handlers.NotificationsService
 	RefreshCookie           handlers.RefreshCookieConfig
 	AccessCookie            handlers.AccessCookieConfig
 	AuthRateLimitMiddleware func(huma.Context, func(huma.Context))
@@ -74,6 +77,9 @@ func RegisterRoutes(api huma.API, deps Dependencies) {
 	}
 	if deps.AuthService != nil && deps.SystemEventsService != nil {
 		handlers.RegisterSystemEvents(api, deps.AuthService, deps.SystemEventsService)
+	}
+	if deps.AuthService != nil && deps.NotificationsService != nil {
+		handlers.RegisterNotifications(api, deps.AuthService, deps.NotificationsService)
 	}
 }
 
@@ -245,6 +251,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)),
 		projectservice.WithUnitOfWork(projectsrepo.NewUnitOfWork(pool)))
 	systemEventsSvc := systemeventsservice.NewService(systemeventsrepo.NewEventStore(queries))
+	notificationsSvc := notificationsservice.NewService(notificationsrepo.NewNotificationStore(queries))
 	rateLimitConfig := httpmiddleware.RateLimitConfig{
 		Enabled:  cfg.AuthRateLimitEnabled,
 		Requests: cfg.AuthRateLimitRequests,
@@ -266,6 +273,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		RolesService:            rolesSvc,
 		ProjectsService:         projectsSvc,
 		SystemEventsService:     systemEventsSvc,
+		NotificationsService:    notificationsSvc,
 		RefreshCookie:           refreshCookieConfig(cfg),
 		AccessCookie:            accessCookieConfig(cfg),
 		AuthRateLimitMiddleware: httpmiddleware.AuthRateLimit(authRateLimiter, metrics.RecordAuthRateLimitRejection),

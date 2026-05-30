@@ -18,6 +18,17 @@ type AuthToken struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type Notification struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	Type      string
+	Title     string
+	Body      string
+	Metadata  []byte
+	ReadAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
 type Project struct {
 	ID          pgtype.UUID
 	Name        string

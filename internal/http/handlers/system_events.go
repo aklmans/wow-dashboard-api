@@ -89,7 +89,7 @@ func RegisterSystemEvents(api huma.API, authSvc SystemEventsAuthenticator, event
 			svcInput.CreatedBefore = &before
 		}
 		if input.Cursor != "" {
-			createdAt, id, err := decodeEventsCursor(input.Cursor)
+			createdAt, id, err := decodeKeysetCursor(input.Cursor)
 			if err != nil {
 				return nil, apierror.ValidationFailed("Invalid pagination cursor.").ForContext(ctx)
 			}
@@ -116,20 +116,20 @@ func listSystemEventsResponseFromDomain(result domain.ListEventsResult) *systemE
 	}
 	if result.HasMore && len(result.Events) > 0 {
 		last := result.Events[len(result.Events)-1]
-		body.NextCursor = encodeEventsCursor(last.CreatedAt, last.ID)
+		body.NextCursor = encodeKeysetCursor(last.CreatedAt, last.ID)
 	}
 	return &systemEventsListResponse{Body: body}
 }
 
-// encodeEventsCursor produces an opaque, URL-safe cursor from a page's last
+// encodeKeysetCursor produces an opaque, URL-safe cursor from a page's last
 // (created_at, id) keyset position.
-func encodeEventsCursor(createdAt time.Time, id uuid.UUID) string {
+func encodeKeysetCursor(createdAt time.Time, id uuid.UUID) string {
 	raw := createdAt.UTC().Format(time.RFC3339Nano) + "|" + id.String()
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
-// decodeEventsCursor reverses encodeEventsCursor, rejecting malformed input.
-func decodeEventsCursor(cursor string) (time.Time, uuid.UUID, error) {
+// decodeKeysetCursor reverses encodeKeysetCursor, rejecting malformed input.
+func decodeKeysetCursor(cursor string) (time.Time, uuid.UUID, error) {
 	data, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil {
 		return time.Time{}, uuid.Nil, err

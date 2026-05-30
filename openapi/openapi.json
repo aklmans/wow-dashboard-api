@@ -544,6 +544,110 @@
         ],
         "type": "object"
       },
+      "NotificationItem": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "Optional longer text",
+            "examples": [
+              "An administrator changed your roles."
+            ],
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Creation timestamp",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Notification identifier",
+            "examples": [
+              "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+            ],
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {},
+            "description": "Safe JSON object metadata",
+            "type": "object"
+          },
+          "readAt": {
+            "description": "When the user read the notification; absent while unread",
+            "format": "date-time",
+            "type": "string"
+          },
+          "title": {
+            "description": "Short headline",
+            "examples": [
+              "Your roles were updated"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "description": "Stable notification type",
+            "examples": [
+              "users.roles.updated"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "title",
+          "body",
+          "metadata",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "NotificationsListBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/NotificationsListBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "limit": {
+            "description": "Requested limit after defaulting",
+            "examples": [
+              20
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "nextCursor": {
+            "description": "Opaque cursor for the next page; absent when there are no more notifications",
+            "type": "string"
+          },
+          "notifications": {
+            "description": "The user's notifications, newest first",
+            "items": {
+              "$ref": "#/components/schemas/NotificationItem"
+            },
+            "type": "array"
+          },
+          "unreadCount": {
+            "description": "Total unread notifications for the user, independent of this page",
+            "examples": [
+              3
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "notifications",
+          "limit",
+          "unreadCount"
+        ],
+        "type": "object"
+      },
       "PatchMeInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -1269,6 +1373,32 @@
         "required": [
           "events",
           "limit"
+        ],
+        "type": "object"
+      },
+      "UnreadCountBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/UnreadCountBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "unreadCount": {
+            "description": "The user's unread notification count after the operation",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unreadCount"
         ],
         "type": "object"
       },
@@ -2193,6 +2323,191 @@
         "summary": "Verify an email address",
         "tags": [
           "Auth"
+        ]
+      }
+    },
+    "/api/notifications": {
+      "get": {
+        "description": "Returns the authenticated user's notifications, newest first, with their unread count.",
+        "operationId": "list-notifications",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum number of notifications per page; defaults to 20 and must not exceed 100",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 20,
+              "description": "Maximum number of notifications per page; defaults to 20 and must not exceed 100",
+              "examples": [
+                20
+              ],
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "When true, return only unread notifications",
+            "explode": false,
+            "in": "query",
+            "name": "unreadOnly",
+            "schema": {
+              "description": "When true, return only unread notifications",
+              "examples": [
+                false
+              ],
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Opaque pagination cursor from a previous response's nextCursor; returns the next page of older notifications",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque pagination cursor from a previous response's nextCursor; returns the next page of older notifications",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationsListBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List notifications",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/api/notifications/read-all": {
+      "post": {
+        "description": "Marks every unread notification for the authenticated user read.",
+        "operationId": "mark-all-notifications-read",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Mark all notifications read",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/api/notifications/{id}/read": {
+      "post": {
+        "description": "Marks one of the authenticated user's notifications read. Idempotent; returns the updated unread count.",
+        "operationId": "mark-notification-read",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Notification identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Notification identifier",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Mark a notification read",
+        "tags": [
+          "Notifications"
         ]
       }
     },
