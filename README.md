@@ -89,6 +89,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `ACCESS_TOKEN_COOKIE_SECURE` | `false` | Whether the access cookie requires HTTPS; `ENV=production` requires this to be `true` |
 | `ACCESS_TOKEN_COOKIE_SAMESITE` | `lax` | Access cookie SameSite mode (`lax`, `strict`, or `none`) |
 | `ACCESS_TOKEN_COOKIE_DOMAIN` | _(empty)_ | Optional cookie `Domain`; set to a shared parent (e.g. `.example.com`) for cross-subdomain app/API, empty for host-only |
+| `SYSTEM_EVENTS_RETENTION_DAYS` | `90` | Days to keep audit (system) events before the background retention job purges them; must be > 0 (refresh/auth tokens are purged on their own expiry) |
 | `EMAIL_FROM_ADDRESS` | `noreply@wow-dashboard.test` | From address for transactional email; must parse as an email address |
 | `EMAIL_FROM_NAME` | `WOW Dashboard` | Display name for transactional email |
 

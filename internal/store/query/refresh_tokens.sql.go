@@ -80,6 +80,21 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 	return i, err
 }
 
+const deleteExpiredRefreshTokens = `-- name: DeleteExpiredRefreshTokens :execrows
+DELETE FROM refresh_tokens
+WHERE expires_at < now()
+`
+
+// Retention purge: drop refresh tokens that have already expired. Revoked but
+// not-yet-expired tokens are kept so reuse detection still recognises them.
+func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredRefreshTokens)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getRefreshTokenByHash = `-- name: GetRefreshTokenByHash :one
 SELECT
     id,

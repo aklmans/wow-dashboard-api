@@ -43,6 +43,7 @@ var configEnvKeys = []string{
 	"ACCESS_TOKEN_COOKIE_SECURE",
 	"ACCESS_TOKEN_COOKIE_SAMESITE",
 	"ACCESS_TOKEN_COOKIE_DOMAIN",
+	"SYSTEM_EVENTS_RETENTION_DAYS",
 	"EMAIL_SMTP_HOST",
 	"EMAIL_SMTP_PORT",
 	"EMAIL_SMTP_USERNAME",
@@ -190,6 +191,9 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.AccessTokenCookieSameSite != "lax" {
 		t.Errorf("AccessTokenCookieSameSite = %q, want lax", cfg.AccessTokenCookieSameSite)
+	}
+	if cfg.SystemEventsRetentionDays != 90 {
+		t.Errorf("SystemEventsRetentionDays = %d, want 90", cfg.SystemEventsRetentionDays)
 	}
 }
 
@@ -582,6 +586,7 @@ func TestConfig_DurationHelpers(t *testing.T) {
 		AuthRateLimitWindowSeconds: 60,
 		JWTAccessTokenTTLSeconds:   900,
 		RefreshTokenTTLSeconds:     1209600,
+		SystemEventsRetentionDays:  30,
 	}
 
 	tests := []struct {
@@ -599,6 +604,7 @@ func TestConfig_DurationHelpers(t *testing.T) {
 		{"AuthRateLimitWindow", cfg.AuthRateLimitWindow(), time.Minute},
 		{"JWTAccessTokenTTL", cfg.JWTAccessTokenTTL(), 900 * time.Second},
 		{"RefreshTokenTTL", cfg.RefreshTokenTTL(), 1209600 * time.Second},
+		{"SystemEventsRetention", cfg.SystemEventsRetention(), 30 * 24 * time.Hour},
 	}
 
 	for _, tc := range tests {
@@ -1185,6 +1191,7 @@ func TestLoad_TimeoutValidation(t *testing.T) {
 		"DB_HEALTH_TIMEOUT_SECONDS",
 		"AUTH_RATE_LIMIT_WINDOW_SECONDS",
 		"REFRESH_TOKEN_TTL_SECONDS",
+		"SYSTEM_EVENTS_RETENTION_DAYS",
 	}
 
 	for _, key := range timeoutKeys {
