@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/aklmans/wow-dashboard-api/internal/config"
@@ -59,6 +60,24 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 	poolCfg.MinConns = int32(cfg.DBMinConns)
 	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime()
 	poolCfg.MaxConnIdleTime = cfg.DBMaxConnIdleTime()
+
+	// How often the pool probes idle connections (prune dead ones, top up to
+	// MinConns). Zero leaves the pgxpool default (1 minute) in place, which keeps
+	// existing callers that build a Config literal without this field working.
+	if period := cfg.DBHealthCheckPeriod(); period > 0 {
+		poolCfg.HealthCheckPeriod = period
+	}
+
+	// Bound every statement server-side so a stuck query cannot pin a pooled
+	// connection forever. Sent as a startup runtime parameter so every connection
+	// in the pool inherits it. PostgreSQL reads a bare integer as milliseconds;
+	// zero leaves the server default (no timeout).
+	if timeout := cfg.DBStatementTimeout(); timeout > 0 {
+		if poolCfg.ConnConfig.RuntimeParams == nil {
+			poolCfg.ConnConfig.RuntimeParams = map[string]string{}
+		}
+		poolCfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(timeout.Milliseconds(), 10)
+	}
 
 	// Trace database queries; the tracer is a no-op until tracing is enabled.
 	poolCfg.ConnConfig.Tracer = otelpgx.NewTracer()
