@@ -1627,7 +1627,8 @@
     }
   },
   "info": {
-    "title": "Spec D-D API",
+    "description": "Production-grade admin dashboard API: authentication, users, roles, projects, and audit events.",
+    "title": "WOW Dashboard API",
     "version": "1.0.0"
   },
   "openapi": "3.1.0",

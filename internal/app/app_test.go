@@ -5,12 +5,33 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
 )
+
+func TestNewAPIDocsToggle(t *testing.T) {
+	docsStatus := func(docsEnabled bool) int {
+		router := chi.NewRouter()
+		_ = NewAPI(router, docsEnabled)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/docs", nil))
+		return rec.Code
+	}
+
+	if code := docsStatus(true); code == http.StatusNotFound {
+		t.Fatalf("/docs should be served when docs are enabled, got %d", code)
+	}
+	if code := docsStatus(false); code != http.StatusNotFound {
+		t.Fatalf("/docs should 404 when docs are disabled, got %d", code)
+	}
+}
 
 type closeFuncServer struct {
 	called bool
