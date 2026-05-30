@@ -11,6 +11,27 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/projects/service"
 )
 
+// fakeNotificationEmitter captures the notification emitted inside a unit of work.
+type fakeNotificationEmitter struct {
+	called   bool
+	userID   uuid.UUID
+	nType    string
+	title    string
+	body     string
+	metadata map[string]any
+	err      error
+}
+
+func (f *fakeNotificationEmitter) Emit(_ context.Context, userID uuid.UUID, notificationType, title, body string, metadata map[string]any) error {
+	f.called = true
+	f.userID = userID
+	f.nType = notificationType
+	f.title = title
+	f.body = body
+	f.metadata = metadata
+	return f.err
+}
+
 func TestServiceAddMemberOwnerSucceeds(t *testing.T) {
 	owner := uuid.New()
 	project := uuid.New()
@@ -46,6 +67,46 @@ func TestServiceAddMemberOwnerSucceeds(t *testing.T) {
 	}
 	if recorder.calls[0].Metadata.TargetUserID != target.String() {
 		t.Fatalf("audit target = %q, want %s", recorder.calls[0].Metadata.TargetUserID, target)
+	}
+}
+
+func TestServiceAddMemberEmitsNotificationToNewMember(t *testing.T) {
+	owner := uuid.New()
+	project := uuid.New()
+	target := uuid.New()
+	recorder := &fakeAuditRecorder{}
+	emitter := &fakeNotificationEmitter{}
+	store := &fakeProjectStore{
+		getAccess:       ownerAccess(domain.Project{ID: project, Name: "Apollo", OwnerUserID: owner}),
+		findEmailResult: target,
+		addMemberResult: domain.ProjectMember{ProjectID: project, UserID: target, Role: domain.ProjectRoleEditor},
+	}
+	uow := &fakeProjectUnitOfWork{mutator: store, recorder: recorder, emitter: emitter}
+	svc := service.NewService(store, service.WithUnitOfWork(uow))
+
+	if _, err := svc.AddMember(context.Background(), service.AddMemberInput{
+		RequestingUserID: owner.String(),
+		ProjectID:        project.String(),
+		Email:            "teammate@example.com",
+		Role:             "EDITOR",
+	}); err != nil {
+		t.Fatalf("AddMember error: %v", err)
+	}
+
+	if !emitter.called {
+		t.Fatal("expected a notification emitted to the new member")
+	}
+	if emitter.userID != target {
+		t.Fatalf("notification recipient = %s, want the added member %s", emitter.userID, target)
+	}
+	if emitter.nType != "projects.member.added" {
+		t.Fatalf("notification type = %q, want projects.member.added", emitter.nType)
+	}
+	if emitter.metadata["project_id"] != project.String() {
+		t.Fatalf("notification metadata project_id = %v, want %s", emitter.metadata["project_id"], project)
+	}
+	if !uow.committed {
+		t.Fatal("unit of work should have committed")
 	}
 }
 

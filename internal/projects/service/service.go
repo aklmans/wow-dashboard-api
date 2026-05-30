@@ -90,12 +90,22 @@ type ProjectMutator interface {
 	RemoveProjectMember(ctx context.Context, projectID uuid.UUID, userID uuid.UUID) error
 }
 
+// NotificationEmitter creates a user notification inside the unit of work, so a
+// membership change and the recipient's notification commit (or roll back)
+// together. It is optional: a nil emitter sends nothing, keeping the
+// non-transactional path and existing tests unchanged.
+type NotificationEmitter interface {
+	Emit(ctx context.Context, userID uuid.UUID, notificationType, title, body string, metadata map[string]any) error
+}
+
 // WorkDeps contains transaction-scoped dependencies for a unit of work. The
-// mutator and the audit recorder share one transaction, so a mutation and its
-// audit event commit or roll back together.
+// mutator, the audit recorder, and the notification emitter share one
+// transaction, so a mutation, its audit event, and any notification commit or
+// roll back together.
 type WorkDeps struct {
-	Projects ProjectMutator
-	Audit    AuditRecorder
+	Projects      ProjectMutator
+	Audit         AuditRecorder
+	Notifications NotificationEmitter
 }
 
 // UnitOfWork runs fn inside a single database transaction. When configured, it
