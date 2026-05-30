@@ -272,6 +272,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ReadyChecker:            handlers.NewDatabaseReadyChecker(pool, cfg.DBHealthTimeout()),
 	})
 
+	// errChan is buffered for both listeners so a bind failure from either is
+	// reported without the goroutine blocking. A configured metrics listener is
+	// an operational requirement, so its failure fails startup just like the API
+	// listener's — it must not silently start without metrics.
+	errChan := make(chan error, 2)
+
 	// Optional internal-only metrics listener. Started before the API server so
 	// the scrape target is up early; it is drained alongside the API on shutdown.
 	var metricsServer *http.Server
@@ -286,7 +292,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		go func() {
 			logger.Info("Starting metrics server", "addr", cfg.MetricsAddr)
 			if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error("metrics server failed", "error", err)
+				errChan <- fmt.Errorf("metrics server (%s): %w", cfg.MetricsAddr, err)
 			}
 		}()
 	}
@@ -298,8 +304,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		WriteTimeout: cfg.WriteTimeout(),
 		IdleTimeout:  cfg.IdleTimeout(),
 	}
-
-	errChan := make(chan error, 1)
 
 	go func() {
 		logger.Info("Starting API server",
