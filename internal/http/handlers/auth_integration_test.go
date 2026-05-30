@@ -98,7 +98,7 @@ func TestAuthHandlersIntegration(t *testing.T) {
 		authservice.WithRefreshTokenStore(authrepo.NewRefreshTokenStore(queries), 14*24*time.Hour))
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
-	api := app.NewAPI(router)
+	api := app.NewAPI(router, true)
 	app.RegisterRoutes(api, app.Dependencies{AuthService: authSvc})
 
 	signUpRec := postJSON(router, "/api/auth/sign-up", map[string]string{

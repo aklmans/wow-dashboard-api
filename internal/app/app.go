@@ -77,11 +77,30 @@ func RegisterRoutes(api huma.API, deps Dependencies) {
 	}
 }
 
+const (
+	openAPITitle   = "WOW Dashboard API"
+	openAPIVersion = "1.0.0"
+)
+
 // NewAPI creates and configures a Huma API instance on top of a Chi router.
-func NewAPI(router chi.Router) huma.API {
-	humaCfg := huma.DefaultConfig("Spec D-D API", "1.0.0")
+// docsEnabled toggles the interactive Swagger UI at /docs; the OpenAPI JSON at
+// /openapi is always served. The title/version/servers populate the generated
+// contract.
+func NewAPI(router chi.Router, docsEnabled bool) huma.API {
+	humaCfg := huma.DefaultConfig(openAPITitle, openAPIVersion)
+	humaCfg.Info.Description = "Production-grade admin dashboard API: authentication, users, roles, projects, and audit events."
 	humaCfg.OpenAPIPath = "/openapi"
-	humaCfg.DocsPath = "/docs"
+	// An empty DocsPath disables the Swagger UI; production hides the full API
+	// surface by default (see config.EnableDocs).
+	if docsEnabled {
+		humaCfg.DocsPath = "/docs"
+	} else {
+		humaCfg.DocsPath = ""
+	}
+	// Intentionally no Servers entry: setting an absolute server URL makes Huma
+	// rewrite every response `$schema` reference against it, baking a host into
+	// the committed contract. The runtime /openapi already reflects the real
+	// request host, so the source spec stays host-agnostic.
 	// LoggingTransformer runs first so it observes the original error value
 	// (with its internal cause) before HumaErrorTransformer collapses 5xx into
 	// the generic client envelope. It passes nil to resolve slog.Default(),
@@ -142,11 +161,17 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	router.Use(httpmiddleware.CSRFGuard(cfg.CORS, cfg.AccessTokenCookieName, cfg.RefreshTokenCookieName))
 	router.Use(httpmiddleware.AccessCookieBridge(cfg.AccessTokenCookieName))
 
-	// Prometheus scrape endpoint, served outside the Huma JSON API.
-	router.Handle("/metrics", metrics.Handler())
+	// Prometheus scrape endpoint, served outside the Huma JSON API. By default it
+	// rides on the public router; when METRICS_ADDR is set it is served on a
+	// separate internal-only listener instead (started below), keeping metrics
+	// off the internet-facing port.
+	if cfg.MetricsAddr == "" {
+		router.Handle("/metrics", metrics.Handler())
+	}
 
-	// Configure and initialize Huma API dynamically using the shared constructor
-	api := NewAPI(router)
+	// Configure and initialize Huma API dynamically using the shared constructor.
+	// The Swagger UI at /docs is gated by config (off by default in production).
+	api := NewAPI(router, cfg.EnableDocs)
 
 	pool, err := store.NewPool(ctx, cfg)
 	if err != nil {
@@ -247,6 +272,31 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		ReadyChecker:            handlers.NewDatabaseReadyChecker(pool, cfg.DBHealthTimeout()),
 	})
 
+	// errChan is buffered for both listeners so a bind failure from either is
+	// reported without the goroutine blocking. A configured metrics listener is
+	// an operational requirement, so its failure fails startup just like the API
+	// listener's — it must not silently start without metrics.
+	errChan := make(chan error, 2)
+
+	// Optional internal-only metrics listener. Started before the API server so
+	// the scrape target is up early; it is drained alongside the API on shutdown.
+	var metricsServer *http.Server
+	if cfg.MetricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", metrics.Handler())
+		metricsServer = &http.Server{
+			Addr:              cfg.MetricsAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: cfg.ReadTimeout(),
+		}
+		go func() {
+			logger.Info("Starting metrics server", "addr", cfg.MetricsAddr)
+			if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errChan <- fmt.Errorf("metrics server (%s): %w", cfg.MetricsAddr, err)
+			}
+		}()
+	}
+
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      otelhttp.NewHandler(router, "http.server"),
@@ -254,8 +304,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		WriteTimeout: cfg.WriteTimeout(),
 		IdleTimeout:  cfg.IdleTimeout(),
 	}
-
-	errChan := make(chan error, 1)
 
 	go func() {
 		logger.Info("Starting API server",
@@ -281,6 +329,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Timeout buffer for socket drain and active requests handling
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout())
 	defer cancel()
+
+	if metricsServer != nil {
+		if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("metrics server shutdown failed", "error", err)
+		}
+	}
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {

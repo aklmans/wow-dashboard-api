@@ -76,6 +76,17 @@ type Config struct {
 	// tracing; empty leaves tracing as a no-op.
 	OTelExporterEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:""`
 
+	// MetricsAddr, when set, serves the Prometheus /metrics endpoint on this
+	// separate address (e.g. an internal-only "127.0.0.1:9090") instead of the
+	// public API router, so metrics are not exposed on the internet-facing port.
+	// Empty keeps /metrics on the main router (convenient for local development).
+	MetricsAddr string `env:"METRICS_ADDR" envDefault:""`
+
+	// EnableDocs controls the interactive Swagger UI at /docs. It defaults on,
+	// but production defaults it off (the docs and the OpenAPI JSON expose the
+	// full API surface); set ENABLE_DOCS=true to force-enable it in production.
+	EnableDocs bool `env:"ENABLE_DOCS" envDefault:"true"`
+
 	// SystemEventsRetentionDays bounds how long audit events are kept before the
 	// background retention job purges them. Refresh/auth tokens are purged on
 	// their own expiry, independent of this window.
@@ -372,6 +383,14 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.LogFormat = logFormat
+
+	// The interactive docs and OpenAPI JSON expose the full API surface, so
+	// production defaults them off unless ENABLE_DOCS is explicitly provided.
+	cfg.MetricsAddr = strings.TrimSpace(cfg.MetricsAddr)
+	docsConfigured := strings.TrimSpace(os.Getenv("ENABLE_DOCS")) != ""
+	if cfg.Env == "production" && !docsConfigured {
+		cfg.EnableDocs = false
+	}
 
 	refreshCookieSecureConfigured := strings.TrimSpace(os.Getenv("REFRESH_TOKEN_COOKIE_SECURE")) != ""
 	if cfg.Env == "production" && !refreshCookieSecureConfigured {

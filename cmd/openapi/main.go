@@ -24,8 +24,10 @@ import (
 func main() {
 	router := chi.NewRouter()
 
-	// Use the shared configuration logic to prevent drift
-	api := app.NewAPI(router)
+	// Use the shared configuration logic to prevent drift. Docs are enabled here
+	// so the generated spec is independent of runtime config (DocsPath is a UI
+	// route, not part of the OpenAPI document).
+	api := app.NewAPI(router, true)
 
 	app.RegisterRoutes(api, app.Dependencies{
 		AuthService:         openAPIAuthService{},

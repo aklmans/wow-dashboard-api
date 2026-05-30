@@ -21,6 +21,8 @@ var configEnvKeys = []string{
 	"HTTP_SHUTDOWN_TIMEOUT_SECONDS",
 	"SHUTDOWN_TIMEOUT_SECONDS",
 	"REQUEST_BODY_MAX_BYTES",
+	"METRICS_ADDR",
+	"ENABLE_DOCS",
 	"CORS_ALLOWED_ORIGINS",
 	"DATABASE_URL",
 	"DB_MAX_CONNS",
@@ -118,6 +120,12 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.RequestBodyMaxBytes != 1048576 {
 		t.Errorf("RequestBodyMaxBytes = %d, want %d", cfg.RequestBodyMaxBytes, 1048576)
+	}
+	if cfg.MetricsAddr != "" {
+		t.Errorf("MetricsAddr = %q, want empty", cfg.MetricsAddr)
+	}
+	if !cfg.EnableDocs {
+		t.Error("EnableDocs = false, want true in development")
 	}
 	wantCORS := []string{
 		"http://localhost:3000",
@@ -1268,6 +1276,41 @@ func TestLoad_RequestBodyMaxBytesValidation(t *testing.T) {
 		}
 		if cfg.RequestBodyMaxBytes != 2097152 {
 			t.Errorf("RequestBodyMaxBytes = %d, want 2097152", cfg.RequestBodyMaxBytes)
+		}
+	})
+}
+
+func TestLoad_EnableDocsProductionDefault(t *testing.T) {
+	t.Run("defaults off in production", func(t *testing.T) {
+		clearConfigEnv(t)
+		setProductionMinima(t)
+		t.Setenv("ENV", "production")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+		t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if cfg.EnableDocs {
+			t.Error("EnableDocs = true, want false by default in production")
+		}
+	})
+
+	t.Run("explicit true is honored in production", func(t *testing.T) {
+		clearConfigEnv(t)
+		setProductionMinima(t)
+		t.Setenv("ENV", "production")
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+		t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+		t.Setenv("ENABLE_DOCS", "true")
+
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if !cfg.EnableDocs {
+			t.Error("EnableDocs = false, want true when ENABLE_DOCS=true in production")
 		}
 	})
 }

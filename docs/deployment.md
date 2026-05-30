@@ -57,6 +57,8 @@ weak. The exact rules are in [`operations.md`](operations.md#configuration-check
 | `REFRESH_TOKEN_COOKIE_SAMESITE`   | `none` requires `_SECURE=true`. |
 | `EMAIL_SMTP_HOST` + friends       | Required in production (refuses to start without `EMAIL_SMTP_HOST`). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`     | Optional. Set to ship traces (no-op when empty). |
+| `ENABLE_DOCS`                     | Optional. Defaults to `false` in production (the Swagger UI at `/docs` is hidden); set `true` only to deliberately expose interactive docs. The OpenAPI JSON at `/openapi` is always served. |
+| `METRICS_ADDR`                    | Optional but recommended. Set to an internal-only bind (e.g. `127.0.0.1:9090`) to serve `/metrics` off the public API port; point the scraper there. Empty leaves `/metrics` on the API port — restrict it at the ingress in that case. |
 
 Hand the production env-var set to a second engineer for review before
 rolling out. See [`operations.md` § Production Ready](operations.md#production-ready)

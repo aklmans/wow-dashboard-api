@@ -658,7 +658,7 @@ func newProjectAuthTestRouter(authSvc handlers.AuthService) chi.Router {
 func newProjectAuthTestRouterWithMiddlewares(authSvc handlers.AuthService, authMiddlewares ...func(huma.Context, func(huma.Context))) chi.Router {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
-	api := app.NewAPI(router)
+	api := app.NewAPI(router, true)
 	handlers.RegisterAuth(api, authSvc, authMiddlewares...)
 	return router
 }

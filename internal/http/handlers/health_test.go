@@ -20,7 +20,7 @@ import (
 func TestHealthAndReadyEndpoints(t *testing.T) {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
-	api := app.NewAPI(router)
+	api := app.NewAPI(router, true)
 	app.RegisterRoutes(api, app.Dependencies{ReadyChecker: handlers.ReadyCheckerFunc(func(context.Context) error {
 		return nil
 	})})
@@ -78,7 +78,7 @@ func TestHealthAndReadyEndpoints(t *testing.T) {
 func TestReadyEndpoint_DependencyFailure(t *testing.T) {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
-	api := app.NewAPI(router)
+	api := app.NewAPI(router, true)
 	app.RegisterRoutes(api, app.Dependencies{ReadyChecker: handlers.ReadyCheckerFunc(func(context.Context) error {
 		return errors.New("pgx: failed to connect to postgres://user:secret@localhost:5432/spec")
 	})})
@@ -119,7 +119,7 @@ func TestReadyEndpoint_DependencyFailure(t *testing.T) {
 
 func TestReadyOpenAPIIncludesServiceUnavailableAPIError(t *testing.T) {
 	router := chi.NewRouter()
-	api := app.NewAPI(router)
+	api := app.NewAPI(router, true)
 	app.RegisterRoutes(api, app.Dependencies{ReadyChecker: handlers.NoopReadyChecker{}})
 
 	specJSON, err := json.Marshal(api.OpenAPI())
