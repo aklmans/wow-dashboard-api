@@ -1106,7 +1106,7 @@ export interface components {
              * @example https://example.com/schemas/SystemEventsListBody.json
              */
             readonly $schema?: string;
-            /** @description Recent system audit events */
+            /** @description System audit events, newest first */
             events: components["schemas"]["SystemEventItem"][];
             /**
              * Format: int64
@@ -1114,6 +1114,8 @@ export interface components {
              * @example 20
              */
             limit: number;
+            /** @description Opaque cursor for the next page; absent when there are no more events */
+            nextCursor?: string;
         };
         UpdateProjectInputBody: {
             /**
@@ -2150,8 +2152,16 @@ export interface operations {
     "get-system-events": {
         parameters: {
             query?: {
-                /** @description Maximum number of recent system events to return; defaults to 20 and must not exceed 100 */
+                /** @description Maximum number of events to return per page; defaults to 20 and must not exceed 100 */
                 limit?: number;
+                /** @description Filter to a single stable event type */
+                eventType?: string;
+                /** @description Only events created at or after this RFC3339 timestamp */
+                after?: string;
+                /** @description Only events created strictly before this RFC3339 timestamp */
+                before?: string;
+                /** @description Opaque pagination cursor from a previous response's nextCursor; returns the next page of older events */
+                cursor?: string;
             };
             header?: {
                 /** @description Bearer access token */

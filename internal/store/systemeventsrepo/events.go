@@ -31,7 +31,14 @@ func (s *EventStore) ListEvents(ctx context.Context, input domain.ListEventsInpu
 		return domain.ListEventsResult{}, fmt.Errorf("systemeventsrepo: queries is nil")
 	}
 
-	rows, err := s.queries.ListSystemEvents(ctx, int32(input.Limit))
+	rows, err := s.queries.ListSystemEventsPage(ctx, query.ListSystemEventsPageParams{
+		EventType:       pgTextPtr(input.EventType),
+		CreatedAfter:    pgTimestampPtr(input.CreatedAfter),
+		CreatedBefore:   pgTimestampPtr(input.CreatedBefore),
+		CursorCreatedAt: pgTimestampPtr(input.CursorCreatedAt),
+		CursorID:        pgUUIDPtr(input.CursorID),
+		RowLimit:        int32(input.Limit),
+	})
 	if err != nil {
 		return domain.ListEventsResult{}, fmt.Errorf("systemeventsrepo: list events: %w", err)
 	}
@@ -45,9 +52,31 @@ func (s *EventStore) ListEvents(ctx context.Context, input domain.ListEventsInpu
 		events = append(events, event)
 	}
 
-	// Limit is part of the response contract owned by the service layer,
-	// which normalizes and sets it; the store only returns the event rows.
+	// Limit and HasMore are part of the response contract owned by the service
+	// layer, which requests an extra probe row and trims; the store only returns
+	// the rows the query produced.
 	return domain.ListEventsResult{Events: events}, nil
+}
+
+func pgTextPtr(s *string) pgtype.Text {
+	if s == nil {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: *s, Valid: true}
+}
+
+func pgTimestampPtr(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: *t, Valid: true}
+}
+
+func pgUUIDPtr(id *uuid.UUID) pgtype.UUID {
+	if id == nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: *id, Valid: true}
 }
 
 func eventFromRow(row query.SystemEvent) (domain.Event, error) {
