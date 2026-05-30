@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/aklmans/wow-dashboard-api/internal/projects/domain"
 )
 
@@ -111,7 +113,10 @@ func (s *Service) AddMember(ctx context.Context, input AddMemberInput) (domain.P
 				return err
 			}
 			result = member
-			return recordProjectEventTx(ctx, deps.Audit, EventMemberAdded, "Project member added.", auditMeta)
+			if err := recordProjectEventTx(ctx, deps.Audit, EventMemberAdded, "Project member added.", auditMeta); err != nil {
+				return err
+			}
+			return emitMemberAddedNotification(ctx, deps.Notifications, targetID, access.Project)
 		})
 		if err != nil {
 			return domain.ProjectMember{}, mapErr(err)
@@ -125,6 +130,21 @@ func (s *Service) AddMember(ctx context.Context, input AddMemberInput) (domain.P
 	}
 	s.recordMemberAdded(ctx, auditMeta)
 	return member, nil
+}
+
+// emitMemberAddedNotification notifies a newly added member that they now have
+// access to the project. It is a no-op when no emitter is configured. The
+// project owner can never be added as a member, so this never self-notifies.
+func emitMemberAddedNotification(ctx context.Context, emitter NotificationEmitter, userID uuid.UUID, project domain.Project) error {
+	if emitter == nil {
+		return nil
+	}
+	return emitter.Emit(ctx, userID,
+		"projects.member.added",
+		"You were added to a project",
+		fmt.Sprintf("You now have access to the project %q.", project.Name),
+		map[string]any{"project_id": project.ID.String(), "project_name": project.Name},
+	)
 }
 
 // UpdateMemberRole changes an existing member's role. Only the project owner

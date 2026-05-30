@@ -554,11 +554,12 @@ func TestServiceCreateProjectTransactionalAuditFailureRollsBack(t *testing.T) {
 type fakeProjectUnitOfWork struct {
 	mutator   service.ProjectMutator
 	recorder  service.AuditRecorder
+	emitter   service.NotificationEmitter
 	committed bool
 }
 
 func (f *fakeProjectUnitOfWork) Do(ctx context.Context, fn func(context.Context, service.WorkDeps) error) error {
-	if err := fn(ctx, service.WorkDeps{Projects: f.mutator, Audit: f.recorder}); err != nil {
+	if err := fn(ctx, service.WorkDeps{Projects: f.mutator, Audit: f.recorder, Notifications: f.emitter}); err != nil {
 		return err
 	}
 	f.committed = true

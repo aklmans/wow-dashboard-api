@@ -46,8 +46,9 @@ func (u *UnitOfWork) Do(ctx context.Context, fn func(context.Context, projectser
 
 	queries := query.New(tx)
 	deps := projectservice.WorkDeps{
-		Projects: NewProjectStore(queries),
-		Audit:    NewSystemEventRecorder(queries),
+		Projects:      NewProjectStore(queries),
+		Audit:         NewSystemEventRecorder(queries),
+		Notifications: newTxNotificationEmitter(queries),
 	}
 
 	if err := fn(ctx, deps); err != nil {
