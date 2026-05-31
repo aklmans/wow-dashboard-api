@@ -90,11 +90,23 @@ func (openAPIAuthService) Refresh(context.Context, string) (*authservice.Session
 	return nil, nil
 }
 
+func (openAPIAuthService) RefreshSession(context.Context, string, string) (*authservice.Session, error) {
+	return nil, nil
+}
+
 func (openAPIAuthService) SignOut(context.Context, string) error {
 	return nil
 }
 
 func (openAPIAuthService) CurrentUser(context.Context, string) (*authservice.PublicUser, error) {
+	return nil, nil
+}
+
+func (openAPIAuthService) Impersonate(context.Context, *authservice.PublicUser, string) (*authservice.Session, error) {
+	return nil, nil
+}
+
+func (openAPIAuthService) StopImpersonation(context.Context, string, string) (*authservice.Session, error) {
 	return nil, nil
 }
 

@@ -33,6 +33,12 @@ var (
 
 // Claims holds the application-specific JWT claims.
 type Claims struct {
+	// Act, when present, is the user id of the actor (an admin) impersonating
+	// the subject. It is informational only: authorization always resolves from
+	// the subject's current database roles/permissions, never from this claim.
+	// It is used for audit attribution and to surface impersonation in /me.
+	Act string `json:"act,omitempty"`
+
 	jwt.RegisteredClaims
 }
 
@@ -116,6 +122,40 @@ func (m *Manager) IssueAccessToken(userID string) (string, error) {
 	return signed, nil
 }
 
+// IssueImpersonationToken creates a signed JWT whose subject is the impersonated
+// user (targetID) and which carries an `act` (actor) claim identifying the admin
+// (actorID) performing the impersonation. The token resolves the target's
+// permissions (loaded per-request from the subject); the act claim is purely
+// informational, used for audit and to surface impersonation in /me.
+func (m *Manager) IssueImpersonationToken(targetID, actorID string) (string, error) {
+	if targetID == "" || actorID == "" {
+		return "", ErrEmptyUserID
+	}
+
+	now := m.now()
+
+	claims := Claims{
+		Act: actorID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   targetID,
+			Issuer:    m.issuer,
+			Audience:  jwt.ClaimStrings{m.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
+		},
+	}
+
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signed, err := t.SignedString(m.secret)
+	if err != nil {
+		return "", errors.New("token: failed to sign token")
+	}
+
+	return signed, nil
+}
+
 // VerifyAccessToken parses and validates a JWT string. It enforces HS256
 // signing method and validates issuer, audience, and expiration. It returns
 // the Claims on success.
@@ -133,6 +173,36 @@ func (m *Manager) VerifyAccessToken(raw string) (*Claims, error) {
 	)
 	if err != nil {
 		return nil, errors.New("token: invalid or expired token")
+	}
+
+	return claims, nil
+}
+
+// ParseClaimsAllowExpired parses a token and returns its claims even when the
+// token has expired, but still requires a valid signature, issuer, and
+// audience. It exists so the refresh path can detect an impersonation session
+// from its (by then expired) access token; never use it to authorize a request.
+func (m *Manager) ParseClaimsAllowExpired(raw string) (*Claims, error) {
+	claims := &Claims{}
+
+	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+		return m.secret, nil
+	},
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithIssuer(m.issuer),
+		jwt.WithAudience(m.audience),
+		jwt.WithIssuedAt(),
+	)
+	if err != nil {
+		// Tolerate ONLY a pure expiry error; a bad signature, wrong issuer or
+		// audience, or malformed token is untrustworthy and rejected.
+		if !errors.Is(err, jwt.ErrTokenExpired) ||
+			errors.Is(err, jwt.ErrTokenSignatureInvalid) ||
+			errors.Is(err, jwt.ErrTokenMalformed) ||
+			errors.Is(err, jwt.ErrTokenInvalidIssuer) ||
+			errors.Is(err, jwt.ErrTokenInvalidAudience) {
+			return nil, errors.New("token: invalid token")
+		}
 	}
 
 	return claims, nil

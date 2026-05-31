@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 )
@@ -18,8 +19,11 @@ type AuthService interface {
 	SignUp(ctx context.Context, input service.SignUpInput) (*service.Session, error)
 	SignIn(ctx context.Context, input service.SignInInput) (*service.Session, error)
 	Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error)
+	RefreshSession(ctx context.Context, rawCurrentAccessToken, rawRefreshToken string) (*service.Session, error)
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
+	Impersonate(ctx context.Context, actor *service.PublicUser, targetID string) (*service.Session, error)
+	StopImpersonation(ctx context.Context, rawCurrentToken, rawRefreshToken string) (*service.Session, error)
 	UpdateMyProfile(ctx context.Context, rawAccessToken string, input service.UpdateMyProfileInput) (*service.PublicUser, error)
 	ChangePassword(ctx context.Context, rawAccessToken string, currentPassword string, newPassword string) error
 	ForgotPassword(ctx context.Context, email string) error
@@ -48,6 +52,9 @@ type authMeUser struct {
 	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty" doc:"Last successful sign-in time; null if the user has never signed in"`
 	Roles         []string   `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
 	Permissions   []string   `json:"permissions" nullable:"false" doc:"Effective permission strings granted by the user's roles"`
+	// Impersonator* are present only while an admin is acting as this user.
+	ImpersonatorID    string `json:"impersonatorId,omitempty" doc:"Id of the admin impersonating this user; absent unless impersonating"`
+	ImpersonatorEmail string `json:"impersonatorEmail,omitempty" doc:"Email of the admin impersonating this user; absent unless impersonating"`
 }
 
 type authSessionBody struct {
@@ -128,11 +135,22 @@ type resendVerificationInput struct {
 }
 
 type refreshInput struct {
-	Cookie string `header:"Cookie" doc:"Refresh token cookie"`
+	Authorization string `header:"Authorization" doc:"Bearer access token, if any; used to refuse refresh during impersonation"`
+	Cookie        string `header:"Cookie" doc:"Refresh token cookie"`
 }
 
 type signOutInput struct {
 	Cookie string `header:"Cookie" doc:"Refresh token cookie"`
+}
+
+type impersonateInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token of an administrator"`
+	TargetUserID  string `path:"targetUserId" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"Id of the user to impersonate"`
+}
+
+type stopImpersonationInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token of the impersonation session"`
+	Cookie        string `header:"Cookie" doc:"Refresh token cookie (the admin's, preserved during impersonation)"`
 }
 
 type RefreshCookieConfig struct {
@@ -226,11 +244,12 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		Method:      http.MethodPost,
 		Path:        "/api/auth/refresh",
 		Summary:     "Refresh session",
-		Description: "Rotates the refresh token cookie and returns a new access token.",
+		Description: "Rotates the refresh token cookie and returns a new access token. Refused (409) while impersonating — use the stop-impersonation endpoint instead.",
 		Tags:        []string{"Auth"},
 		Responses: apiErrorResponses(api,
 			http.StatusUnauthorized,
 			http.StatusForbidden,
+			http.StatusConflict,
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *refreshInput) (*authSessionResponse, error) {
@@ -239,7 +258,63 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 		}
 
-		session, err := authSvc.Refresh(ctx, rawRefreshToken)
+		// Pass the current access token so the service can refuse to refresh an
+		// impersonation session into the admin's (which would silently restore
+		// admin privileges without an audited stop).
+		rawCurrentToken, _ := parseBearerToken(input.Authorization)
+
+		session, err := authSvc.RefreshSession(ctx, rawCurrentToken, rawRefreshToken)
+		if err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return sessionResponse(session, refreshCookie, accessCookie), nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-impersonate",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/impersonate/{targetUserId}",
+		Summary:     "Impersonate a user",
+		Description: "Starts impersonating another user. Requires an administrator (the * permission); administrators cannot be impersonated. Returns an impersonation session and sets the access cookie, leaving the admin's refresh cookie intact so the session can be restored.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusForbidden,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *impersonateInput) (*authSessionResponse, error) {
+		admin, authErr := authorizeWithPermission(ctx, authSvc, input.Authorization, rbac.PermissionAll)
+		if authErr != nil {
+			return nil, authErr
+		}
+		session, err := authSvc.Impersonate(ctx, admin, input.TargetUserID)
+		if err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return sessionResponse(session, refreshCookie, accessCookie), nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-impersonate-stop",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/impersonate/stop",
+		Summary:     "Stop impersonating",
+		Description: "Ends the current impersonation session and restores the administrator session by refreshing the preserved admin refresh cookie.",
+		Tags:        []string{"Auth"},
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusForbidden,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *stopImpersonationInput) (*authSessionResponse, error) {
+		rawRefreshToken, ok := parseCookieValue(input.Cookie, refreshCookie.Name)
+		if !ok {
+			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+		}
+		rawCurrentToken, _ := parseBearerToken(input.Authorization)
+
+		session, err := authSvc.StopImpersonation(ctx, rawCurrentToken, rawRefreshToken)
 		if err != nil {
 			return nil, mapAuthError(ctx, err)
 		}
@@ -485,17 +560,19 @@ func meUserResponse(user service.PublicUser) authMeUser {
 		permissions = []string{}
 	}
 	return authMeUser{
-		ID:            user.ID,
-		Email:         user.Email,
-		DisplayName:   user.DisplayName,
-		EmailVerified: user.EmailVerified,
-		AvatarURL:     user.AvatarURL,
-		Phone:         user.Phone,
-		JobTitle:      user.JobTitle,
-		Company:       user.Company,
-		LastLoginAt:   user.LastLoginAt,
-		Roles:         roles,
-		Permissions:   permissions,
+		ID:                user.ID,
+		Email:             user.Email,
+		DisplayName:       user.DisplayName,
+		EmailVerified:     user.EmailVerified,
+		AvatarURL:         user.AvatarURL,
+		Phone:             user.Phone,
+		JobTitle:          user.JobTitle,
+		Company:           user.Company,
+		LastLoginAt:       user.LastLoginAt,
+		Roles:             roles,
+		Permissions:       permissions,
+		ImpersonatorID:    user.ImpersonatorID,
+		ImpersonatorEmail: user.ImpersonatorEmail,
 	}
 }
 
@@ -648,6 +725,10 @@ func mapAuthError(ctx context.Context, err error) huma.StatusError {
 		return apierror.Forbidden("User account is disabled.").ForContext(ctx)
 	case errors.Is(err, service.ErrInvalidToken):
 		return apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+	case errors.Is(err, service.ErrCannotImpersonate):
+		return apierror.ValidationFailed("This user cannot be impersonated.").ForContext(ctx)
+	case errors.Is(err, service.ErrImpersonationActive):
+		return apierror.Conflict("Stop impersonation before refreshing the session.").ForContext(ctx)
 	case errors.Is(err, service.ErrUserNotFound):
 		return apierror.Unauthorized("Invalid authorization token.").ForContext(ctx)
 	default:

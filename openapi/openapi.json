@@ -169,6 +169,14 @@
             ],
             "type": "string"
           },
+          "impersonatorEmail": {
+            "description": "Email of the admin impersonating this user; absent unless impersonating",
+            "type": "string"
+          },
+          "impersonatorId": {
+            "description": "Id of the admin impersonating this user; absent unless impersonating",
+            "type": "string"
+          },
           "jobTitle": {
             "description": "User job title; empty when unset",
             "examples": [
@@ -1877,6 +1885,135 @@
         ]
       }
     },
+    "/api/auth/impersonate/stop": {
+      "post": {
+        "description": "Ends the current impersonation session and restores the administrator session by refreshing the preserved admin refresh cookie.",
+        "operationId": "post-auth-impersonate-stop",
+        "parameters": [
+          {
+            "description": "Bearer access token of the impersonation session",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token of the impersonation session",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Refresh token cookie (the admin's, preserved during impersonation)",
+            "in": "header",
+            "name": "Cookie",
+            "schema": {
+              "description": "Refresh token cookie (the admin's, preserved during impersonation)",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Stop impersonating",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/impersonate/{targetUserId}": {
+      "post": {
+        "description": "Starts impersonating another user. Requires an administrator (the * permission); administrators cannot be impersonated. Returns an impersonation session and sets the access cookie, leaving the admin's refresh cookie intact so the session can be restored.",
+        "operationId": "post-auth-impersonate",
+        "parameters": [
+          {
+            "description": "Bearer access token of an administrator",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token of an administrator",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Id of the user to impersonate",
+            "in": "path",
+            "name": "targetUserId",
+            "required": true,
+            "schema": {
+              "description": "Id of the user to impersonate",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Impersonate a user",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/api/auth/me": {
       "get": {
         "description": "Returns the profile for the bearer access token.",
@@ -1980,9 +2117,18 @@
     },
     "/api/auth/refresh": {
       "post": {
-        "description": "Rotates the refresh token cookie and returns a new access token.",
+        "description": "Rotates the refresh token cookie and returns a new access token. Refused (409) while impersonating — use the stop-impersonation endpoint instead.",
         "operationId": "post-auth-refresh",
         "parameters": [
+          {
+            "description": "Bearer access token, if any; used to refuse refresh during impersonation",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token, if any; used to refuse refresh during impersonation",
+              "type": "string"
+            }
+          },
           {
             "description": "Refresh token cookie",
             "in": "header",
@@ -2015,6 +2161,9 @@
             "$ref": "#/components/responses/APIError"
           },
           "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "409": {
             "$ref": "#/components/responses/APIError"
           },
           "500": {

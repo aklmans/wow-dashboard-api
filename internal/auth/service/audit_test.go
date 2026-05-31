@@ -316,6 +316,9 @@ type fakeTokenManager struct {
 	issueErr    error
 	claims      *token.Claims
 	verifyErr   error
+
+	impersonationTarget string
+	impersonationActor  string
 }
 
 func (f *fakeTokenManager) IssueAccessToken(userID string) (string, error) {
@@ -325,9 +328,25 @@ func (f *fakeTokenManager) IssueAccessToken(userID string) (string, error) {
 	return f.issuedToken, nil
 }
 
+func (f *fakeTokenManager) IssueImpersonationToken(targetID, actorID string) (string, error) {
+	if f.issueErr != nil {
+		return "", f.issueErr
+	}
+	f.impersonationTarget = targetID
+	f.impersonationActor = actorID
+	return f.issuedToken, nil
+}
+
 func (f *fakeTokenManager) VerifyAccessToken(raw string) (*token.Claims, error) {
 	if f.verifyErr != nil {
 		return nil, f.verifyErr
+	}
+	return f.claims, nil
+}
+
+func (f *fakeTokenManager) ParseClaimsAllowExpired(raw string) (*token.Claims, error) {
+	if f.claims == nil {
+		return &token.Claims{}, nil
 	}
 	return f.claims, nil
 }

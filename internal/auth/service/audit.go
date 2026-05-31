@@ -26,6 +26,11 @@ const (
 	// EventAuthEmailVerificationFailed is recorded when a verification token is
 	// rejected — a signal of token brute-forcing.
 	EventAuthEmailVerificationFailed = "auth.email.verification_failed"
+	// EventAuthImpersonationStarted / Stopped bracket an admin acting as another
+	// user. Together with their timestamps they make the impersonation window
+	// auditable: which admin acted as which user, and when.
+	EventAuthImpersonationStarted = "auth.impersonation.started"
+	EventAuthImpersonationStopped = "auth.impersonation.stopped"
 
 	AuditReasonInvalidInput       = "invalid_input"
 	AuditReasonEmailAlreadyExists = "email_already_exists"
@@ -45,6 +50,10 @@ type AuditMetadata struct {
 	UserID    string `json:"user_id,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
+	// ActorUserID / TargetUserID identify the admin and the impersonated user on
+	// impersonation events.
+	ActorUserID  string `json:"actor_user_id,omitempty"`
+	TargetUserID string `json:"target_user_id,omitempty"`
 }
 
 // AuditEvent describes an auth audit event before persistence.
