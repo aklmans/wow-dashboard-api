@@ -67,7 +67,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `IDLE_TIMEOUT_SECONDS` | `60` | HTTP server idle timeout |
 | `HTTP_SHUTDOWN_TIMEOUT_SECONDS` | `10` | Graceful shutdown deadline for draining in-flight HTTP requests |
 | `REQUEST_BODY_MAX_BYTES` | `1048576` | Max request body accepted at the transport edge for every route (413 when exceeded); must be >= 0, `0` disables the edge check. Default 1 MiB matches Huma's per-operation body cap |
-| `METRICS_ADDR` | _(empty)_ | When set (e.g. `127.0.0.1:9090`), serves `/metrics` on this separate internal-only listener instead of the public API port. Empty keeps `/metrics` on the main router |
+| `METRICS_ADDR` | _(empty)_ | When set (e.g. `127.0.0.1:9090`), serves `/metrics` on this separate internal-only listener instead of the public API port. Empty keeps `/metrics` on the main router outside production only; production leaves `/metrics` off the main router unless this is set |
 | `ENABLE_DOCS` | `true` | Serve the interactive Swagger UI at `/docs`. Defaults to `true`, but **production defaults it to `false`** (set `ENABLE_DOCS=true` to force-enable); the OpenAPI JSON at `/openapi` is always served |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173,http://localhost:8082,http://localhost:8083,http://localhost:8084,http://localhost:8085` | Comma-separated allowed origins |
 | `DATABASE_URL` | `postgres://wow_dashboard:wow_dashboard@localhost:5432/wow_dashboard_api?sslmode=disable` | PostgreSQL database connection URL for local Compose (masks credentials in errors/logs) |
@@ -504,7 +504,7 @@ In Kubernetes or Docker Compose, configure `/healthz` as the liveness probe and 
 - **Background jobs** — `river_jobs{state}` (available/running/discarded/…), a queue-backlog and dead-letter gauge read from the shared `river_job` table. It degrades to nothing when the table is absent (River migrations not run).
 - The standard Go runtime and process collectors.
 
-The endpoint is unauthenticated; restrict it at the network or ingress layer, or set `METRICS_ADDR` (e.g. `127.0.0.1:9090`) to serve it on a separate internal-only listener kept off the public API port.
+The endpoint is unauthenticated; restrict it at the network or ingress layer. In production, `/metrics` is not mounted on the main API router by default. Set `METRICS_ADDR` (e.g. `127.0.0.1:9090`) to serve it on a separate internal-only listener kept off the public API port.
 
 ### Tracing
 

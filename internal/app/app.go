@@ -167,11 +167,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	router.Use(httpmiddleware.CSRFGuard(cfg.CORS, cfg.AccessTokenCookieName, cfg.RefreshTokenCookieName))
 	router.Use(httpmiddleware.AccessCookieBridge(cfg.AccessTokenCookieName))
 
-	// Prometheus scrape endpoint, served outside the Huma JSON API. By default it
-	// rides on the public router; when METRICS_ADDR is set it is served on a
-	// separate internal-only listener instead (started below), keeping metrics
-	// off the internet-facing port.
-	if cfg.MetricsAddr == "" {
+	// Prometheus scrape endpoint, served outside the Huma JSON API. It rides on
+	// the public router only outside production; production should either set
+	// METRICS_ADDR for a separate internal-only listener or leave metrics off the
+	// main router entirely.
+	if cfg.MetricsOnMainRouter() {
 		router.Handle("/metrics", metrics.Handler())
 	}
 
