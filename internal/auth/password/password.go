@@ -49,6 +49,15 @@ var defaultParams = params{
 	KeyLength:   32,
 }
 
+const (
+	maxEncodedMemory      uint32 = 256 * 1024 // 256 MiB expressed in KiB
+	maxEncodedIterations  uint32 = 10
+	maxEncodedParallelism uint8  = 8
+	maxEncodedSaltLength  uint32 = 128
+	maxEncodedKeyLength   uint32 = 128
+	maxEncodedB64Length          = 256
+)
+
 // Hash returns an Argon2id encoded hash of the given password using the
 // default parameters. The returned string is safe to store directly in a
 // database column. An error is returned only when the system's CSPRNG fails
@@ -138,18 +147,32 @@ func decode(encodedHash string) (p params, salt, hash []byte, err error) {
 	if err != nil {
 		return p, nil, nil, ErrInvalidHash
 	}
+	if p.Memory == 0 || p.Memory > maxEncodedMemory ||
+		p.Iterations == 0 || p.Iterations > maxEncodedIterations ||
+		p.Parallelism == 0 || p.Parallelism > maxEncodedParallelism {
+		return p, nil, nil, ErrInvalidHash
+	}
+	if len(parts[4]) > maxEncodedB64Length || len(parts[5]) > maxEncodedB64Length {
+		return p, nil, nil, ErrInvalidHash
+	}
 
 	salt, err = base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return p, nil, nil, ErrInvalidHash
 	}
 	p.SaltLength = uint32(len(salt))
+	if p.SaltLength == 0 || p.SaltLength > maxEncodedSaltLength {
+		return p, nil, nil, ErrInvalidHash
+	}
 
 	hash, err = base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return p, nil, nil, ErrInvalidHash
 	}
 	p.KeyLength = uint32(len(hash))
+	if p.KeyLength == 0 || p.KeyLength > maxEncodedKeyLength {
+		return p, nil, nil, ErrInvalidHash
+	}
 
 	return p, salt, hash, nil
 }

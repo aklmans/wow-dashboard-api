@@ -1,13 +1,13 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.5-alpine
     shm_size: 256m
     environment:
       POSTGRES_DB: wow_dashboard_api
       POSTGRES_USER: wow_dashboard
       POSTGRES_PASSWORD: wow_dashboard
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wow_dashboard -d wow_dashboard_api"]
       interval: 5s
@@ -23,7 +23,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -37,8 +37,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     environment:
       MP_MAX_MESSAGES: "5000"
       MP_SMTP_AUTH_ACCEPT_ANY: "1"

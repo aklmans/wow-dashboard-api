@@ -45,13 +45,13 @@ x-app-env: &app-env
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.5-alpine
     environment:
       POSTGRES_DB: wow_dashboard_api
       POSTGRES_USER: wow_dashboard
       POSTGRES_PASSWORD: wow_dashboard
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wow_dashboard -d wow_dashboard_api"]
       interval: 5s
@@ -77,7 +77,7 @@ services:
   api:
     image: ghcr.io/aklmans/wow-dashboard-api:${IMAGE_TAG:-main}
     ports:
-      - "7272:7272"
+      - "127.0.0.1:7272:7272"
     environment:
       <<: *app-env
       PORT: "7272"
@@ -107,8 +107,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     environment:
       MP_MAX_MESSAGES: "5000"
 
