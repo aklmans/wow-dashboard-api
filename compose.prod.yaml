@@ -29,12 +29,15 @@
 
 x-app-env: &app-env
   ENV: production
+  APP_BASE_URL: ${APP_BASE_URL:?set APP_BASE_URL to an https:// frontend URL}
   DATABASE_URL: postgres://wow_dashboard:wow_dashboard@postgres:5432/wow_dashboard_api?sslmode=disable
   JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET to a >=32 character secret}
   JWT_ISSUER: wow-dashboard-api
   JWT_AUDIENCE: wow-dashboard
-  REFRESH_TOKEN_COOKIE_SECURE: "false"
-  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8083}
+  REFRESH_TOKEN_COOKIE_SECURE: "true"
+  ACCESS_TOKEN_COOKIE_SECURE: "true"
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS to exact https:// origins}
+  METRICS_ADDR: ${METRICS_ADDR:-127.0.0.1:9090}
   EMAIL_SMTP_HOST: mailpit
   EMAIL_SMTP_PORT: "1025"
   EMAIL_SMTP_TLS: none

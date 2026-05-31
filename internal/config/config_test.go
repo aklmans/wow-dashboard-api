@@ -638,6 +638,38 @@ func TestConfig_DurationHelpers(t *testing.T) {
 	}
 }
 
+func TestConfig_MetricsOnMainRouter(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{
+			name: "development empty metrics addr exposes main router metrics",
+			cfg:  Config{Env: "development"},
+			want: true,
+		},
+		{
+			name: "production empty metrics addr disables main router metrics",
+			cfg:  Config{Env: "production"},
+			want: false,
+		},
+		{
+			name: "separate metrics addr disables main router metrics",
+			cfg:  Config{Env: "development", MetricsAddr: "127.0.0.1:9090"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.MetricsOnMainRouter(); got != tt.want {
+				t.Fatalf("MetricsOnMainRouter() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- LOG_LEVEL parsing ---
 
 func TestLoad_LogLevelValues(t *testing.T) {

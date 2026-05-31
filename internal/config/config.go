@@ -79,7 +79,9 @@ type Config struct {
 	// MetricsAddr, when set, serves the Prometheus /metrics endpoint on this
 	// separate address (e.g. an internal-only "127.0.0.1:9090") instead of the
 	// public API router, so metrics are not exposed on the internet-facing port.
-	// Empty keeps /metrics on the main router (convenient for local development).
+	// Empty keeps /metrics on the main router outside production (convenient for
+	// local development); production never exposes /metrics on the main router by
+	// default.
 	MetricsAddr string `env:"METRICS_ADDR" envDefault:""`
 
 	// EnableDocs controls the interactive Swagger UI at /docs. It defaults on,
@@ -345,6 +347,13 @@ func (c *Config) RefreshTokenTTL() time.Duration {
 // SystemEventsRetention returns the audit-event retention window as a Duration.
 func (c *Config) SystemEventsRetention() time.Duration {
 	return time.Duration(c.SystemEventsRetentionDays) * 24 * time.Hour
+}
+
+// MetricsOnMainRouter reports whether /metrics should be mounted on the public
+// API router. Production defaults this off when METRICS_ADDR is empty so
+// unauthenticated metrics are not exposed on the internet-facing listener.
+func (c *Config) MetricsOnMainRouter() bool {
+	return strings.TrimSpace(c.MetricsAddr) == "" && c.Env != "production"
 }
 
 // defaultJWTSecret is the dev-only placeholder. It must never be used in production.
