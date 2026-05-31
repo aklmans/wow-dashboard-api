@@ -61,6 +61,41 @@ func TestIssueAndVerify(t *testing.T) {
 	}
 }
 
+func TestImpersonationToken(t *testing.T) {
+	m := newTestManager(t)
+
+	raw, err := m.IssueImpersonationToken("target-user-id", "admin-actor-id")
+	if err != nil {
+		t.Fatalf("IssueImpersonationToken: unexpected error: %v", err)
+	}
+
+	claims, err := m.VerifyAccessToken(raw)
+	if err != nil {
+		t.Fatalf("VerifyAccessToken: unexpected error: %v", err)
+	}
+	if claims.Subject != "target-user-id" {
+		t.Errorf("Subject = %q, want the target", claims.Subject)
+	}
+	if claims.Act != "admin-actor-id" {
+		t.Errorf("Act = %q, want the actor", claims.Act)
+	}
+
+	// A normal access token carries no act claim.
+	normal, _ := m.IssueAccessToken(testUserID)
+	normalClaims, _ := m.VerifyAccessToken(normal)
+	if normalClaims.Act != "" {
+		t.Errorf("normal token Act = %q, want empty", normalClaims.Act)
+	}
+
+	// Both ids are required.
+	if _, err := m.IssueImpersonationToken("", "actor"); !errors.Is(err, token.ErrEmptyUserID) {
+		t.Errorf("empty target err = %v, want ErrEmptyUserID", err)
+	}
+	if _, err := m.IssueImpersonationToken("target", ""); !errors.Is(err, token.ErrEmptyUserID) {
+		t.Errorf("empty actor err = %v, want ErrEmptyUserID", err)
+	}
+}
+
 func TestVerify_ExpiredToken(t *testing.T) {
 	// Issue with a clock set far in the past so the token is already expired.
 	pastClock := func() time.Time {

@@ -564,6 +564,16 @@ type fakeAuthService struct {
 
 	signOutToken string
 	signOutErr   error
+
+	impersonateActor   *service.PublicUser
+	impersonateTarget  string
+	impersonateSession *service.Session
+	impersonateErr     error
+
+	stopCurrentToken string
+	stopRefreshToken string
+	stopSession      *service.Session
+	stopErr          error
 }
 
 func (f *fakeAuthService) SignUp(ctx context.Context, input service.SignUpInput) (*service.Session, error) {
@@ -588,6 +598,24 @@ func (f *fakeAuthService) CurrentUser(ctx context.Context, rawAccessToken string
 		return nil, f.currentUserErr
 	}
 	return f.currentUser, nil
+}
+
+func (f *fakeAuthService) Impersonate(ctx context.Context, actor *service.PublicUser, targetID string) (*service.Session, error) {
+	f.impersonateActor = actor
+	f.impersonateTarget = targetID
+	if f.impersonateErr != nil {
+		return nil, f.impersonateErr
+	}
+	return f.impersonateSession, nil
+}
+
+func (f *fakeAuthService) StopImpersonation(ctx context.Context, rawCurrentToken, rawRefreshToken string) (*service.Session, error) {
+	f.stopCurrentToken = rawCurrentToken
+	f.stopRefreshToken = rawRefreshToken
+	if f.stopErr != nil {
+		return nil, f.stopErr
+	}
+	return f.stopSession, nil
 }
 
 func (f *fakeAuthService) ChangePassword(ctx context.Context, rawAccessToken string, currentPassword string, newPassword string) error {
@@ -641,6 +669,59 @@ func (f *fakeAuthService) Refresh(ctx context.Context, rawRefreshToken string) (
 func (f *fakeAuthService) SignOut(ctx context.Context, rawRefreshToken string) error {
 	f.signOutToken = rawRefreshToken
 	return f.signOutErr
+}
+
+func TestImpersonateHandler(t *testing.T) {
+	const target = "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+
+	t.Run("a non-admin is forbidden and the service is never called", func(t *testing.T) {
+		authSvc := &fakeAuthService{
+			currentUser: &service.PublicUser{ID: "u1", Status: "active", Permissions: []string{"users:read"}},
+		}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/impersonate/"+target, nil)
+		req.Header.Set("Authorization", "Bearer some-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden, noPermissionMessage)
+		if authSvc.impersonateTarget != "" {
+			t.Fatal("Impersonate must not be called for a non-admin")
+		}
+	})
+
+	t.Run("an admin starts impersonation; access cookie set, refresh cookie preserved", func(t *testing.T) {
+		authSvc := &fakeAuthService{
+			currentUser: &service.PublicUser{ID: "admin-1", Status: "active", Permissions: []string{"*"}},
+			impersonateSession: &service.Session{
+				User:         service.PublicUser{ID: target, Email: "target@example.test"},
+				AccessToken:  "impersonation-token",
+				RefreshToken: "", // never rotate the admin's session
+			},
+		}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/impersonate/"+target, nil)
+		req.Header.Set("Authorization", "Bearer admin-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if authSvc.impersonateActor == nil || authSvc.impersonateActor.ID != "admin-1" || authSvc.impersonateTarget != target {
+			t.Fatalf("Impersonate called with actor=%#v target=%q", authSvc.impersonateActor, authSvc.impersonateTarget)
+		}
+		if access := cookieByName(t, rec, "wow_dashboard_access_token"); access.Value != "impersonation-token" {
+			t.Fatalf("access cookie = %q, want impersonation-token", access.Value)
+		}
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == "wow_dashboard_refresh_token" {
+				t.Fatal("refresh cookie must not be set on impersonate (admin session is preserved)")
+			}
+		}
+	})
 }
 
 func newAuthTestRouter(authSvc handlers.AuthService) chi.Router {

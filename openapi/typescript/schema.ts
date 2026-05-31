@@ -44,6 +44,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/impersonate/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop impersonating
+         * @description Ends the current impersonation session and restores the administrator session by refreshing the preserved admin refresh cookie.
+         */
+        post: operations["post-auth-impersonate-stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/impersonate/{targetUserId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Impersonate a user
+         * @description Starts impersonating another user. Requires an administrator (the * permission); administrators cannot be impersonated. Returns an impersonation session and sets the access cookie, leaving the admin's refresh cookie intact so the session can be restored.
+         */
+        post: operations["post-auth-impersonate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -609,6 +649,10 @@ export interface components {
              * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
              */
             id: string;
+            /** @description Email of the admin impersonating this user; absent unless impersonating */
+            impersonatorEmail?: string;
+            /** @description Id of the admin impersonating this user; absent unless impersonating */
+            impersonatorId?: string;
             /**
              * @description User job title; empty when unset
              * @example
@@ -1535,6 +1579,66 @@ export interface operations {
                     "application/json": components["schemas"]["AuthSuccessBody"];
                 };
             };
+            422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-impersonate-stop": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token of the impersonation session */
+                Authorization?: string;
+                /** @description Refresh token cookie (the admin's, preserved during impersonation) */
+                Cookie?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSessionBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-impersonate": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token of an administrator */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Id of the user to impersonate */
+                targetUserId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSessionBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };

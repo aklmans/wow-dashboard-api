@@ -33,6 +33,12 @@ var (
 
 // Claims holds the application-specific JWT claims.
 type Claims struct {
+	// Act, when present, is the user id of the actor (an admin) impersonating
+	// the subject. It is informational only: authorization always resolves from
+	// the subject's current database roles/permissions, never from this claim.
+	// It is used for audit attribution and to surface impersonation in /me.
+	Act string `json:"act,omitempty"`
+
 	jwt.RegisteredClaims
 }
 
@@ -98,6 +104,40 @@ func (m *Manager) IssueAccessToken(userID string) (string, error) {
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID,
+			Issuer:    m.issuer,
+			Audience:  jwt.ClaimStrings{m.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
+		},
+	}
+
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signed, err := t.SignedString(m.secret)
+	if err != nil {
+		return "", errors.New("token: failed to sign token")
+	}
+
+	return signed, nil
+}
+
+// IssueImpersonationToken creates a signed JWT whose subject is the impersonated
+// user (targetID) and which carries an `act` (actor) claim identifying the admin
+// (actorID) performing the impersonation. The token resolves the target's
+// permissions (loaded per-request from the subject); the act claim is purely
+// informational, used for audit and to surface impersonation in /me.
+func (m *Manager) IssueImpersonationToken(targetID, actorID string) (string, error) {
+	if targetID == "" || actorID == "" {
+		return "", ErrEmptyUserID
+	}
+
+	now := m.now()
+
+	claims := Claims{
+		Act: actorID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   targetID,
 			Issuer:    m.issuer,
 			Audience:  jwt.ClaimStrings{m.audience},
 			IssuedAt:  jwt.NewNumericDate(now),

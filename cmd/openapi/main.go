@@ -98,6 +98,14 @@ func (openAPIAuthService) CurrentUser(context.Context, string) (*authservice.Pub
 	return nil, nil
 }
 
+func (openAPIAuthService) Impersonate(context.Context, *authservice.PublicUser, string) (*authservice.Session, error) {
+	return nil, nil
+}
+
+func (openAPIAuthService) StopImpersonation(context.Context, string, string) (*authservice.Session, error) {
+	return nil, nil
+}
+
 func (openAPIAuthService) UpdateMyProfile(context.Context, string, authservice.UpdateMyProfileInput) (*authservice.PublicUser, error) {
 	return nil, nil
 }

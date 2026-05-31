@@ -316,12 +316,24 @@ type fakeTokenManager struct {
 	issueErr    error
 	claims      *token.Claims
 	verifyErr   error
+
+	impersonationTarget string
+	impersonationActor  string
 }
 
 func (f *fakeTokenManager) IssueAccessToken(userID string) (string, error) {
 	if f.issueErr != nil {
 		return "", f.issueErr
 	}
+	return f.issuedToken, nil
+}
+
+func (f *fakeTokenManager) IssueImpersonationToken(targetID, actorID string) (string, error) {
+	if f.issueErr != nil {
+		return "", f.issueErr
+	}
+	f.impersonationTarget = targetID
+	f.impersonationActor = actorID
 	return f.issuedToken, nil
 }
 
