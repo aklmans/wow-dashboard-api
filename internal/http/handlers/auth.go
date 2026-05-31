@@ -19,6 +19,7 @@ type AuthService interface {
 	SignUp(ctx context.Context, input service.SignUpInput) (*service.Session, error)
 	SignIn(ctx context.Context, input service.SignInInput) (*service.Session, error)
 	Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error)
+	RefreshSession(ctx context.Context, rawCurrentAccessToken, rawRefreshToken string) (*service.Session, error)
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
 	Impersonate(ctx context.Context, actor *service.PublicUser, targetID string) (*service.Session, error)
@@ -134,7 +135,8 @@ type resendVerificationInput struct {
 }
 
 type refreshInput struct {
-	Cookie string `header:"Cookie" doc:"Refresh token cookie"`
+	Authorization string `header:"Authorization" doc:"Bearer access token, if any; used to refuse refresh during impersonation"`
+	Cookie        string `header:"Cookie" doc:"Refresh token cookie"`
 }
 
 type signOutInput struct {
@@ -242,11 +244,12 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		Method:      http.MethodPost,
 		Path:        "/api/auth/refresh",
 		Summary:     "Refresh session",
-		Description: "Rotates the refresh token cookie and returns a new access token.",
+		Description: "Rotates the refresh token cookie and returns a new access token. Refused (409) while impersonating — use the stop-impersonation endpoint instead.",
 		Tags:        []string{"Auth"},
 		Responses: apiErrorResponses(api,
 			http.StatusUnauthorized,
 			http.StatusForbidden,
+			http.StatusConflict,
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *refreshInput) (*authSessionResponse, error) {
@@ -255,7 +258,12 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 		}
 
-		session, err := authSvc.Refresh(ctx, rawRefreshToken)
+		// Pass the current access token so the service can refuse to refresh an
+		// impersonation session into the admin's (which would silently restore
+		// admin privileges without an audited stop).
+		rawCurrentToken, _ := parseBearerToken(input.Authorization)
+
+		session, err := authSvc.RefreshSession(ctx, rawCurrentToken, rawRefreshToken)
 		if err != nil {
 			return nil, mapAuthError(ctx, err)
 		}
@@ -719,6 +727,8 @@ func mapAuthError(ctx context.Context, err error) huma.StatusError {
 		return apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 	case errors.Is(err, service.ErrCannotImpersonate):
 		return apierror.ValidationFailed("This user cannot be impersonated.").ForContext(ctx)
+	case errors.Is(err, service.ErrImpersonationActive):
+		return apierror.Conflict("Stop impersonation before refreshing the session.").ForContext(ctx)
 	case errors.Is(err, service.ErrUserNotFound):
 		return apierror.Unauthorized("Invalid authorization token.").ForContext(ctx)
 	default:

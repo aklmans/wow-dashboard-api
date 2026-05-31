@@ -2117,9 +2117,18 @@
     },
     "/api/auth/refresh": {
       "post": {
-        "description": "Rotates the refresh token cookie and returns a new access token.",
+        "description": "Rotates the refresh token cookie and returns a new access token. Refused (409) while impersonating — use the stop-impersonation endpoint instead.",
         "operationId": "post-auth-refresh",
         "parameters": [
+          {
+            "description": "Bearer access token, if any; used to refuse refresh during impersonation",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token, if any; used to refuse refresh during impersonation",
+              "type": "string"
+            }
+          },
           {
             "description": "Refresh token cookie",
             "in": "header",
@@ -2152,6 +2161,9 @@
             "$ref": "#/components/responses/APIError"
           },
           "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "409": {
             "$ref": "#/components/responses/APIError"
           },
           "500": {

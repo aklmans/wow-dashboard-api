@@ -96,6 +96,40 @@ func TestImpersonationToken(t *testing.T) {
 	}
 }
 
+func TestParseClaimsAllowExpired(t *testing.T) {
+	m := newTestManager(t)
+
+	// An expired token still yields its claims (used to detect impersonation on
+	// refresh) while VerifyAccessToken rejects it.
+	past := newTestManager(t, token.WithClock(func() time.Time { return time.Now().Add(-24 * time.Hour) }))
+	expired, err := past.IssueImpersonationToken("target-id", "actor-id")
+	if err != nil {
+		t.Fatalf("IssueImpersonationToken: %v", err)
+	}
+
+	claims, err := m.ParseClaimsAllowExpired(expired)
+	if err != nil {
+		t.Fatalf("ParseClaimsAllowExpired should tolerate expiry: %v", err)
+	}
+	if claims.Act != "actor-id" || claims.Subject != "target-id" {
+		t.Fatalf("claims = %#v, want act/sub preserved", claims)
+	}
+	if _, err := m.VerifyAccessToken(expired); err == nil {
+		t.Fatal("VerifyAccessToken must still reject an expired token")
+	}
+
+	// A token signed with a different secret is rejected even by the
+	// expiry-tolerant parser — the signature must always be valid.
+	alt, err := token.NewManager(altSecret, testIssuer, testAudience, testTTL)
+	if err != nil {
+		t.Fatalf("NewManager(alt): %v", err)
+	}
+	forged, _ := alt.IssueAccessToken("x")
+	if _, err := m.ParseClaimsAllowExpired(forged); err == nil {
+		t.Fatal("ParseClaimsAllowExpired must reject a token signed with a different secret")
+	}
+}
+
 func TestVerify_ExpiredToken(t *testing.T) {
 	// Issue with a clock set far in the past so the token is already expired.
 	pastClock := func() time.Time {

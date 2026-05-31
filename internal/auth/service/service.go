@@ -24,13 +24,14 @@ import (
 
 // Domain sentinel errors for upstream mapping to API error envelopes.
 var (
-	ErrInvalidInput       = errors.New("auth: invalid input")
-	ErrEmailAlreadyExists = errors.New("auth: email already exists")
-	ErrInvalidCredentials = errors.New("auth: invalid credentials")
-	ErrUserDisabled       = errors.New("auth: user disabled")
-	ErrInvalidToken       = errors.New("auth: invalid token")
-	ErrUserNotFound       = errors.New("auth: user not found")
-	ErrCannotImpersonate  = errors.New("auth: cannot impersonate this user")
+	ErrInvalidInput        = errors.New("auth: invalid input")
+	ErrEmailAlreadyExists  = errors.New("auth: email already exists")
+	ErrInvalidCredentials  = errors.New("auth: invalid credentials")
+	ErrUserDisabled        = errors.New("auth: user disabled")
+	ErrInvalidToken        = errors.New("auth: invalid token")
+	ErrUserNotFound        = errors.New("auth: user not found")
+	ErrCannotImpersonate   = errors.New("auth: cannot impersonate this user")
+	ErrImpersonationActive = errors.New("auth: stop impersonation before refreshing")
 )
 
 const (
@@ -154,6 +155,7 @@ type TokenManager interface {
 	IssueAccessToken(userID string) (string, error)
 	IssueImpersonationToken(targetID, actorID string) (string, error)
 	VerifyAccessToken(raw string) (*token.Claims, error)
+	ParseClaimsAllowExpired(raw string) (*token.Claims, error)
 }
 
 // Service provides the orchestration layer for auth business logic.
@@ -750,13 +752,32 @@ func (s *Service) Impersonate(ctx context.Context, actor *PublicUser, targetID s
 	}, nil
 }
 
+// RefreshSession backs the generic POST /api/auth/refresh. It refuses to refresh
+// while impersonating: the current (impersonation) access token carries an `act`
+// claim, and minting a fresh session from the preserved admin refresh token here
+// would silently restore admin privileges without an explicit, audited stop.
+// Callers leave an impersonation session through StopImpersonation instead.
+func (s *Service) RefreshSession(ctx context.Context, rawCurrentAccessToken, rawRefreshToken string) (*Session, error) {
+	if strings.TrimSpace(rawCurrentAccessToken) != "" {
+		if claims, err := s.tokenManager.ParseClaimsAllowExpired(rawCurrentAccessToken); err == nil && strings.TrimSpace(claims.Act) != "" {
+			return nil, ErrImpersonationActive
+		}
+	}
+	return s.Refresh(ctx, rawRefreshToken)
+}
+
 // StopImpersonation ends an impersonation session and restores the admin. It
-// reads the current (impersonation) token to audit the stop, then refreshes
-// using the admin's preserved refresh token to mint a fresh admin session.
+// refreshes using the admin's preserved refresh token first, then — only after a
+// successful restore — audits the stop, so the start/stop bracketing is never
+// broken by a failed restore. An expired impersonation token is still read for
+// the audit so a late stop is recorded.
 func (s *Service) StopImpersonation(ctx context.Context, rawCurrentToken, rawRefreshToken string) (*Session, error) {
-	// Best-effort audit: only when the current token is a valid impersonation
-	// token. A normal refresh below restores the admin regardless.
-	if claims, err := s.tokenManager.VerifyAccessToken(rawCurrentToken); err == nil && strings.TrimSpace(claims.Act) != "" {
+	session, err := s.Refresh(ctx, rawRefreshToken)
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, perr := s.tokenManager.ParseClaimsAllowExpired(rawCurrentToken); perr == nil && strings.TrimSpace(claims.Act) != "" {
 		s.recordAudit(ctx, AuditEvent{
 			EventType: EventAuthImpersonationStopped,
 			Message:   "Impersonation stopped.",
@@ -767,7 +788,7 @@ func (s *Service) StopImpersonation(ctx context.Context, rawCurrentToken, rawRef
 		})
 	}
 
-	return s.Refresh(ctx, rawRefreshToken)
+	return session, nil
 }
 
 // isAdmin reports whether the given roles/permissions denote an administrator —

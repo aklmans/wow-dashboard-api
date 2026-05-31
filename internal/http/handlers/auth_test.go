@@ -558,9 +558,10 @@ type fakeAuthService struct {
 	resendVerificationToken string
 	resendVerificationErr   error
 
-	refreshToken   string
-	refreshSession *service.Session
-	refreshErr     error
+	refreshToken               string
+	refreshSessionCurrentToken string
+	refreshSession             *service.Session
+	refreshErr                 error
 
 	signOutToken string
 	signOutErr   error
@@ -659,6 +660,15 @@ func (f *fakeAuthService) ResendVerification(ctx context.Context, rawAccessToken
 }
 
 func (f *fakeAuthService) Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error) {
+	f.refreshToken = rawRefreshToken
+	if f.refreshErr != nil {
+		return nil, f.refreshErr
+	}
+	return f.refreshSession, nil
+}
+
+func (f *fakeAuthService) RefreshSession(ctx context.Context, rawCurrentAccessToken, rawRefreshToken string) (*service.Session, error) {
+	f.refreshSessionCurrentToken = rawCurrentAccessToken
 	f.refreshToken = rawRefreshToken
 	if f.refreshErr != nil {
 		return nil, f.refreshErr

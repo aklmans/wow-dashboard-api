@@ -90,6 +90,10 @@ func (openAPIAuthService) Refresh(context.Context, string) (*authservice.Session
 	return nil, nil
 }
 
+func (openAPIAuthService) RefreshSession(context.Context, string, string) (*authservice.Session, error) {
+	return nil, nil
+}
+
 func (openAPIAuthService) SignOut(context.Context, string) error {
 	return nil
 }

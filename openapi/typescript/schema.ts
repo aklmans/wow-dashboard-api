@@ -119,7 +119,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh session
-         * @description Rotates the refresh token cookie and returns a new access token.
+         * @description Rotates the refresh token cookie and returns a new access token. Refused (409) while impersonating — use the stop-impersonation endpoint instead.
          */
         post: operations["post-auth-refresh"];
         delete?: never;
@@ -1704,6 +1704,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                /** @description Bearer access token, if any; used to refuse refresh during impersonation */
+                Authorization?: string;
                 /** @description Refresh token cookie */
                 Cookie?: string;
             };
@@ -1724,6 +1726,7 @@ export interface operations {
             };
             401: components["responses"]["APIError"];
             403: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

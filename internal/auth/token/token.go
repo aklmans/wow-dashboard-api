@@ -177,3 +177,33 @@ func (m *Manager) VerifyAccessToken(raw string) (*Claims, error) {
 
 	return claims, nil
 }
+
+// ParseClaimsAllowExpired parses a token and returns its claims even when the
+// token has expired, but still requires a valid signature, issuer, and
+// audience. It exists so the refresh path can detect an impersonation session
+// from its (by then expired) access token; never use it to authorize a request.
+func (m *Manager) ParseClaimsAllowExpired(raw string) (*Claims, error) {
+	claims := &Claims{}
+
+	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {
+		return m.secret, nil
+	},
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithIssuer(m.issuer),
+		jwt.WithAudience(m.audience),
+		jwt.WithIssuedAt(),
+	)
+	if err != nil {
+		// Tolerate ONLY a pure expiry error; a bad signature, wrong issuer or
+		// audience, or malformed token is untrustworthy and rejected.
+		if !errors.Is(err, jwt.ErrTokenExpired) ||
+			errors.Is(err, jwt.ErrTokenSignatureInvalid) ||
+			errors.Is(err, jwt.ErrTokenMalformed) ||
+			errors.Is(err, jwt.ErrTokenInvalidIssuer) ||
+			errors.Is(err, jwt.ErrTokenInvalidAudience) {
+			return nil, errors.New("token: invalid token")
+		}
+	}
+
+	return claims, nil
+}

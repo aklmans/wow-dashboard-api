@@ -91,6 +91,39 @@ func TestImpersonate(t *testing.T) {
 	})
 }
 
+func TestRefreshSessionRefusesDuringImpersonation(t *testing.T) {
+	claims := &token.Claims{Act: uuid.New().String()}
+	claims.Subject = uuid.New().String()
+	svc := service.NewService(&fakeUserStore{}, &fakeTokenManager{claims: claims})
+
+	// An impersonation access token must not be refreshable into an admin session.
+	if _, err := svc.RefreshSession(context.Background(), "impersonation-token", "admin-refresh"); !errors.Is(err, service.ErrImpersonationActive) {
+		t.Fatalf("RefreshSession during impersonation err = %v, want ErrImpersonationActive", err)
+	}
+
+	// With no current access token the impersonation guard is skipped and it
+	// proceeds to the normal refresh (which may error for other reasons, but must
+	// never be ErrImpersonationActive).
+	if _, err := svc.RefreshSession(context.Background(), "", "admin-refresh"); errors.Is(err, service.ErrImpersonationActive) {
+		t.Fatal("a non-impersonation refresh must not be blocked")
+	}
+}
+
+func TestStopImpersonationDoesNotAuditWhenRestoreFails(t *testing.T) {
+	claims := &token.Claims{Act: "admin-id"}
+	claims.Subject = "target-id"
+	audit := &fakeAuditRecorder{}
+	// No refresh-token store is configured, so the underlying Refresh fails.
+	svc := service.NewService(&fakeUserStore{}, &fakeTokenManager{claims: claims}, service.WithAuditRecorder(audit))
+
+	if _, err := svc.StopImpersonation(context.Background(), "impersonation-token", "some-refresh"); err == nil {
+		t.Fatal("expected the stop to fail when the admin restore fails")
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("audit recorded %d events; stop must not be audited before a successful restore", len(audit.events))
+	}
+}
+
 func TestCurrentUserSurfacesImpersonation(t *testing.T) {
 	target := uuid.New()
 	adminID := uuid.New()

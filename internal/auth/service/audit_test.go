@@ -344,6 +344,13 @@ func (f *fakeTokenManager) VerifyAccessToken(raw string) (*token.Claims, error) 
 	return f.claims, nil
 }
 
+func (f *fakeTokenManager) ParseClaimsAllowExpired(raw string) (*token.Claims, error) {
+	if f.claims == nil {
+		return &token.Claims{}, nil
+	}
+	return f.claims, nil
+}
+
 func testAuthUser(t *testing.T, id uuid.UUID, email string, displayName string, status domain.UserStatus, plainPassword string) domain.AuthUser {
 	t.Helper()
 
