@@ -61,8 +61,15 @@ func TestAuthTokenStoreIntegration(t *testing.T) {
 		t.Fatalf("cross-purpose lookup err = %v, want ErrAuthTokenNotFound", err)
 	}
 
-	if err := tokenRepo.MarkAuthTokenUsed(ctx, tok.ID, now); err != nil {
-		t.Fatalf("MarkAuthTokenUsed failed: %v", err)
+	consumed, err := tokenRepo.ConsumeAuthToken(ctx, domain.AuthTokenPurposePasswordReset, "hash-1", now)
+	if err != nil {
+		t.Fatalf("ConsumeAuthToken failed: %v", err)
+	}
+	if consumed.ID != tok.ID || consumed.UsedAt == nil {
+		t.Fatalf("consumed token = %#v, want same token with used_at set", consumed)
+	}
+	if _, err := tokenRepo.ConsumeAuthToken(ctx, domain.AuthTokenPurposePasswordReset, "hash-1", now); !errors.Is(err, domain.ErrAuthTokenNotFound) {
+		t.Fatalf("second consume err = %v, want ErrAuthTokenNotFound", err)
 	}
 	used, err := tokenRepo.GetAuthTokenByHash(ctx, domain.AuthTokenPurposePasswordReset, "hash-1")
 	if err != nil || used.UsedAt == nil {

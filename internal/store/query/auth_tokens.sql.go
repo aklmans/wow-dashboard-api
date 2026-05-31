@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const consumeAuthToken = `-- name: ConsumeAuthToken :one
+UPDATE auth_tokens
+SET used_at = $1
+WHERE token_hash = $2
+  AND purpose = $3
+  AND used_at IS NULL
+  AND expires_at > $1
+RETURNING id, user_id, purpose, token_hash, expires_at, used_at, created_at
+`
+
+type ConsumeAuthTokenParams struct {
+	UsedAt    pgtype.Timestamptz
+	TokenHash string
+	Purpose   string
+}
+
+func (q *Queries) ConsumeAuthToken(ctx context.Context, arg ConsumeAuthTokenParams) (AuthToken, error) {
+	row := q.db.QueryRow(ctx, consumeAuthToken, arg.UsedAt, arg.TokenHash, arg.Purpose)
+	var i AuthToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Purpose,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createAuthToken = `-- name: CreateAuthToken :exec
 INSERT INTO auth_tokens (id, user_id, purpose, token_hash, expires_at, created_at)
 VALUES ($1, $2, $3, $4, $5, $6)
