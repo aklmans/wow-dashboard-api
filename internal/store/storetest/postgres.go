@@ -22,7 +22,7 @@ func NewPostgresPool(t testing.TB, ctx context.Context, database string, migrati
 	t.Helper()
 
 	pgContainer, err := postgres.Run(ctx,
-		"postgres:17-alpine",
+		"postgres:17.5-alpine",
 		postgres.WithDatabase(database),
 		postgres.WithUsername("test_user"),
 		postgres.WithPassword("test_password"),

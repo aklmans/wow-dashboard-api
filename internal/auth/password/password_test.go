@@ -111,6 +111,27 @@ func TestVerify_UnsupportedVersion(t *testing.T) {
 	}
 }
 
+func TestVerify_RejectsExcessiveArgon2Parameters(t *testing.T) {
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{"memory", "$argon2id$v=19$m=262145,t=2,p=1$c2FsdA$aGFzaA"},
+		{"iterations", "$argon2id$v=19$m=19456,t=11,p=1$c2FsdA$aGFzaA"},
+		{"parallelism", "$argon2id$v=19$m=19456,t=2,p=9$c2FsdA$aGFzaA"},
+		{"empty salt", "$argon2id$v=19$m=19456,t=2,p=1$$aGFzaA"},
+		{"empty key", "$argon2id$v=19$m=19456,t=2,p=1$c2FsdA$"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := password.Verify("anything", tt.hash); !errors.Is(err, password.ErrInvalidHash) {
+				t.Fatalf("Verify error = %v, want ErrInvalidHash", err)
+			}
+		})
+	}
+}
+
 func TestVerify_EmptyPassword(t *testing.T) {
 	encoded, err := password.Hash("notempty")
 	if err != nil {
