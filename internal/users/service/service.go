@@ -223,6 +223,14 @@ func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (domain
 		}
 	}
 
+	targetUser, err := s.fetchUser(ctx, targetID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if userHasRole(targetUser, "admin") && !actorCanGrantSystemAdmin(input.ActorRoles, input.ActorPermissions) {
+		return domain.User{}, ErrInsufficientPrivilege
+	}
+
 	metadata := func(user domain.User) AuditMetadata {
 		return AuditMetadata{
 			TargetUserID:  targetID.String(),
@@ -279,6 +287,15 @@ func actorCanGrantSystemAdmin(roles []string, permissions []string) bool {
 	}
 	for _, role := range roles {
 		if strings.TrimSpace(role) == "admin" {
+			return true
+		}
+	}
+	return false
+}
+
+func userHasRole(user domain.User, name string) bool {
+	for _, role := range user.Roles {
+		if strings.TrimSpace(role) == name {
 			return true
 		}
 	}
