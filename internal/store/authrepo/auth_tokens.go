@@ -53,6 +53,25 @@ func (s *AuthTokenStore) GetAuthTokenByHash(ctx context.Context, purpose string,
 	return authTokenFromRow(row)
 }
 
+// ConsumeAuthToken atomically marks an unused, unexpired token as used and
+// returns it. Missing, expired, used, or cross-purpose tokens surface as
+// domain.ErrAuthTokenNotFound so callers can keep a generic invalid-token
+// response.
+func (s *AuthTokenStore) ConsumeAuthToken(ctx context.Context, purpose string, tokenHash string, usedAt time.Time) (domain.AuthToken, error) {
+	row, err := s.queries.ConsumeAuthToken(ctx, query.ConsumeAuthTokenParams{
+		TokenHash: tokenHash,
+		Purpose:   purpose,
+		UsedAt:    pgTimestamp(usedAt),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AuthToken{}, domain.ErrAuthTokenNotFound
+		}
+		return domain.AuthToken{}, fmt.Errorf("authrepo: consume auth token: %w", err)
+	}
+	return authTokenFromRow(row)
+}
+
 func (s *AuthTokenStore) MarkAuthTokenUsed(ctx context.Context, id uuid.UUID, usedAt time.Time) error {
 	if err := s.queries.MarkAuthTokenUsed(ctx, query.MarkAuthTokenUsedParams{
 		ID:     pgUUID(id),

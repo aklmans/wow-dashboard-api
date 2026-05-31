@@ -125,6 +125,7 @@ type UserStore interface {
 type AuthTokenStore interface {
 	CreateAuthToken(ctx context.Context, input domain.CreateAuthTokenInput) error
 	GetAuthTokenByHash(ctx context.Context, purpose string, tokenHash string) (domain.AuthToken, error)
+	ConsumeAuthToken(ctx context.Context, purpose string, tokenHash string, usedAt time.Time) (domain.AuthToken, error)
 	MarkAuthTokenUsed(ctx context.Context, id uuid.UUID, usedAt time.Time) error
 	DeleteAuthTokensForUser(ctx context.Context, userID uuid.UUID, purpose string) error
 }
@@ -143,6 +144,7 @@ type RefreshTokenStore interface {
 type WorkDeps struct {
 	Users         UserStore
 	RefreshTokens RefreshTokenStore
+	AuthTokens    AuthTokenStore
 }
 
 // UnitOfWork defines the transactional boundary needed by auth workflows.
@@ -854,15 +856,31 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
-	if err := s.store.UpdateUserPassword(ctx, userID, newHash, now); err != nil {
-		return fmt.Errorf("auth: failed to update password: %w", err)
-	}
-
-	// Revoke every refresh token so a compromised session cannot survive a
-	// password change. This is best-effort — the password is already changed.
-	if s.refreshTokenStore != nil {
-		if err := s.refreshTokenStore.RevokeAllForUser(ctx, userID, now); err != nil {
-			slog.ErrorContext(ctx, "failed to revoke refresh tokens after password change", "error", err)
+	if s.unitOfWork != nil {
+		if err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			if deps.Users == nil {
+				return fmt.Errorf("auth: unit of work missing user store")
+			}
+			if err := deps.Users.UpdateUserPassword(ctx, userID, newHash, now); err != nil {
+				return fmt.Errorf("auth: failed to update password: %w", err)
+			}
+			if deps.RefreshTokens != nil {
+				if err := deps.RefreshTokens.RevokeAllForUser(ctx, userID, now); err != nil {
+					return fmt.Errorf("auth: failed to revoke refresh tokens after password change: %w", err)
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	} else {
+		if err := s.store.UpdateUserPassword(ctx, userID, newHash, now); err != nil {
+			return fmt.Errorf("auth: failed to update password: %w", err)
+		}
+		if s.refreshTokenStore != nil {
+			if err := s.refreshTokenStore.RevokeAllForUser(ctx, userID, now); err != nil {
+				return fmt.Errorf("auth: failed to revoke refresh tokens after password change: %w", err)
+			}
 		}
 	}
 
@@ -933,27 +951,49 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPasswor
 		return fmt.Errorf("%w: password must be at least %d characters", ErrInvalidInput, minPasswordLength)
 	}
 
-	authToken, err := s.consumeAuthToken(ctx, domain.AuthTokenPurposePasswordReset, rawToken)
-	if err != nil {
-		s.recordPasswordResetFailed(ctx, AuditMetadata{Reason: AuditReasonInvalidToken})
-		return err
-	}
-
 	newHash, err := password.Hash(newPassword)
 	if err != nil {
 		return fmt.Errorf("auth: failed to hash password: %w", err)
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)
-	if err := s.store.UpdateUserPassword(ctx, authToken.UserID, newHash, now); err != nil {
-		return fmt.Errorf("auth: failed to update password: %w", err)
-	}
-	if err := s.authTokenStore.MarkAuthTokenUsed(ctx, authToken.ID, now); err != nil {
-		slog.ErrorContext(ctx, "failed to mark reset token used", "error", err)
-	}
-	if s.refreshTokenStore != nil {
-		if err := s.refreshTokenStore.RevokeAllForUser(ctx, authToken.UserID, now); err != nil {
-			slog.ErrorContext(ctx, "failed to revoke refresh tokens after password reset", "error", err)
+	var authToken domain.AuthToken
+	if s.unitOfWork != nil {
+		err = s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			if deps.Users == nil || deps.AuthTokens == nil {
+				return fmt.Errorf("auth: unit of work missing reset-password stores")
+			}
+			var consumeErr error
+			authToken, consumeErr = s.consumeAuthTokenFromStore(ctx, deps.AuthTokens, domain.AuthTokenPurposePasswordReset, rawToken, now)
+			if consumeErr != nil {
+				return consumeErr
+			}
+			if err := deps.Users.UpdateUserPassword(ctx, authToken.UserID, newHash, now); err != nil {
+				return fmt.Errorf("auth: failed to update password: %w", err)
+			}
+			if deps.RefreshTokens != nil {
+				if err := deps.RefreshTokens.RevokeAllForUser(ctx, authToken.UserID, now); err != nil {
+					return fmt.Errorf("auth: failed to revoke refresh tokens after password reset: %w", err)
+				}
+			}
+			return nil
+		})
+	} else {
+		authToken, err = s.consumeAuthToken(ctx, domain.AuthTokenPurposePasswordReset, rawToken)
+		if err == nil {
+			if err = s.store.UpdateUserPassword(ctx, authToken.UserID, newHash, now); err != nil {
+				err = fmt.Errorf("auth: failed to update password: %w", err)
+			} else if s.refreshTokenStore != nil {
+				if revokeErr := s.refreshTokenStore.RevokeAllForUser(ctx, authToken.UserID, now); revokeErr != nil {
+					err = fmt.Errorf("auth: failed to revoke refresh tokens after password reset: %w", revokeErr)
+				}
+			}
 		}
+	}
+	if err != nil {
+		if errors.Is(err, ErrInvalidToken) {
+			s.recordPasswordResetFailed(ctx, AuditMetadata{Reason: AuditReasonInvalidToken})
+		}
+		return err
 	}
 	s.recordPasswordReset(ctx, AuditMetadata{UserID: authToken.UserID.String()})
 	return nil
@@ -965,17 +1005,37 @@ func (s *Service) VerifyEmail(ctx context.Context, rawToken string) error {
 	if s.authTokenStore == nil {
 		return fmt.Errorf("auth: email verification is not configured")
 	}
-	authToken, err := s.consumeAuthToken(ctx, domain.AuthTokenPurposeEmailVerification, rawToken)
-	if err != nil {
-		s.recordEmailVerificationFailed(ctx, AuditMetadata{Reason: AuditReasonInvalidToken})
-		return err
-	}
 	now := s.now().UTC().Truncate(time.Microsecond)
-	if err := s.store.SetEmailVerified(ctx, authToken.UserID, now, now); err != nil {
-		return fmt.Errorf("auth: failed to mark email verified: %w", err)
+	var authToken domain.AuthToken
+	var err error
+	if s.unitOfWork != nil {
+		err = s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+			if deps.Users == nil || deps.AuthTokens == nil {
+				return fmt.Errorf("auth: unit of work missing email-verification stores")
+			}
+			var consumeErr error
+			authToken, consumeErr = s.consumeAuthTokenFromStore(ctx, deps.AuthTokens, domain.AuthTokenPurposeEmailVerification, rawToken, now)
+			if consumeErr != nil {
+				return consumeErr
+			}
+			if err := deps.Users.SetEmailVerified(ctx, authToken.UserID, now, now); err != nil {
+				return fmt.Errorf("auth: failed to mark email verified: %w", err)
+			}
+			return nil
+		})
+	} else {
+		authToken, err = s.consumeAuthToken(ctx, domain.AuthTokenPurposeEmailVerification, rawToken)
+		if err == nil {
+			if err = s.store.SetEmailVerified(ctx, authToken.UserID, now, now); err != nil {
+				err = fmt.Errorf("auth: failed to mark email verified: %w", err)
+			}
+		}
 	}
-	if err := s.authTokenStore.MarkAuthTokenUsed(ctx, authToken.ID, now); err != nil {
-		slog.ErrorContext(ctx, "failed to mark verification token used", "error", err)
+	if err != nil {
+		if errors.Is(err, ErrInvalidToken) {
+			s.recordEmailVerificationFailed(ctx, AuditMetadata{Reason: AuditReasonInvalidToken})
+		}
+		return err
 	}
 	s.recordEmailVerified(ctx, AuditMetadata{UserID: authToken.UserID.String()})
 	return nil
@@ -1012,22 +1072,23 @@ func (s *Service) ResendVerification(ctx context.Context, rawAccessToken string)
 // consumeAuthToken looks up a token by purpose and confirms it is unused and
 // unexpired. A missing, used, or expired token surfaces as ErrInvalidToken.
 func (s *Service) consumeAuthToken(ctx context.Context, purpose string, rawToken string) (domain.AuthToken, error) {
+	return s.consumeAuthTokenFromStore(ctx, s.authTokenStore, purpose, rawToken, s.now().UTC().Truncate(time.Microsecond))
+}
+
+func (s *Service) consumeAuthTokenFromStore(ctx context.Context, store AuthTokenStore, purpose string, rawToken string, now time.Time) (domain.AuthToken, error) {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
 		return domain.AuthToken{}, ErrInvalidToken
 	}
-	authToken, err := s.authTokenStore.GetAuthTokenByHash(ctx, purpose, hashRefreshToken(rawToken))
+	if store == nil {
+		return domain.AuthToken{}, fmt.Errorf("auth: token store is not configured")
+	}
+	authToken, err := store.ConsumeAuthToken(ctx, purpose, hashRefreshToken(rawToken), now)
 	if err != nil {
 		if errors.Is(err, domain.ErrAuthTokenNotFound) {
 			return domain.AuthToken{}, ErrInvalidToken
 		}
-		return domain.AuthToken{}, fmt.Errorf("auth: failed to retrieve token: %w", err)
-	}
-	if authToken.UsedAt != nil {
-		return domain.AuthToken{}, ErrInvalidToken
-	}
-	if !authToken.ExpiresAt.After(s.now().UTC()) {
-		return domain.AuthToken{}, ErrInvalidToken
+		return domain.AuthToken{}, fmt.Errorf("auth: failed to consume token: %w", err)
 	}
 	return authToken, nil
 }
@@ -1106,6 +1167,9 @@ func (s *Service) rotateSession(ctx context.Context, user domain.User, currentTo
 
 	if _, err := s.refreshTokenStore.RotateRefreshToken(ctx, currentToken.ID, input, revokedAt); err != nil {
 		if errors.Is(err, domain.ErrRefreshTokenNotFound) {
+			if revokeErr := s.refreshTokenStore.RevokeRefreshTokenFamily(ctx, currentToken.FamilyID, revokedAt); revokeErr != nil {
+				return nil, fmt.Errorf("auth: failed to revoke refresh token family after rotation conflict: %w", revokeErr)
+			}
 			return nil, ErrInvalidToken
 		}
 		return nil, err

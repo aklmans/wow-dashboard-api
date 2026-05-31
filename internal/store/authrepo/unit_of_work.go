@@ -40,6 +40,7 @@ func (u *UnitOfWork) Do(ctx context.Context, fn func(context.Context, authservic
 	deps := authservice.WorkDeps{
 		Users:         NewUserStore(queries),
 		RefreshTokens: NewRefreshTokenStore(queries),
+		AuthTokens:    NewAuthTokenStore(queries),
 	}
 
 	if err := fn(ctx, deps); err != nil {

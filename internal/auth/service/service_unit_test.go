@@ -350,6 +350,21 @@ func TestServiceChangePassword(t *testing.T) {
 			t.Fatalf("ChangePassword error = %v, want ErrInvalidInput", err)
 		}
 	})
+
+	t.Run("session revocation failure is returned", func(t *testing.T) {
+		revokeErr := errors.New("revoke failed")
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
+		}
+		refreshStore := &unitRefreshTokenStore{revokeAllErr: revokeErr}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "new-password-123")
+		if !errors.Is(err, revokeErr) {
+			t.Fatalf("ChangePassword error = %v, want revoke error", err)
+		}
+	})
 }
 
 func TestServiceCurrentUserWithDomainStore(t *testing.T) {
@@ -557,6 +572,37 @@ func TestServiceRefreshWithDomainStores(t *testing.T) {
 			t.Fatalf("revoked family = %s, want %s", refreshStore.revokedFamily, familyID)
 		}
 	})
+
+	t.Run("rotation conflict revokes the whole family", func(t *testing.T) {
+		familyID := uuid.MustParse("00000000-0000-0000-0000-0000000000fb")
+		refreshStore := &unitRefreshTokenStore{
+			token: domain.RefreshToken{
+				ID:        oldTokenID,
+				UserID:    userID,
+				FamilyID:  familyID,
+				ExpiresAt: now.Add(time.Hour),
+			},
+			rotateErr: domain.ErrRefreshTokenNotFound,
+		}
+		authSvc := service.NewService(&unitUserStore{
+			user: domain.User{
+				ID:          userID,
+				Email:       "demo@example.com",
+				DisplayName: "Demo User",
+				Status:      domain.UserStatusActive,
+			},
+		}, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour),
+			service.WithClock(func() time.Time { return now }))
+
+		_, err := authSvc.Refresh(context.Background(), "conflicting-token")
+		if !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("Refresh error = %v, want ErrInvalidToken", err)
+		}
+		if refreshStore.revokedFamily != familyID {
+			t.Fatalf("revoked family = %s, want %s", refreshStore.revokedFamily, familyID)
+		}
+	})
 }
 
 func TestServiceSignOutRevokesRefreshTokenIdempotently(t *testing.T) {
@@ -701,6 +747,7 @@ type unitRefreshTokenStore struct {
 	revokedFamily     uuid.UUID
 	revokeFamErr      error
 	revokedAllForUser uuid.UUID
+	revokeAllErr      error
 }
 
 func (s *unitRefreshTokenStore) CreateRefreshToken(ctx context.Context, input domain.CreateRefreshTokenInput) (domain.RefreshToken, error) {
@@ -740,12 +787,13 @@ func (s *unitRefreshTokenStore) RevokeRefreshTokenFamily(ctx context.Context, fa
 
 func (s *unitRefreshTokenStore) RevokeAllForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error {
 	s.revokedAllForUser = userID
-	return nil
+	return s.revokeAllErr
 }
 
 type unitOfWork struct {
 	users         *unitUserStore
 	refreshTokens *unitRefreshTokenStore
+	authTokens    *fakeAuthTokenStore
 	calls         int
 	fnErr         error
 	committed     bool
@@ -757,6 +805,7 @@ func (u *unitOfWork) Do(ctx context.Context, fn func(context.Context, service.Wo
 	err := fn(ctx, service.WorkDeps{
 		Users:         u.users,
 		RefreshTokens: u.refreshTokens,
+		AuthTokens:    u.authTokens,
 	})
 	u.fnErr = err
 	if err != nil {
@@ -803,6 +852,8 @@ type fakeAuthTokenStore struct {
 	created    []domain.CreateAuthTokenInput
 	token      domain.AuthToken
 	getErr     error
+	consumeErr error
+	consumed   []string
 	markedUsed []uuid.UUID
 	deleted    []string
 }
@@ -817,6 +868,23 @@ func (s *fakeAuthTokenStore) GetAuthTokenByHash(ctx context.Context, purpose str
 		return domain.AuthToken{}, s.getErr
 	}
 	return s.token, nil
+}
+
+func (s *fakeAuthTokenStore) ConsumeAuthToken(ctx context.Context, purpose string, tokenHash string, usedAt time.Time) (domain.AuthToken, error) {
+	s.consumed = append(s.consumed, purpose)
+	if s.consumeErr != nil {
+		return domain.AuthToken{}, s.consumeErr
+	}
+	if s.getErr != nil {
+		return domain.AuthToken{}, s.getErr
+	}
+	if s.token.UsedAt != nil || !s.token.ExpiresAt.After(usedAt) || (s.token.Purpose != "" && s.token.Purpose != purpose) {
+		return domain.AuthToken{}, domain.ErrAuthTokenNotFound
+	}
+	token := s.token
+	token.UsedAt = &usedAt
+	s.token = token
+	return token, nil
 }
 
 func (s *fakeAuthTokenStore) MarkAuthTokenUsed(ctx context.Context, id uuid.UUID, usedAt time.Time) error {
@@ -902,11 +970,25 @@ func TestServiceResetPassword(t *testing.T) {
 		if store.updatedPasswordHash == "" {
 			t.Fatal("password was not updated")
 		}
-		if len(tokens.markedUsed) != 1 {
-			t.Fatalf("marked-used tokens = %d, want 1", len(tokens.markedUsed))
+		if len(tokens.consumed) != 1 {
+			t.Fatalf("consumed tokens = %d, want 1", len(tokens.consumed))
 		}
 		if refreshStore.revokedAllForUser != userID {
 			t.Fatalf("revokedAllForUser = %s, want %s", refreshStore.revokedAllForUser, userID)
+		}
+	})
+
+	t.Run("session revocation failure is returned", func(t *testing.T) {
+		revokeErr := errors.New("revoke failed")
+		tokens := &fakeAuthTokenStore{token: validToken()}
+		refreshStore := &unitRefreshTokenStore{revokeAllErr: revokeErr}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{},
+			service.WithAuthTokenStore(tokens),
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		err := authSvc.ResetPassword(context.Background(), "raw-token", "new-password-123")
+		if !errors.Is(err, revokeErr) {
+			t.Fatalf("ResetPassword error = %v, want revoke error", err)
 		}
 	})
 
@@ -964,8 +1046,8 @@ func TestServiceVerifyEmail(t *testing.T) {
 		if !store.emailVerifiedSet {
 			t.Fatal("email was not marked verified")
 		}
-		if len(tokens.markedUsed) != 1 {
-			t.Fatalf("marked-used tokens = %d, want 1", len(tokens.markedUsed))
+		if len(tokens.consumed) != 1 {
+			t.Fatalf("consumed tokens = %d, want 1", len(tokens.consumed))
 		}
 	})
 

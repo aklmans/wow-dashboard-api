@@ -7,6 +7,15 @@ SELECT id, user_id, purpose, token_hash, expires_at, used_at, created_at
 FROM auth_tokens
 WHERE token_hash = @token_hash AND purpose = @purpose;
 
+-- name: ConsumeAuthToken :one
+UPDATE auth_tokens
+SET used_at = @used_at
+WHERE token_hash = @token_hash
+  AND purpose = @purpose
+  AND used_at IS NULL
+  AND expires_at > @used_at
+RETURNING id, user_id, purpose, token_hash, expires_at, used_at, created_at;
+
 -- name: MarkAuthTokenUsed :exec
 UPDATE auth_tokens
 SET used_at = @used_at
