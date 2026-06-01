@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 	"github.com/aklmans/wow-dashboard-api/internal/users/domain"
 	"github.com/aklmans/wow-dashboard-api/internal/users/service"
 )
@@ -144,6 +145,51 @@ func TestServiceUpdateUserChangesStatus(t *testing.T) {
 	}
 	if len(audit.events) != 1 || audit.events[0].EventType != service.EventUserUpdated {
 		t.Fatalf("audit = %#v, want one users.user.updated", audit.events)
+	}
+}
+
+func TestServiceUpdateUserAttributesImpersonator(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	impersonatorID := uuid.New()
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID, Status: domain.UserStatusDisabled, Roles: []string{"user"}}}
+	audit := &fakeUserAuditRecorder{}
+	svc := service.NewService(store, service.WithAuditRecorder(audit))
+
+	// An impersonated request stamps the admin behind the "act as" session into
+	// the audit metadata so the action is attributable to the real actor.
+	ctx := auditctx.WithImpersonator(context.Background(), impersonatorID.String())
+	if _, err := svc.UpdateUser(ctx, service.UpdateUserInput{
+		ActorUserID:  actorID.String(),
+		TargetUserID: targetID.String(),
+		Status:       strptr("DISABLED"),
+	}); err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	if len(audit.events) != 1 {
+		t.Fatalf("audit events = %d, want 1", len(audit.events))
+	}
+	if got := audit.events[0].Metadata.ImpersonatorID; got != impersonatorID.String() {
+		t.Fatalf("ImpersonatorID = %q, want %q", got, impersonatorID.String())
+	}
+}
+
+func TestServiceUpdateUserOmitsImpersonatorWhenNotImpersonating(t *testing.T) {
+	actorID := uuid.New()
+	targetID := uuid.New()
+	store := &fakeUserStore{updateResult: domain.User{ID: targetID, Status: domain.UserStatusDisabled, Roles: []string{"user"}}}
+	audit := &fakeUserAuditRecorder{}
+	svc := service.NewService(store, service.WithAuditRecorder(audit))
+
+	if _, err := svc.UpdateUser(context.Background(), service.UpdateUserInput{
+		ActorUserID:  actorID.String(),
+		TargetUserID: targetID.String(),
+		Status:       strptr("DISABLED"),
+	}); err != nil {
+		t.Fatalf("UpdateUser returned error: %v", err)
+	}
+	if got := audit.events[0].Metadata.ImpersonatorID; got != "" {
+		t.Fatalf("ImpersonatorID = %q, want empty for a non-impersonated update", got)
 	}
 }
 
