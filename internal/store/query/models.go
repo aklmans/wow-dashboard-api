@@ -97,6 +97,27 @@ type User struct {
 	JobTitle         pgtype.Text
 	Company          pgtype.Text
 	LastLoginAt      pgtype.Timestamptz
+	MfaEnabled       bool
+	MfaConfirmedAt   pgtype.Timestamptz
+}
+
+type UserMfaRecoveryCode struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	CodeHash  string
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+type UserMfaSecret struct {
+	ID              pgtype.UUID
+	UserID          pgtype.UUID
+	SecretEncrypted string
+	Algorithm       string
+	Digits          int32
+	Period          int32
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type UserRole struct {

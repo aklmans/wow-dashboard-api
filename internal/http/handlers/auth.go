@@ -51,6 +51,7 @@ type authMeUser struct {
 	JobTitle      string     `json:"jobTitle" example:"" doc:"User job title; empty when unset"`
 	Company       string     `json:"company" example:"" doc:"User company; empty when unset"`
 	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty" doc:"Last successful sign-in time; null if the user has never signed in"`
+	MfaEnabled    bool       `json:"mfaEnabled" example:"false" doc:"Whether the user has confirmed TOTP MFA"`
 	Roles         []string   `json:"roles" nullable:"false" doc:"Names of the roles assigned to the user"`
 	Permissions   []string   `json:"permissions" nullable:"false" doc:"Effective permission strings granted by the user's roles"`
 	// Impersonator* are present only while an admin is acting as this user.
@@ -599,6 +600,7 @@ func meUserResponse(user service.PublicUser) authMeUser {
 		JobTitle:          user.JobTitle,
 		Company:           user.Company,
 		LastLoginAt:       user.LastLoginAt,
+		MfaEnabled:        user.MfaEnabled,
 		Roles:             roles,
 		Permissions:       permissions,
 		ImpersonatorID:    user.ImpersonatorID,

@@ -189,6 +189,13 @@
             "format": "date-time",
             "type": "string"
           },
+          "mfaEnabled": {
+            "description": "Whether the user has confirmed TOTP MFA",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "permissions": {
             "description": "Effective permission strings granted by the user's roles",
             "items": {
@@ -220,6 +227,7 @@
           "phone",
           "jobTitle",
           "company",
+          "mfaEnabled",
           "roles",
           "permissions"
         ],
@@ -549,6 +557,85 @@
         },
         "required": [
           "status"
+        ],
+        "type": "object"
+      },
+      "MfaConfirmBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MfaConfirmBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "recoveryCodes": {
+            "description": "One-time recovery codes — shown once, store them somewhere safe",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "recoveryCodes"
+        ],
+        "type": "object"
+      },
+      "MfaConfirmInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MfaConfirmInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "code": {
+            "description": "The current code from the authenticator app",
+            "examples": [
+              "123456"
+            ],
+            "maxLength": 16,
+            "minLength": 6,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "MfaSetupBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MfaSetupBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "otpauthUrl": {
+            "description": "otpauth:// URI to render as a QR code in an authenticator app",
+            "type": "string"
+          },
+          "secret": {
+            "description": "Base32 TOTP secret for manual entry as an alternative to the QR code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "otpauthUrl",
+          "secret"
         ],
         "type": "object"
       },
@@ -2110,6 +2197,109 @@
           }
         },
         "summary": "Update own profile",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/mfa/confirm": {
+      "post": {
+        "description": "Verifies the first authenticator code, turns MFA on, and returns one-time recovery codes (shown only once).",
+        "operationId": "post-auth-mfa-confirm",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaConfirmInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaConfirmBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "409": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Confirm MFA enrollment",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/mfa/setup": {
+      "post": {
+        "description": "Generates a new TOTP secret for the current user and returns an otpauth URI + the raw secret. MFA is not active until the code is confirmed.",
+        "operationId": "post-auth-mfa-setup",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaSetupBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "409": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Start MFA enrollment",
         "tags": [
           "Auth"
         ]

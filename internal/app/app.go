@@ -19,12 +19,14 @@ import (
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/token"
 	"github.com/aklmans/wow-dashboard-api/internal/config"
+	appcrypto "github.com/aklmans/wow-dashboard-api/internal/crypto"
 	"github.com/aklmans/wow-dashboard-api/internal/email"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	"github.com/aklmans/wow-dashboard-api/internal/http/handlers"
 	httpmiddleware "github.com/aklmans/wow-dashboard-api/internal/http/middleware"
 	"github.com/aklmans/wow-dashboard-api/internal/jobs"
 	"github.com/aklmans/wow-dashboard-api/internal/logging"
+	mfaservice "github.com/aklmans/wow-dashboard-api/internal/mfa/service"
 	notificationsservice "github.com/aklmans/wow-dashboard-api/internal/notifications/service"
 	"github.com/aklmans/wow-dashboard-api/internal/observability"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
@@ -44,6 +46,7 @@ import (
 // Dependencies contains route-level use-case dependencies.
 type Dependencies struct {
 	AuthService             handlers.AuthService
+	MfaService              handlers.MfaService
 	UsersService            handlers.UsersService
 	RolesService            handlers.RolesService
 	ProjectsService         handlers.ProjectsService
@@ -65,6 +68,9 @@ func RegisterRoutes(api huma.API, deps Dependencies) {
 			authMiddlewares = append(authMiddlewares, deps.AuthRateLimitMiddleware)
 		}
 		handlers.RegisterAuthWithCookies(api, deps.AuthService, deps.RefreshCookie, deps.AccessCookie, authMiddlewares...)
+		if deps.MfaService != nil {
+			handlers.RegisterMfa(api, deps.AuthService, deps.MfaService, authMiddlewares...)
+		}
 	}
 	if deps.AuthService != nil && deps.UsersService != nil {
 		handlers.RegisterUsers(api, deps.AuthService, deps.UsersService)
@@ -242,6 +248,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		authservice.WithEmailSender(emailSender),
 		authservice.WithAppBaseURL(cfg.AppBaseURL),
 		authservice.WithLockoutPolicy(cfg.AuthMaxFailedLoginAttempts, cfg.AuthAccountLockoutWindow()))
+	mfaCipher, err := appcrypto.NewCipher(cfg.MfaEncryptionKey)
+	if err != nil {
+		return fmt.Errorf("app: mfa cipher: %w", err)
+	}
+	mfaSvc := mfaservice.NewService(authrepo.NewMfaStore(queries), mfaCipher, cfg.AppName,
+		mfaservice.WithAuditRecorder(auditRecorder))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(pool),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)),
 		userservice.WithUnitOfWork(usersrepo.NewUnitOfWork(pool)))
@@ -270,6 +282,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Wire application routes
 	RegisterRoutes(api, Dependencies{
 		AuthService:             authSvc,
+		MfaService:              mfaSvc,
 		UsersService:            usersSvc,
 		RolesService:            rolesSvc,
 		ProjectsService:         projectsSvc,

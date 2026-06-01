@@ -74,6 +74,7 @@ type PublicUser struct {
 	JobTitle      string     `json:"jobTitle"`
 	Company       string     `json:"company"`
 	LastLoginAt   *time.Time `json:"lastLoginAt,omitempty"`
+	MfaEnabled    bool       `json:"mfaEnabled"`
 	Roles         []string   `json:"roles,omitempty"`
 	Permissions   []string   `json:"permissions,omitempty"`
 	// ImpersonatorID / ImpersonatorEmail are set only while this session is an
@@ -713,6 +714,7 @@ func (s *Service) CurrentUser(ctx context.Context, rawAccessToken string) (*Publ
 		JobTitle:      user.JobTitle,
 		Company:       user.Company,
 		LastLoginAt:   user.LastLoginAt,
+		MfaEnabled:    user.MfaEnabled,
 		Roles:         roles,
 		Permissions:   permissions,
 	}

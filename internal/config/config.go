@@ -102,7 +102,12 @@ type Config struct {
 	SystemEventsRetentionDays int `env:"SYSTEM_EVENTS_RETENTION_DAYS" envDefault:"90"`
 
 	// JWT authentication configuration.
-	JWTAccessSecret          string `env:"JWT_ACCESS_SECRET" envDefault:"dev-only-change-me-min-32-characters"`
+	JWTAccessSecret string `env:"JWT_ACCESS_SECRET" envDefault:"dev-only-change-me-min-32-characters"`
+	// MfaEncryptionKey is the symmetric secret used to encrypt TOTP secrets at
+	// rest (AES-256-GCM, key = SHA-256 of this value). Must be high-entropy and
+	// >= 32 chars; production rejects the dev default. Rotating it makes existing
+	// MFA secrets undecryptable, so enrolled users would have to re-enroll.
+	MfaEncryptionKey         string `env:"MFA_ENCRYPTION_KEY" envDefault:"dev-only-change-me-mfa-encryption-key-32+"`
 	JWTIssuer                string `env:"JWT_ISSUER" envDefault:"wow-dashboard-api"`
 	JWTAudience              string `env:"JWT_AUDIENCE" envDefault:"wow-dashboard"`
 	JWTAccessTokenTTLSeconds int    `env:"JWT_ACCESS_TOKEN_TTL_SECONDS" envDefault:"900"`
@@ -374,6 +379,10 @@ const defaultJWTSecret = "dev-only-change-me-min-32-characters"
 // minJWTSecretLength is the minimum acceptable length for JWT signing secrets.
 const minJWTSecretLength = 32
 
+// defaultMfaEncryptionKey is the dev-only placeholder for the MFA secret-at-rest
+// key. Like the JWT secret it must never be used in production.
+const defaultMfaEncryptionKey = "dev-only-change-me-mfa-encryption-key-32+"
+
 // maxAuthAccountLockoutSeconds is the largest lockout window that still fits in
 // a time.Duration once multiplied by time.Second, so a configured value can
 // never silently wrap to a negative or absurd duration.
@@ -532,6 +541,26 @@ func Load() (*Config, error) {
 		for _, p := range placeholders {
 			if strings.Contains(secretLower, p) {
 				return nil, fmt.Errorf("JWT_ACCESS_SECRET must not contain common placeholder %q in production", p)
+			}
+		}
+	}
+
+	// 5b. MFA Encryption Key Constraints (mirrors the JWT secret rules — it
+	// derives an AES-256 key, so the same entropy/placeholder bar applies).
+	if len(cfg.MfaEncryptionKey) < minJWTSecretLength {
+		return nil, fmt.Errorf("MFA_ENCRYPTION_KEY must be at least %d characters", minJWTSecretLength)
+	}
+	if cfg.Env == "production" {
+		if cfg.MfaEncryptionKey == defaultMfaEncryptionKey {
+			return nil, fmt.Errorf("MFA_ENCRYPTION_KEY must not use the default dev key in production")
+		}
+		if cfg.MfaEncryptionKey == cfg.JWTAccessSecret {
+			return nil, fmt.Errorf("MFA_ENCRYPTION_KEY must differ from JWT_ACCESS_SECRET in production")
+		}
+		keyLower := strings.ToLower(cfg.MfaEncryptionKey)
+		for _, p := range []string{"change-me", "changeme", "dev-only", "example", "secret"} {
+			if strings.Contains(keyLower, p) {
+				return nil, fmt.Errorf("MFA_ENCRYPTION_KEY must not contain common placeholder %q in production", p)
 			}
 		}
 	}
