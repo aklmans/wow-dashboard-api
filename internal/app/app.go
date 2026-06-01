@@ -240,7 +240,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		authservice.WithAuditRecorder(auditRecorder),
 		authservice.WithAuthTokenStore(authTokenStore),
 		authservice.WithEmailSender(emailSender),
-		authservice.WithAppBaseURL(cfg.AppBaseURL))
+		authservice.WithAppBaseURL(cfg.AppBaseURL),
+		authservice.WithLockoutPolicy(cfg.AuthMaxFailedLoginAttempts, cfg.AuthAccountLockoutWindow()))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(pool),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)),
 		userservice.WithUnitOfWork(usersrepo.NewUnitOfWork(pool)))

@@ -82,6 +82,8 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `AUTH_RATE_LIMIT_REQUESTS` | `10` | Sustained auth requests allowed per window per IP |
 | `AUTH_RATE_LIMIT_WINDOW_SECONDS` | `60` | Auth rate limit window in seconds |
 | `AUTH_RATE_LIMIT_BURST` | `5` | Auth requests allowed immediately before throttling per IP |
+| `AUTH_MAX_FAILED_LOGIN_ATTEMPTS` | `10` | Consecutive failed sign-ins that lock an account (per-account, complements the per-IP limiter) |
+| `AUTH_ACCOUNT_LOCKOUT_SECONDS` | `900` | How long a locked account stays locked, in seconds (self-healing) |
 | `JWT_ACCESS_SECRET` | `dev-only-change-me-min-32-characters` | JWT signing secret (minimum 32 characters, default forbidden in production) |
 | `JWT_ISSUER` | `wow-dashboard-api` | Expected JWT issuer claim |
 | `JWT_AUDIENCE` | `wow-dashboard` | Expected JWT audience claim |
@@ -192,7 +194,7 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 
 The sensitive auth endpoints — `sign-up`, `sign-in`, `change-password`, `forgot-password`, `reset-password`, `verify-email`, and `resend-verification` — are protected by a shared per-IP rate limiter, so credential stuffing, password-reset email bombing, and token brute-forcing all draw from one budget per client IP. The default allows 10 auth attempts per minute with a burst of 5; limited requests return `429` with `code: "rate_limited"` and a `Retry-After` header. High-frequency read/session endpoints (`refresh`, `GET /me`) are intentionally excluded so normal sessions are never throttled. The password-reset and email-verification flows additionally emit audit events — `auth.password.reset_requested`, `auth.password.reset_failed`, and `auth.email.verification_failed` — so abuse attempts are visible in the system-events log. The limiter is in-memory and per-instance by default; set `REDIS_URL` (e.g. `redis://localhost:6379/0`) to share the limit across instances via a Redis fixed-window counter. The Redis limiter fails open — if Redis is unreachable, requests are allowed rather than blocked.
 
-Sign-in additionally enforces a per-account lockout: after 10 consecutive failed attempts an account is locked for 15 minutes (self-healing — the lock simply expires). A locked account returns the same generic invalid-credentials error so the lock state cannot be probed; a successful sign-in clears the counter.
+Sign-in additionally enforces a per-account lockout: after a configurable number of consecutive failed attempts (`AUTH_MAX_FAILED_LOGIN_ATTEMPTS`, default 10) an account is locked for `AUTH_ACCOUNT_LOCKOUT_SECONDS` (default 900s / 15 minutes, self-healing — the lock simply expires). A locked account returns the same generic invalid-credentials error so the lock state cannot be probed; a successful sign-in clears the counter.
 
 Password reset (`forgot-password` → `reset-password`) and email verification (a link is sent on sign-up and confirmed via `verify-email`) deliver one-time tokens by email. Delivery goes through a pluggable `email.Sender`; the default development sender logs the message instead of delivering it, so the flows run end to end before a real provider is wired in. `GET /api/auth/me` reports `emailVerified`; verification status is tracked and surfaced but not yet enforced.
 

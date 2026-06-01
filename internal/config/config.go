@@ -68,6 +68,12 @@ type Config struct {
 	AuthRateLimitWindowSeconds int  `env:"AUTH_RATE_LIMIT_WINDOW_SECONDS" envDefault:"60"`
 	AuthRateLimitBurst         int  `env:"AUTH_RATE_LIMIT_BURST" envDefault:"5"`
 
+	// Per-account brute-force lockout policy (complements the per-IP limiter
+	// above). After AuthMaxFailedLoginAttempts consecutive failed sign-ins an
+	// account is locked for AuthAccountLockoutSeconds; the lock self-heals.
+	AuthMaxFailedLoginAttempts int `env:"AUTH_MAX_FAILED_LOGIN_ATTEMPTS" envDefault:"10"`
+	AuthAccountLockoutSeconds  int `env:"AUTH_ACCOUNT_LOCKOUT_SECONDS" envDefault:"900"`
+
 	// RedisURL, when set, makes auth rate limiting shared across instances via
 	// Redis; empty keeps the per-instance in-memory limiter.
 	RedisURL string `env:"REDIS_URL" envDefault:""`
@@ -334,6 +340,11 @@ func (c *Config) AuthRateLimitWindow() time.Duration {
 	return time.Duration(c.AuthRateLimitWindowSeconds) * time.Second
 }
 
+// AuthAccountLockoutWindow returns the per-account lockout duration.
+func (c *Config) AuthAccountLockoutWindow() time.Duration {
+	return time.Duration(c.AuthAccountLockoutSeconds) * time.Second
+}
+
 // JWTAccessTokenTTL returns the access token time-to-live as a time.Duration.
 func (c *Config) JWTAccessTokenTTL() time.Duration {
 	return time.Duration(c.JWTAccessTokenTTLSeconds) * time.Second
@@ -484,6 +495,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.AuthRateLimitBurst <= 0 {
 		return nil, fmt.Errorf("AUTH_RATE_LIMIT_BURST must be greater than 0")
+	}
+	if cfg.AuthMaxFailedLoginAttempts <= 0 {
+		return nil, fmt.Errorf("AUTH_MAX_FAILED_LOGIN_ATTEMPTS must be greater than 0")
+	}
+	if cfg.AuthAccountLockoutSeconds <= 0 {
+		return nil, fmt.Errorf("AUTH_ACCOUNT_LOCKOUT_SECONDS must be greater than 0")
 	}
 
 	// 5. JWT Secret Constraints
