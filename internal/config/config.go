@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net/mail"
 	"net/url"
 	"os"
@@ -373,6 +374,11 @@ const defaultJWTSecret = "dev-only-change-me-min-32-characters"
 // minJWTSecretLength is the minimum acceptable length for JWT signing secrets.
 const minJWTSecretLength = 32
 
+// maxAuthAccountLockoutSeconds is the largest lockout window that still fits in
+// a time.Duration once multiplied by time.Second, so a configured value can
+// never silently wrap to a negative or absurd duration.
+const maxAuthAccountLockoutSeconds = int64(math.MaxInt64) / int64(time.Second)
+
 // Load parses environment variables into a typed Config and validates
 // constrained fields. Returns an error for invalid values (e.g. unknown log level,
 // insecure JWT secret in production).
@@ -499,8 +505,18 @@ func Load() (*Config, error) {
 	if cfg.AuthMaxFailedLoginAttempts <= 0 {
 		return nil, fmt.Errorf("AUTH_MAX_FAILED_LOGIN_ATTEMPTS must be greater than 0")
 	}
+	// Upper bound: the threshold is narrowed to int32 for the sqlc query, so a
+	// larger value would wrap negative and lock accounts on the first failure.
+	if cfg.AuthMaxFailedLoginAttempts > math.MaxInt32 {
+		return nil, fmt.Errorf("AUTH_MAX_FAILED_LOGIN_ATTEMPTS must not exceed %d", math.MaxInt32)
+	}
 	if cfg.AuthAccountLockoutSeconds <= 0 {
 		return nil, fmt.Errorf("AUTH_ACCOUNT_LOCKOUT_SECONDS must be greater than 0")
+	}
+	// Upper bound: prevent the seconds→time.Duration multiplication from
+	// overflowing into a negative/absurd lock duration.
+	if int64(cfg.AuthAccountLockoutSeconds) > maxAuthAccountLockoutSeconds {
+		return nil, fmt.Errorf("AUTH_ACCOUNT_LOCKOUT_SECONDS must not exceed %d", maxAuthAccountLockoutSeconds)
 	}
 
 	// 5. JWT Secret Constraints
