@@ -98,6 +98,10 @@ func (openAPIAuthService) SignOut(context.Context, string) error {
 	return nil
 }
 
+func (openAPIAuthService) SignOutOtherSessions(context.Context, string) error {
+	return nil
+}
+
 func (openAPIAuthService) CurrentUser(context.Context, string) (*authservice.PublicUser, error) {
 	return nil, nil
 }

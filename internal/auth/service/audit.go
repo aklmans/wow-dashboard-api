@@ -32,6 +32,9 @@ const (
 	// auditable: which admin acted as which user, and when.
 	EventAuthImpersonationStarted = "auth.impersonation.started"
 	EventAuthImpersonationStopped = "auth.impersonation.stopped"
+	// EventAuthOtherSessionsRevoked is recorded when a user signs out their other
+	// sessions, keeping only the calling device.
+	EventAuthOtherSessionsRevoked = "auth.sessions.revoked_others"
 
 	AuditReasonInvalidInput       = "invalid_input"
 	AuditReasonEmailAlreadyExists = "email_already_exists"
@@ -177,6 +180,14 @@ func (s *Service) recordEmailVerificationFailed(ctx context.Context, metadata Au
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventAuthEmailVerificationFailed,
 		Message:   "Auth email verification failed.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordOtherSessionsRevoked(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthOtherSessionsRevoked,
+		Message:   "Other sessions revoked.",
 		Metadata:  metadata,
 	})
 }

@@ -208,6 +208,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/sign-out-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out other sessions
+         * @description Revokes every other active session for the current user, keeping the calling device signed in. Requires the current refresh token cookie to identify which session to keep.
+         */
+        post: operations["post-auth-sign-out-others"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/sign-up": {
         parameters: {
             query?: never;
@@ -1837,6 +1857,32 @@ export interface operations {
                     "application/json": components["schemas"]["AuthSuccessBody"];
                 };
             };
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-sign-out-others": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Refresh token cookie identifying the session to keep */
+                Cookie?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

@@ -21,6 +21,7 @@ type AuthService interface {
 	Refresh(ctx context.Context, rawRefreshToken string) (*service.Session, error)
 	RefreshSession(ctx context.Context, rawCurrentAccessToken, rawRefreshToken string) (*service.Session, error)
 	SignOut(ctx context.Context, rawRefreshToken string) error
+	SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
 	Impersonate(ctx context.Context, actor *service.PublicUser, targetID string) (*service.Session, error)
 	StopImpersonation(ctx context.Context, rawCurrentToken, rawRefreshToken string) (*service.Session, error)
@@ -141,6 +142,10 @@ type refreshInput struct {
 
 type signOutInput struct {
 	Cookie string `header:"Cookie" doc:"Refresh token cookie"`
+}
+
+type signOutOthersInput struct {
+	Cookie string `header:"Cookie" doc:"Refresh token cookie identifying the session to keep"`
 }
 
 type impersonateInput struct {
@@ -342,6 +347,30 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			SetCookie: []http.Cookie{clearRefreshCookie(refreshCookie), clearAccessCookie(accessCookie)},
 			Body:      authSuccessBody{Success: true},
 		}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-sign-out-others",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/sign-out-others",
+		Summary:     "Sign out other sessions",
+		Description: "Revokes every other active session for the current user, keeping the calling device signed in. Requires the current refresh token cookie to identify which session to keep.",
+		Tags:        []string{"Auth"},
+		Middlewares: huma.Middlewares(authMiddlewares),
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *signOutOthersInput) (*authSuccessResponse, error) {
+		rawRefreshToken, ok := parseCookieValue(input.Cookie, refreshCookie.Name)
+		if !ok {
+			return nil, apierror.Unauthorized("Refresh token cookie missing.").ForContext(ctx)
+		}
+		if err := authSvc.SignOutOtherSessions(ctx, rawRefreshToken); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		// The calling session is intentionally untouched, so no cookies change.
+		return &authSuccessResponse{Body: authSuccessBody{Success: true}}, nil
 	})
 
 	huma.Register(api, huma.Operation{

@@ -166,6 +166,38 @@ func TestAuthHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("sign-out-others revokes other sessions and keeps the current cookies", func(t *testing.T) {
+		authSvc := &fakeAuthService{}
+		router := newAuthTestRouter(authSvc)
+
+		rec := postNoBodyWithCookie(router, "/api/auth/sign-out-others", "wow_dashboard_refresh_token", "current-refresh-token")
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if authSvc.signOutOthersToken != "current-refresh-token" {
+			t.Fatalf("SignOutOtherSessions token = %q, want current-refresh-token", authSvc.signOutOthersToken)
+		}
+		// The calling session stays signed in, so no cookies are cleared.
+		if got := rec.Result().Header.Values("Set-Cookie"); len(got) != 0 {
+			t.Fatalf("Set-Cookie headers = %v, want none (current session preserved)", got)
+		}
+	})
+
+	t.Run("sign-out-others without a refresh cookie is unauthorized", func(t *testing.T) {
+		authSvc := &fakeAuthService{}
+		router := newAuthTestRouter(authSvc)
+
+		rec := postNoBody(router, "/api/auth/sign-out-others")
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+		}
+		if authSvc.signOutOthersToken != "" {
+			t.Fatalf("SignOutOtherSessions token = %q, want empty (service not called)", authSvc.signOutOthersToken)
+		}
+	})
+
 	t.Run("me success returns starter user response and forwards raw token", func(t *testing.T) {
 		authSvc := &fakeAuthService{
 			currentUser: &testSession().User,
@@ -566,6 +598,9 @@ type fakeAuthService struct {
 	signOutToken string
 	signOutErr   error
 
+	signOutOthersToken string
+	signOutOthersErr   error
+
 	impersonateActor   *service.PublicUser
 	impersonateTarget  string
 	impersonateSession *service.Session
@@ -679,6 +714,11 @@ func (f *fakeAuthService) RefreshSession(ctx context.Context, rawCurrentAccessTo
 func (f *fakeAuthService) SignOut(ctx context.Context, rawRefreshToken string) error {
 	f.signOutToken = rawRefreshToken
 	return f.signOutErr
+}
+
+func (f *fakeAuthService) SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error {
+	f.signOutOthersToken = rawRefreshToken
+	return f.signOutOthersErr
 }
 
 func TestImpersonateHandler(t *testing.T) {

@@ -692,6 +692,50 @@ func TestServiceSignOutRevokesRefreshTokenIdempotently(t *testing.T) {
 	}
 }
 
+func TestServiceSignOutOtherSessions(t *testing.T) {
+	userID := uuid.New()
+	familyID := uuid.New()
+
+	t.Run("revokes the user's other families and keeps the current one", func(t *testing.T) {
+		refreshStore := &unitRefreshTokenStore{
+			token: domain.RefreshToken{UserID: userID, FamilyID: familyID},
+		}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.SignOutOtherSessions(context.Background(), "raw-refresh-token"); err != nil {
+			t.Fatalf("SignOutOtherSessions returned error: %v", err)
+		}
+		if refreshStore.revokedExceptFamilyUser != userID {
+			t.Fatalf("revoked user = %s, want %s", refreshStore.revokedExceptFamilyUser, userID)
+		}
+		// The caller's current family is the one preserved.
+		if refreshStore.revokedExceptFamily != familyID {
+			t.Fatalf("kept family = %s, want the current %s", refreshStore.revokedExceptFamily, familyID)
+		}
+	})
+
+	t.Run("a missing refresh token is rejected", func(t *testing.T) {
+		refreshStore := &unitRefreshTokenStore{}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.SignOutOtherSessions(context.Background(), "   "); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("SignOutOtherSessions error = %v, want ErrInvalidToken", err)
+		}
+	})
+
+	t.Run("an unknown refresh token is rejected", func(t *testing.T) {
+		refreshStore := &unitRefreshTokenStore{getErr: domain.ErrRefreshTokenNotFound}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.SignOutOtherSessions(context.Background(), "raw-refresh-token"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("SignOutOtherSessions error = %v, want ErrInvalidToken", err)
+		}
+	})
+}
+
 type unitUserStore struct {
 	created         domain.CreateUserInput
 	createCalls     int
@@ -815,6 +859,10 @@ type unitRefreshTokenStore struct {
 	revokeFamErr      error
 	revokedAllForUser uuid.UUID
 	revokeAllErr      error
+
+	revokedExceptFamilyUser uuid.UUID
+	revokedExceptFamily     uuid.UUID
+	revokeExceptFamilyErr   error
 }
 
 func (s *unitRefreshTokenStore) CreateRefreshToken(ctx context.Context, input domain.CreateRefreshTokenInput) (domain.RefreshToken, error) {
@@ -855,6 +903,12 @@ func (s *unitRefreshTokenStore) RevokeRefreshTokenFamily(ctx context.Context, fa
 func (s *unitRefreshTokenStore) RevokeAllForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error {
 	s.revokedAllForUser = userID
 	return s.revokeAllErr
+}
+
+func (s *unitRefreshTokenStore) RevokeAllForUserExceptFamily(ctx context.Context, userID uuid.UUID, familyID uuid.UUID, revokedAt time.Time) error {
+	s.revokedExceptFamilyUser = userID
+	s.revokedExceptFamily = familyID
+	return s.revokeExceptFamilyErr
 }
 
 type unitOfWork struct {

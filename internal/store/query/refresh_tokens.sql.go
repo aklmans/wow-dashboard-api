@@ -184,6 +184,29 @@ func (q *Queries) RevokeRefreshTokenFamily(ctx context.Context, arg RevokeRefres
 	return err
 }
 
+const revokeUserRefreshTokensExceptFamily = `-- name: RevokeUserRefreshTokensExceptFamily :exec
+UPDATE refresh_tokens
+SET
+    revoked_at = $1,
+    updated_at = $1
+WHERE user_id = $2
+  AND family_id <> $3
+  AND revoked_at IS NULL
+`
+
+type RevokeUserRefreshTokensExceptFamilyParams struct {
+	RevokedAt pgtype.Timestamptz
+	UserID    pgtype.UUID
+	FamilyID  pgtype.UUID
+}
+
+// Revoke every active session for the user except the caller's current token
+// family, so "sign out other sessions" leaves the calling device signed in.
+func (q *Queries) RevokeUserRefreshTokensExceptFamily(ctx context.Context, arg RevokeUserRefreshTokensExceptFamilyParams) error {
+	_, err := q.db.Exec(ctx, revokeUserRefreshTokensExceptFamily, arg.RevokedAt, arg.UserID, arg.FamilyID)
+	return err
+}
+
 const rotateRefreshToken = `-- name: RotateRefreshToken :one
 WITH revoked AS (
     UPDATE refresh_tokens AS old_token
