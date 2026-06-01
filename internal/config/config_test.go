@@ -36,6 +36,8 @@ var configEnvKeys = []string{
 	"AUTH_RATE_LIMIT_REQUESTS",
 	"AUTH_RATE_LIMIT_WINDOW_SECONDS",
 	"AUTH_RATE_LIMIT_BURST",
+	"AUTH_MAX_FAILED_LOGIN_ATTEMPTS",
+	"AUTH_ACCOUNT_LOCKOUT_SECONDS",
 	"JWT_ACCESS_SECRET",
 	"JWT_ISSUER",
 	"JWT_AUDIENCE",
@@ -178,6 +180,15 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	if cfg.AuthRateLimitBurst != 5 {
 		t.Errorf("AuthRateLimitBurst = %d, want 5", cfg.AuthRateLimitBurst)
+	}
+	if cfg.AuthMaxFailedLoginAttempts != 10 {
+		t.Errorf("AuthMaxFailedLoginAttempts = %d, want 10", cfg.AuthMaxFailedLoginAttempts)
+	}
+	if cfg.AuthAccountLockoutSeconds != 900 {
+		t.Errorf("AuthAccountLockoutSeconds = %d, want 900", cfg.AuthAccountLockoutSeconds)
+	}
+	if cfg.AuthAccountLockoutWindow() != 15*time.Minute {
+		t.Errorf("AuthAccountLockoutWindow() = %s, want 15m", cfg.AuthAccountLockoutWindow())
 	}
 	if cfg.JWTAccessSecret != "dev-only-change-me-min-32-characters" {
 		t.Errorf("JWTAccessSecret = %q, want default dev secret", cfg.JWTAccessSecret)
@@ -880,6 +891,12 @@ func TestLoad_InvalidAuthRateLimitValues(t *testing.T) {
 		{"requests negative", "AUTH_RATE_LIMIT_REQUESTS", "-1"},
 		{"window negative", "AUTH_RATE_LIMIT_WINDOW_SECONDS", "-1"},
 		{"burst negative", "AUTH_RATE_LIMIT_BURST", "-1"},
+		{"max failed attempts zero", "AUTH_MAX_FAILED_LOGIN_ATTEMPTS", "0"},
+		{"max failed attempts negative", "AUTH_MAX_FAILED_LOGIN_ATTEMPTS", "-1"},
+		{"max failed attempts overflows int32", "AUTH_MAX_FAILED_LOGIN_ATTEMPTS", "2147483648"},
+		{"lockout seconds zero", "AUTH_ACCOUNT_LOCKOUT_SECONDS", "0"},
+		{"lockout seconds negative", "AUTH_ACCOUNT_LOCKOUT_SECONDS", "-1"},
+		{"lockout seconds overflows duration", "AUTH_ACCOUNT_LOCKOUT_SECONDS", "100000000000"},
 	}
 
 	for _, tc := range tests {

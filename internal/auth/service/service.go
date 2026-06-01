@@ -42,12 +42,14 @@ const (
 	// input size, so an unbounded password is a CPU/memory DoS vector; the cap
 	// is enforced on both sign-up and sign-in before any hashing work.
 	maxPasswordLength = 4096
-	// maxFailedLoginAttempts is the number of consecutive failed sign-ins that
-	// locks an account. It is per-account, complementing the per-IP limiter.
-	maxFailedLoginAttempts = 10
-	// accountLockoutWindow is how long an account stays locked after reaching
-	// the failure threshold. The lock is self-healing — it simply expires.
-	accountLockoutWindow = 15 * time.Minute
+	// defaultMaxFailedLoginAttempts is the default number of consecutive failed
+	// sign-ins that locks an account. Per-account, complementing the per-IP
+	// limiter; deployments override it with WithLockoutPolicy.
+	defaultMaxFailedLoginAttempts = 10
+	// defaultAccountLockoutWindow is the default duration an account stays locked
+	// after reaching the failure threshold. The lock is self-healing — it simply
+	// expires; deployments override it with WithLockoutPolicy.
+	defaultAccountLockoutWindow = 15 * time.Minute
 	// passwordResetTokenTTL bounds how long a password-reset link is valid.
 	passwordResetTokenTTL = time.Hour
 	// emailVerificationTokenTTL bounds how long an email-verification link is valid.
@@ -176,6 +178,9 @@ type Service struct {
 	appBaseURL        string
 	auditRecorder     AuditRecorder
 	now               func() time.Time
+
+	maxFailedLoginAttempts int
+	accountLockoutWindow   time.Duration
 }
 
 // Option configures Service dependencies.
@@ -239,6 +244,20 @@ func WithEmailSender(sender email.Sender) Option {
 	}
 }
 
+// WithLockoutPolicy configures the per-account brute-force lockout: how many
+// consecutive failed sign-ins lock an account, and for how long. Non-positive
+// values are ignored so the secure defaults always hold.
+func WithLockoutPolicy(maxAttempts int, window time.Duration) Option {
+	return func(s *Service) {
+		if maxAttempts > 0 {
+			s.maxFailedLoginAttempts = maxAttempts
+		}
+		if window > 0 {
+			s.accountLockoutWindow = window
+		}
+	}
+}
+
 // WithAppBaseURL sets the frontend base URL used to build links in emails.
 func WithAppBaseURL(baseURL string) Option {
 	return func(s *Service) {
@@ -258,6 +277,9 @@ func NewService(store UserStore, tokenManager TokenManager, opts ...Option) *Ser
 		appBaseURL:      "http://localhost:3000",
 		auditRecorder:   noopAuditRecorder{},
 		now:             time.Now,
+
+		maxFailedLoginAttempts: defaultMaxFailedLoginAttempts,
+		accountLockoutWindow:   defaultAccountLockoutWindow,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -484,7 +506,7 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		// reached. A failure-counter error must not change the (already
 		// failed) sign-in outcome, so it only influences the audit reason.
 		reason := AuditReasonInvalidCredentials
-		if locked, ferr := s.store.RegisterLoginFailure(ctx, user.ID, maxFailedLoginAttempts, now.Add(accountLockoutWindow), now); ferr != nil {
+		if locked, ferr := s.store.RegisterLoginFailure(ctx, user.ID, s.maxFailedLoginAttempts, now.Add(s.accountLockoutWindow), now); ferr != nil {
 			slog.ErrorContext(ctx, "failed to record login failure", "error", ferr)
 		} else if locked {
 			reason = AuditReasonAccountLocked

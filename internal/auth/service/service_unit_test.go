@@ -243,6 +243,26 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 		}
 	})
 
+	t.Run("configured lockout policy is applied to the failure counter", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password"),
+		}
+		authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithLockoutPolicy(3, 5*time.Minute))
+
+		_, err := authSvc.SignIn(context.Background(), service.SignInInput{
+			Email:    "demo@example.com",
+			Password: "wrong-password",
+		})
+		if !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Fatalf("SignIn error = %v, want ErrInvalidCredentials", err)
+		}
+		// The configured threshold (not the default 10) is passed to the store.
+		if store.registeredMaxAttempts != 3 {
+			t.Fatalf("registeredMaxAttempts = %d, want the configured 3", store.registeredMaxAttempts)
+		}
+	})
+
 	t.Run("disabled user returns generic invalid credentials", func(t *testing.T) {
 		// A disabled account must return the same error as a wrong password so
 		// sign-in cannot be used to enumerate which accounts exist.
@@ -686,11 +706,12 @@ type unitUserStore struct {
 	permissions     []string
 	addedRoles      []uuid.UUID
 
-	registerFailureCalls int
-	registerLockedResult bool
-	clearFailuresCalls   int
-	updatedPasswordHash  string
-	emailVerifiedSet     bool
+	registerFailureCalls  int
+	registerLockedResult  bool
+	registeredMaxAttempts int
+	clearFailuresCalls    int
+	updatedPasswordHash   string
+	emailVerifiedSet      bool
 
 	updateProfileInput domain.UpdateProfileInput
 	updateProfileCalls int
@@ -747,6 +768,7 @@ func (s *unitUserStore) GetUserPermissions(ctx context.Context, userID uuid.UUID
 
 func (s *unitUserStore) RegisterLoginFailure(ctx context.Context, userID uuid.UUID, maxAttempts int, lockUntil time.Time, now time.Time) (bool, error) {
 	s.registerFailureCalls++
+	s.registeredMaxAttempts = maxAttempts
 	return s.registerLockedResult, nil
 }
 
