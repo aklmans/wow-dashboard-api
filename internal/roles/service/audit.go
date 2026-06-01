@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 	"github.com/aklmans/wow-dashboard-api/internal/roles/domain"
 )
 
@@ -24,6 +25,9 @@ type AuditMetadata struct {
 	ActorUserID string   `json:"actor_user_id,omitempty"`
 	Permissions []string `json:"permissions,omitempty"`
 	RequestID   string   `json:"request_id,omitempty"`
+	// ImpersonatorID is the admin behind an "act as" session when this action
+	// was performed under impersonation; empty for ordinary requests.
+	ImpersonatorID string `json:"impersonator_id,omitempty"`
 }
 
 // AuditEvent describes a role management audit event before persistence.
@@ -62,10 +66,11 @@ func buildRoleEvent(ctx context.Context, eventType string, message string, role 
 		EventType: eventType,
 		Message:   message,
 		Metadata: AuditMetadata{
-			RoleID:      role.ID.String(),
-			ActorUserID: actorUserID,
-			Permissions: role.Permissions,
-			RequestID:   middleware.GetReqID(ctx),
+			RoleID:         role.ID.String(),
+			ActorUserID:    actorUserID,
+			Permissions:    role.Permissions,
+			RequestID:      middleware.GetReqID(ctx),
+			ImpersonatorID: auditctx.Impersonator(ctx),
 		},
 	}
 }

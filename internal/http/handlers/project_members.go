@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 	"github.com/aklmans/wow-dashboard-api/internal/projects/domain"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
 )
@@ -134,6 +135,8 @@ func registerProjectMembers(api huma.API, authSvc ProjectsAuthenticator, project
 			return nil, err
 		}
 
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
+
 		member, err := projectsSvc.AddMember(ctx, projectservice.AddMemberInput{
 			RequestingUserID: currentUser.ID,
 			ProjectID:        input.ProjectID,
@@ -167,6 +170,8 @@ func registerProjectMembers(api huma.API, authSvc ProjectsAuthenticator, project
 			return nil, err
 		}
 
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
+
 		member, err := projectsSvc.UpdateMemberRole(ctx, projectservice.UpdateMemberRoleInput{
 			RequestingUserID: currentUser.ID,
 			ProjectID:        input.ProjectID,
@@ -198,6 +203,8 @@ func registerProjectMembers(api huma.API, authSvc ProjectsAuthenticator, project
 		if err != nil {
 			return nil, err
 		}
+
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
 
 		if err := projectsSvc.RemoveMember(ctx, currentUser.ID, input.ProjectID, input.UserID); err != nil {
 			return nil, mapProjectsError(ctx, err)

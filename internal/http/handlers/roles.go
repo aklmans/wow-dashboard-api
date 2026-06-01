@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	rolesdomain "github.com/aklmans/wow-dashboard-api/internal/roles/domain"
@@ -189,6 +190,8 @@ func RegisterRoles(api huma.API, authSvc UsersAuthenticator, rolesSvc RolesServi
 			return nil, authErr
 		}
 
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
+
 		role, err := rolesSvc.CreateRole(ctx, rolesservice.CreateRoleInput{
 			ActorUserID: currentUser.ID,
 			Name:        input.Body.Name,
@@ -223,6 +226,8 @@ func RegisterRoles(api huma.API, authSvc UsersAuthenticator, rolesSvc RolesServi
 			return nil, authErr
 		}
 
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
+
 		role, err := rolesSvc.UpdateRole(ctx, rolesservice.UpdateRoleInput{
 			ActorUserID: currentUser.ID,
 			RoleID:      input.ID,
@@ -256,6 +261,8 @@ func RegisterRoles(api huma.API, authSvc UsersAuthenticator, rolesSvc RolesServi
 		if authErr != nil {
 			return nil, authErr
 		}
+
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
 
 		if err := rolesSvc.DeleteRole(ctx, currentUser.ID, input.ID); err != nil {
 			return nil, mapRolesError(ctx, err)

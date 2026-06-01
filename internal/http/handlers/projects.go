@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	"github.com/aklmans/wow-dashboard-api/internal/projects/domain"
@@ -178,6 +179,8 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 			return nil, authErr
 		}
 
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
+
 		project, err := projectsSvc.CreateProject(ctx, projectservice.CreateProjectInput{
 			OwnerUserID: currentUser.ID,
 			Name:        input.Body.Name,
@@ -212,6 +215,8 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 			return nil, err
 		}
 
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
+
 		project, err := projectsSvc.UpdateProject(ctx, projectservice.UpdateProjectInput{
 			UserID:      currentUser.ID,
 			ID:          input.ID,
@@ -245,6 +250,8 @@ func RegisterProjects(api huma.API, authSvc ProjectsAuthenticator, projectsSvc P
 			return nil, err
 		}
 
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
+
 		project, err := projectsSvc.ArchiveProject(ctx, currentUser.ID, input.ID)
 		if err != nil {
 			return nil, mapProjectsError(ctx, err)
@@ -269,11 +276,13 @@ func authenticateProjects(ctx context.Context, authSvc ProjectsAuthenticator, au
 		return currentUser, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 	}
 	currentUser.ID = user.ID
+	currentUser.ImpersonatorID = user.ImpersonatorID
 	return currentUser, nil
 }
 
 type projectsAuthUser struct {
-	ID string
+	ID             string
+	ImpersonatorID string
 }
 
 func listProjectsResponseFromDomain(result domain.ListProjectsResult) *projectsListResponse {

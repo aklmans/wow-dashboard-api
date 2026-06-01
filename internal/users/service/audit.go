@@ -5,6 +5,8 @@ import (
 	"log/slog"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 )
 
 // EventUserUpdated is the stable system event type recorded when an admin
@@ -21,6 +23,9 @@ type AuditMetadata struct {
 	Status        string   `json:"status,omitempty"`
 	RoleIDs       []string `json:"role_ids,omitempty"`
 	RequestID     string   `json:"request_id,omitempty"`
+	// ImpersonatorID is the admin behind an "act as" session when this action
+	// was performed under impersonation; empty for ordinary requests.
+	ImpersonatorID string `json:"impersonator_id,omitempty"`
 }
 
 // AuditEvent describes a user management audit event before persistence.
@@ -58,6 +63,9 @@ func WithAuditRecorder(recorder AuditRecorder) Option {
 func buildUserUpdatedEvent(ctx context.Context, metadata AuditMetadata) AuditEvent {
 	if metadata.RequestID == "" {
 		metadata.RequestID = middleware.GetReqID(ctx)
+	}
+	if metadata.ImpersonatorID == "" {
+		metadata.ImpersonatorID = auditctx.Impersonator(ctx)
 	}
 	return AuditEvent{
 		EventType: EventUserUpdated,

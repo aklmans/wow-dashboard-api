@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
@@ -167,6 +168,7 @@ func RegisterUsers(api huma.API, authSvc UsersAuthenticator, usersSvc UsersServi
 		if authErr != nil {
 			return nil, authErr
 		}
+		ctx = auditctx.WithImpersonator(ctx, currentUser.ImpersonatorID)
 
 		user, err := usersSvc.UpdateUser(ctx, userservice.UpdateUserInput{
 			ActorUserID:      currentUser.ID,

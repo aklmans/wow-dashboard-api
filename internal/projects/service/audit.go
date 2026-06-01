@@ -5,6 +5,8 @@ import (
 	"log/slog"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/aklmans/wow-dashboard-api/internal/audit/auditctx"
 )
 
 const (
@@ -28,6 +30,9 @@ type AuditMetadata struct {
 	Role          string   `json:"role,omitempty"`
 	ChangedFields []string `json:"changed_fields,omitempty"`
 	RequestID     string   `json:"request_id,omitempty"`
+	// ImpersonatorID is the admin behind an "act as" session when this action
+	// was performed under impersonation; empty for ordinary requests.
+	ImpersonatorID string `json:"impersonator_id,omitempty"`
 }
 
 // AuditEvent describes a project audit event before persistence.
@@ -132,6 +137,9 @@ func (s *Service) recordMemberRemoved(ctx context.Context, metadata AuditMetadat
 func withAuditRequestID(ctx context.Context, metadata AuditMetadata) AuditMetadata {
 	if metadata.RequestID == "" {
 		metadata.RequestID = middleware.GetReqID(ctx)
+	}
+	if metadata.ImpersonatorID == "" {
+		metadata.ImpersonatorID = auditctx.Impersonator(ctx)
 	}
 	return metadata
 }
