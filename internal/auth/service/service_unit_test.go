@@ -367,6 +367,51 @@ func TestServiceChangePassword(t *testing.T) {
 	})
 }
 
+func TestServiceChangePasswordTransactionalAudit(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	t.Run("success records the audit inside the transaction", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
+		}
+		uow := &unitOfWork{users: &unitUserStore{}, refreshTokens: &unitRefreshTokenStore{}}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())},
+			service.WithUnitOfWork(uow))
+
+		if err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "new-password-123"); err != nil {
+			t.Fatalf("ChangePassword returned error: %v", err)
+		}
+		if !uow.committed || uow.rolledBack {
+			t.Fatalf("committed/rolledBack = %v/%v, want committed only", uow.committed, uow.rolledBack)
+		}
+		if uow.audit == nil || len(uow.audit.events) != 1 || uow.audit.events[0].EventType != service.EventAuthPasswordChanged {
+			t.Fatalf("transaction audit events = %#v, want one %s", uow.audit, service.EventAuthPasswordChanged)
+		}
+	})
+
+	t.Run("audit failure rolls back the password change", func(t *testing.T) {
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
+		}
+		uow := &unitOfWork{
+			users:         &unitUserStore{},
+			refreshTokens: &unitRefreshTokenStore{},
+			audit:         &fakeAuditRecorder{err: errors.New("audit insert failed")},
+		}
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())},
+			service.WithUnitOfWork(uow))
+
+		// With the audit write failing inside the transaction, the whole change
+		// must roll back rather than leave an un-audited password change.
+		if err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "new-password-123"); err == nil {
+			t.Fatal("ChangePassword returned nil, want the audit failure to roll back the change")
+		}
+		if !uow.rolledBack || uow.committed {
+			t.Fatalf("committed/rolledBack = %v/%v, want rollback only", uow.committed, uow.rolledBack)
+		}
+	})
+}
+
 func TestServiceCurrentUserWithDomainStore(t *testing.T) {
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 
@@ -794,6 +839,7 @@ type unitOfWork struct {
 	users         *unitUserStore
 	refreshTokens *unitRefreshTokenStore
 	authTokens    *fakeAuthTokenStore
+	audit         *fakeAuditRecorder
 	calls         int
 	fnErr         error
 	committed     bool
@@ -802,10 +848,14 @@ type unitOfWork struct {
 
 func (u *unitOfWork) Do(ctx context.Context, fn func(context.Context, service.WorkDeps) error) error {
 	u.calls++
+	if u.audit == nil {
+		u.audit = &fakeAuditRecorder{}
+	}
 	err := fn(ctx, service.WorkDeps{
 		Users:         u.users,
 		RefreshTokens: u.refreshTokens,
 		AuthTokens:    u.authTokens,
+		Audit:         u.audit,
 	})
 	u.fnErr = err
 	if err != nil {

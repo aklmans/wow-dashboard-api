@@ -145,6 +145,10 @@ type WorkDeps struct {
 	Users         UserStore
 	RefreshTokens RefreshTokenStore
 	AuthTokens    AuthTokenStore
+	// Audit records a success audit event inside the same transaction as the
+	// mutation, so a security-sensitive change and its audit trail commit or
+	// roll back together (no un-audited password change/reset/verification).
+	Audit AuditRecorder
 }
 
 // UnitOfWork defines the transactional boundary needed by auth workflows.
@@ -857,7 +861,7 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 
 	now := s.now().UTC().Truncate(time.Microsecond)
 	if s.unitOfWork != nil {
-		if err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+		return s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
 			if deps.Users == nil {
 				return fmt.Errorf("auth: unit of work missing user store")
 			}
@@ -869,21 +873,20 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 					return fmt.Errorf("auth: failed to revoke refresh tokens after password change: %w", err)
 				}
 			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	} else {
-		if err := s.store.UpdateUserPassword(ctx, userID, newHash, now); err != nil {
-			return fmt.Errorf("auth: failed to update password: %w", err)
-		}
-		if s.refreshTokenStore != nil {
-			if err := s.refreshTokenStore.RevokeAllForUser(ctx, userID, now); err != nil {
-				return fmt.Errorf("auth: failed to revoke refresh tokens after password change: %w", err)
-			}
-		}
+			// Record inside the transaction so the password change and its audit
+			// trail commit or roll back together — no un-audited password change.
+			return recordAuthEventTx(ctx, deps.Audit, EventAuthPasswordChanged, "Auth password changed.", AuditMetadata{UserID: userID.String()})
+		})
 	}
 
+	if err := s.store.UpdateUserPassword(ctx, userID, newHash, now); err != nil {
+		return fmt.Errorf("auth: failed to update password: %w", err)
+	}
+	if s.refreshTokenStore != nil {
+		if err := s.refreshTokenStore.RevokeAllForUser(ctx, userID, now); err != nil {
+			return fmt.Errorf("auth: failed to revoke refresh tokens after password change: %w", err)
+		}
+	}
 	s.recordPasswordChanged(ctx, AuditMetadata{UserID: userID.String()})
 	return nil
 }
@@ -975,7 +978,8 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPasswor
 					return fmt.Errorf("auth: failed to revoke refresh tokens after password reset: %w", err)
 				}
 			}
-			return nil
+			// Audit inside the transaction: a reset and its audit commit together.
+			return recordAuthEventTx(ctx, deps.Audit, EventAuthPasswordReset, "Auth password reset.", AuditMetadata{UserID: authToken.UserID.String()})
 		})
 	} else {
 		authToken, err = s.consumeAuthToken(ctx, domain.AuthTokenPurposePasswordReset, rawToken)
@@ -987,6 +991,9 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPasswor
 					err = fmt.Errorf("auth: failed to revoke refresh tokens after password reset: %w", revokeErr)
 				}
 			}
+			if err == nil {
+				s.recordPasswordReset(ctx, AuditMetadata{UserID: authToken.UserID.String()})
+			}
 		}
 	}
 	if err != nil {
@@ -995,7 +1002,6 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPasswor
 		}
 		return err
 	}
-	s.recordPasswordReset(ctx, AuditMetadata{UserID: authToken.UserID.String()})
 	return nil
 }
 
@@ -1021,13 +1027,17 @@ func (s *Service) VerifyEmail(ctx context.Context, rawToken string) error {
 			if err := deps.Users.SetEmailVerified(ctx, authToken.UserID, now, now); err != nil {
 				return fmt.Errorf("auth: failed to mark email verified: %w", err)
 			}
-			return nil
+			// Audit inside the transaction: verification and its audit commit together.
+			return recordAuthEventTx(ctx, deps.Audit, EventAuthEmailVerified, "Auth email verified.", AuditMetadata{UserID: authToken.UserID.String()})
 		})
 	} else {
 		authToken, err = s.consumeAuthToken(ctx, domain.AuthTokenPurposeEmailVerification, rawToken)
 		if err == nil {
 			if err = s.store.SetEmailVerified(ctx, authToken.UserID, now, now); err != nil {
 				err = fmt.Errorf("auth: failed to mark email verified: %w", err)
+			}
+			if err == nil {
+				s.recordEmailVerified(ctx, AuditMetadata{UserID: authToken.UserID.String()})
 			}
 		}
 	}
@@ -1037,7 +1047,6 @@ func (s *Service) VerifyEmail(ctx context.Context, rawToken string) error {
 		}
 		return err
 	}
-	s.recordEmailVerified(ctx, AuditMetadata{UserID: authToken.UserID.String()})
 	return nil
 }
 
