@@ -698,7 +698,7 @@ func TestServiceSignOutOtherSessions(t *testing.T) {
 
 	t.Run("revokes the user's other families and keeps the current one", func(t *testing.T) {
 		refreshStore := &unitRefreshTokenStore{
-			token: domain.RefreshToken{UserID: userID, FamilyID: familyID},
+			token: domain.RefreshToken{UserID: userID, FamilyID: familyID, ExpiresAt: time.Now().Add(time.Hour)},
 		}
 		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{issuedToken: "access-token"},
 			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
@@ -732,6 +732,38 @@ func TestServiceSignOutOtherSessions(t *testing.T) {
 
 		if err := authSvc.SignOutOtherSessions(context.Background(), "raw-refresh-token"); !errors.Is(err, service.ErrInvalidToken) {
 			t.Fatalf("SignOutOtherSessions error = %v, want ErrInvalidToken", err)
+		}
+	})
+
+	t.Run("a revoked token cannot authorize the action", func(t *testing.T) {
+		revokedAt := time.Now().UTC()
+		refreshStore := &unitRefreshTokenStore{
+			token: domain.RefreshToken{UserID: userID, FamilyID: familyID, ExpiresAt: time.Now().Add(time.Hour), RevokedAt: &revokedAt},
+		}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.SignOutOtherSessions(context.Background(), "raw-refresh-token"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("SignOutOtherSessions error = %v, want ErrInvalidToken for a revoked token", err)
+		}
+		// A stale token must not revoke anything.
+		if refreshStore.revokedExceptFamilyUser != uuid.Nil {
+			t.Fatalf("revoked sessions for a revoked token = %s, want none", refreshStore.revokedExceptFamilyUser)
+		}
+	})
+
+	t.Run("an expired token cannot authorize the action", func(t *testing.T) {
+		refreshStore := &unitRefreshTokenStore{
+			token: domain.RefreshToken{UserID: userID, FamilyID: familyID, ExpiresAt: time.Now().Add(-time.Hour)},
+		}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.SignOutOtherSessions(context.Background(), "raw-refresh-token"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("SignOutOtherSessions error = %v, want ErrInvalidToken for an expired token", err)
+		}
+		if refreshStore.revokedExceptFamilyUser != uuid.Nil {
+			t.Fatalf("revoked sessions for an expired token = %s, want none", refreshStore.revokedExceptFamilyUser)
 		}
 	})
 }

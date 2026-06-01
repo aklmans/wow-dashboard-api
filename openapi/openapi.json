@@ -2409,6 +2409,9 @@
           "401": {
             "$ref": "#/components/responses/APIError"
           },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
           "500": {
             "$ref": "#/components/responses/APIError"
           }

@@ -359,6 +359,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		Middlewares: huma.Middlewares(authMiddlewares),
 		Responses: apiErrorResponses(api,
 			http.StatusUnauthorized,
+			http.StatusTooManyRequests,
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *signOutOthersInput) (*authSuccessResponse, error) {

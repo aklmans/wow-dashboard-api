@@ -1883,6 +1883,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

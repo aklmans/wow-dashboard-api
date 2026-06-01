@@ -648,6 +648,13 @@ func (s *Service) SignOutOtherSessions(ctx context.Context, rawRefreshToken stri
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
+	// Only an active token — not revoked, not expired — may authorize this
+	// destructive action, so a stale or stolen refresh token cannot trigger it
+	// (and cannot sign the user out everywhere via a family with no live tokens).
+	if current.RevokedAt != nil || !current.ExpiresAt.After(now) {
+		return ErrInvalidToken
+	}
+
 	if err := s.refreshTokenStore.RevokeAllForUserExceptFamily(ctx, current.UserID, current.FamilyID, now); err != nil {
 		return fmt.Errorf("auth: failed to revoke other sessions: %w", err)
 	}
