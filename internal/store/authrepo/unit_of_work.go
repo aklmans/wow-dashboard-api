@@ -41,6 +41,7 @@ func (u *UnitOfWork) Do(ctx context.Context, fn func(context.Context, authservic
 		Users:         NewUserStore(queries),
 		RefreshTokens: NewRefreshTokenStore(queries),
 		AuthTokens:    NewAuthTokenStore(queries),
+		Audit:         NewSystemEventRecorder(queries),
 	}
 
 	if err := fn(ctx, deps); err != nil {

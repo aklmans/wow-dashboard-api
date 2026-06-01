@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -185,4 +186,22 @@ func withAuditRequestID(ctx context.Context, metadata AuditMetadata) AuditMetada
 		metadata.RequestID = middleware.GetReqID(ctx)
 	}
 	return metadata
+}
+
+// recordAuthEventTx records an auth event on a transaction-scoped recorder,
+// stamping the request id and masking the email, and returns the error so a
+// unit of work rolls back when the audit write fails. It is the transactional
+// counterpart of recordAudit (which is best-effort and only logs), used for
+// success events that must be atomic with their mutation.
+func recordAuthEventTx(ctx context.Context, recorder AuditRecorder, eventType string, message string, metadata AuditMetadata) error {
+	if recorder == nil {
+		return fmt.Errorf("auth: unit of work missing audit recorder")
+	}
+	metadata = withAuditRequestID(ctx, metadata)
+	metadata.Email = maskEmail(metadata.Email)
+	return recorder.RecordAuthEvent(ctx, AuditEvent{
+		EventType: eventType,
+		Message:   message,
+		Metadata:  metadata,
+	})
 }
