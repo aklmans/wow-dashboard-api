@@ -113,6 +113,17 @@ SET
 WHERE user_id = @user_id
   AND revoked_at IS NULL;
 
+-- name: RevokeUserRefreshTokensExceptFamily :exec
+-- Revoke every active session for the user except the caller's current token
+-- family, so "sign out other sessions" leaves the calling device signed in.
+UPDATE refresh_tokens
+SET
+    revoked_at = @revoked_at,
+    updated_at = @revoked_at
+WHERE user_id = @user_id
+  AND family_id <> @family_id
+  AND revoked_at IS NULL;
+
 -- name: DeleteExpiredRefreshTokens :execrows
 -- Retention purge: drop refresh tokens that have already expired. Revoked but
 -- not-yet-expired tokens are kept so reuse detection still recognises them.

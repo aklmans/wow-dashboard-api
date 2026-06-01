@@ -140,6 +140,7 @@ type RefreshTokenStore interface {
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string, revokedAt time.Time) error
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID, revokedAt time.Time) error
 	RevokeAllForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error
+	RevokeAllForUserExceptFamily(ctx context.Context, userID uuid.UUID, familyID uuid.UUID, revokedAt time.Time) error
 }
 
 // WorkDeps contains transaction-scoped stores for a unit of work.
@@ -620,6 +621,45 @@ func (s *Service) SignOut(ctx context.Context, rawRefreshToken string) error {
 	if err != nil && !errors.Is(err, domain.ErrRefreshTokenNotFound) {
 		return fmt.Errorf("auth: failed to revoke refresh token: %w", err)
 	}
+	return nil
+}
+
+// SignOutOtherSessions revokes every active session for the caller except the
+// one identified by their current refresh token, so a user can "sign out other
+// devices" without losing their own session. The current refresh token is
+// required to identify which family to keep; a missing or unknown token is
+// rejected as an invalid token.
+func (s *Service) SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error {
+	if s.refreshTokenStore == nil {
+		return fmt.Errorf("auth: refresh tokens are not configured")
+	}
+
+	rawRefreshToken = strings.TrimSpace(rawRefreshToken)
+	if rawRefreshToken == "" {
+		return ErrInvalidToken
+	}
+
+	current, err := s.refreshTokenStore.GetRefreshTokenByHash(ctx, hashRefreshToken(rawRefreshToken))
+	if err != nil {
+		if errors.Is(err, domain.ErrRefreshTokenNotFound) {
+			return ErrInvalidToken
+		}
+		return fmt.Errorf("auth: failed to look up current session: %w", err)
+	}
+
+	now := s.now().UTC().Truncate(time.Microsecond)
+	// Only an active token — not revoked, not expired — may authorize this
+	// destructive action, so a stale or stolen refresh token cannot trigger it
+	// (and cannot sign the user out everywhere via a family with no live tokens).
+	if current.RevokedAt != nil || !current.ExpiresAt.After(now) {
+		return ErrInvalidToken
+	}
+
+	if err := s.refreshTokenStore.RevokeAllForUserExceptFamily(ctx, current.UserID, current.FamilyID, now); err != nil {
+		return fmt.Errorf("auth: failed to revoke other sessions: %w", err)
+	}
+
+	s.recordOtherSessionsRevoked(ctx, AuditMetadata{UserID: current.UserID.String()})
 	return nil
 }
 

@@ -113,3 +113,18 @@ func (s *RefreshTokenStore) RevokeAllForUser(ctx context.Context, userID uuid.UU
 	}
 	return nil
 }
+
+// RevokeAllForUserExceptFamily revokes every active refresh token belonging to a
+// user except the given token family (the caller's current session), so "sign
+// out other sessions" leaves the calling device signed in.
+func (s *RefreshTokenStore) RevokeAllForUserExceptFamily(ctx context.Context, userID uuid.UUID, familyID uuid.UUID, revokedAt time.Time) error {
+	err := s.queries.RevokeUserRefreshTokensExceptFamily(ctx, query.RevokeUserRefreshTokensExceptFamilyParams{
+		UserID:    pgUUID(userID),
+		FamilyID:  pgUUID(familyID),
+		RevokedAt: pgTimestamp(revokedAt),
+	})
+	if err != nil {
+		return mapRefreshTokenError(err)
+	}
+	return nil
+}

@@ -185,6 +185,7 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 | `POST` | `/api/auth/sign-in` | Authenticate credentials, return `{ "user": ..., "accessToken": ... }`, and set the HttpOnly refresh cookie |
 | `POST` | `/api/auth/refresh` | Rotate the refresh cookie and return `{ "user": ..., "accessToken": ... }` |
 | `POST` | `/api/auth/sign-out` | Revoke the current refresh token when present and clear the refresh cookie |
+| `POST` | `/api/auth/sign-out-others` | Revoke every *other* active session for the current user, keeping the calling device signed in (identified by the current refresh cookie) |
 | `POST` | `/api/auth/change-password` | Verify the current password and set a new one for the bearer-token user; revokes every refresh token and clears the cookie |
 | `POST` | `/api/auth/forgot-password` | Email a password-reset link for the given address; always returns `200` so the response cannot enumerate accounts |
 | `POST` | `/api/auth/reset-password` | Set a new password from a reset token, then revoke every session for the account |

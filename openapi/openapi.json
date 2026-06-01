@@ -2373,6 +2373,55 @@
         ]
       }
     },
+    "/api/auth/sign-out-others": {
+      "post": {
+        "description": "Revokes every other active session for the current user, keeping the calling device signed in. Requires the current refresh token cookie to identify which session to keep.",
+        "operationId": "post-auth-sign-out-others",
+        "parameters": [
+          {
+            "description": "Refresh token cookie identifying the session to keep",
+            "in": "header",
+            "name": "Cookie",
+            "schema": {
+              "description": "Refresh token cookie identifying the session to keep",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSuccessBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Sign out other sessions",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/api/auth/sign-up": {
       "post": {
         "description": "Creates a user account, returns an access token, and sets the refresh token cookie.",
