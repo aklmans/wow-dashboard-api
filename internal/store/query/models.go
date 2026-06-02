@@ -57,6 +57,9 @@ type RefreshToken struct {
 	ReplacedByTokenID pgtype.UUID
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
+	UserAgent         pgtype.Text
+	IpAddress         pgtype.Text
+	LastUsedAt        pgtype.Timestamptz
 }
 
 type Role struct {

@@ -21,7 +21,10 @@ INSERT INTO refresh_tokens (
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 ) VALUES (
     $1,
     $2,
@@ -31,7 +34,10 @@ INSERT INTO refresh_tokens (
     NULL,
     NULL,
     $6,
-    $7
+    $7,
+    $8,
+    $9,
+    $10
 )
 RETURNING
     id,
@@ -42,17 +48,23 @@ RETURNING
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 `
 
 type CreateRefreshTokenParams struct {
-	ID        pgtype.UUID
-	UserID    pgtype.UUID
-	TokenHash string
-	FamilyID  pgtype.UUID
-	ExpiresAt pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
+	ID         pgtype.UUID
+	UserID     pgtype.UUID
+	TokenHash  string
+	FamilyID   pgtype.UUID
+	ExpiresAt  pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+	UserAgent  pgtype.Text
+	IpAddress  pgtype.Text
+	LastUsedAt pgtype.Timestamptz
 }
 
 func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (RefreshToken, error) {
@@ -64,6 +76,9 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 		arg.ExpiresAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.UserAgent,
+		arg.IpAddress,
+		arg.LastUsedAt,
 	)
 	var i RefreshToken
 	err := row.Scan(
@@ -76,6 +91,9 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 		&i.ReplacedByTokenID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.LastUsedAt,
 	)
 	return i, err
 }
@@ -105,7 +123,10 @@ SELECT
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 FROM refresh_tokens
 WHERE token_hash = $1
 `
@@ -123,6 +144,9 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (
 		&i.ReplacedByTokenID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.LastUsedAt,
 	)
 	return i, err
 }
@@ -211,10 +235,10 @@ const rotateRefreshToken = `-- name: RotateRefreshToken :one
 WITH revoked AS (
     UPDATE refresh_tokens AS old_token
     SET
-        revoked_at = $8,
+        revoked_at = $11,
         replaced_by_token_id = $1,
-        updated_at = $8
-    WHERE old_token.id = $9
+        updated_at = $11
+    WHERE old_token.id = $12
       AND old_token.revoked_at IS NULL
     RETURNING id
 )
@@ -227,7 +251,10 @@ INSERT INTO refresh_tokens (
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 )
 SELECT
     $1,
@@ -238,7 +265,10 @@ SELECT
     NULL,
     NULL,
     $6,
-    $7
+    $7,
+    $8,
+    $9,
+    $10
 WHERE EXISTS (SELECT 1 FROM revoked)
 RETURNING
     id,
@@ -249,19 +279,25 @@ RETURNING
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 `
 
 type RotateRefreshTokenParams struct {
-	NewID     pgtype.UUID
-	UserID    pgtype.UUID
-	TokenHash string
-	FamilyID  pgtype.UUID
-	ExpiresAt pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
-	OldID     pgtype.UUID
+	NewID      pgtype.UUID
+	UserID     pgtype.UUID
+	TokenHash  string
+	FamilyID   pgtype.UUID
+	ExpiresAt  pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+	UserAgent  pgtype.Text
+	IpAddress  pgtype.Text
+	LastUsedAt pgtype.Timestamptz
+	RevokedAt  pgtype.Timestamptz
+	OldID      pgtype.UUID
 }
 
 func (q *Queries) RotateRefreshToken(ctx context.Context, arg RotateRefreshTokenParams) (RefreshToken, error) {
@@ -273,6 +309,9 @@ func (q *Queries) RotateRefreshToken(ctx context.Context, arg RotateRefreshToken
 		arg.ExpiresAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.UserAgent,
+		arg.IpAddress,
+		arg.LastUsedAt,
 		arg.RevokedAt,
 		arg.OldID,
 	)
@@ -287,6 +326,9 @@ func (q *Queries) RotateRefreshToken(ctx context.Context, arg RotateRefreshToken
 		&i.ReplacedByTokenID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserAgent,
+		&i.IpAddress,
+		&i.LastUsedAt,
 	)
 	return i, err
 }

@@ -24,13 +24,16 @@ func NewRefreshTokenStoreFromDB(db query.DBTX) *RefreshTokenStore {
 
 func (s *RefreshTokenStore) CreateRefreshToken(ctx context.Context, input domain.CreateRefreshTokenInput) (domain.RefreshToken, error) {
 	row, err := s.queries.CreateRefreshToken(ctx, query.CreateRefreshTokenParams{
-		ID:        pgUUID(input.ID),
-		UserID:    pgUUID(input.UserID),
-		TokenHash: input.TokenHash,
-		FamilyID:  pgUUID(input.FamilyID),
-		ExpiresAt: pgTimestamp(input.ExpiresAt),
-		CreatedAt: pgTimestamp(input.CreatedAt),
-		UpdatedAt: pgTimestamp(input.UpdatedAt),
+		ID:         pgUUID(input.ID),
+		UserID:     pgUUID(input.UserID),
+		TokenHash:  input.TokenHash,
+		FamilyID:   pgUUID(input.FamilyID),
+		ExpiresAt:  pgTimestamp(input.ExpiresAt),
+		UserAgent:  pgText(input.UserAgent),
+		IpAddress:  pgText(input.IPAddress),
+		LastUsedAt: pgTimestamp(input.LastUsedAt),
+		CreatedAt:  pgTimestamp(input.CreatedAt),
+		UpdatedAt:  pgTimestamp(input.UpdatedAt),
 	})
 	if err != nil {
 		return domain.RefreshToken{}, mapRefreshTokenError(err)
@@ -58,15 +61,18 @@ func (s *RefreshTokenStore) GetRefreshTokenByHash(ctx context.Context, tokenHash
 
 func (s *RefreshTokenStore) RotateRefreshToken(ctx context.Context, oldTokenID uuid.UUID, input domain.CreateRefreshTokenInput, revokedAt time.Time) (domain.RefreshToken, error) {
 	row, err := s.queries.RotateRefreshToken(ctx, query.RotateRefreshTokenParams{
-		NewID:     pgUUID(input.ID),
-		UserID:    pgUUID(input.UserID),
-		TokenHash: input.TokenHash,
-		FamilyID:  pgUUID(input.FamilyID),
-		ExpiresAt: pgTimestamp(input.ExpiresAt),
-		CreatedAt: pgTimestamp(input.CreatedAt),
-		UpdatedAt: pgTimestamp(input.UpdatedAt),
-		RevokedAt: pgTimestamp(revokedAt),
-		OldID:     pgUUID(oldTokenID),
+		NewID:      pgUUID(input.ID),
+		UserID:     pgUUID(input.UserID),
+		TokenHash:  input.TokenHash,
+		FamilyID:   pgUUID(input.FamilyID),
+		ExpiresAt:  pgTimestamp(input.ExpiresAt),
+		UserAgent:  pgText(input.UserAgent),
+		IpAddress:  pgText(input.IPAddress),
+		LastUsedAt: pgTimestamp(input.LastUsedAt),
+		CreatedAt:  pgTimestamp(input.CreatedAt),
+		UpdatedAt:  pgTimestamp(input.UpdatedAt),
+		RevokedAt:  pgTimestamp(revokedAt),
+		OldID:      pgUUID(oldTokenID),
 	})
 	if err != nil {
 		return domain.RefreshToken{}, mapRefreshTokenError(err)

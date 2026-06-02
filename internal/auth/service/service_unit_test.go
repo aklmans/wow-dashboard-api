@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aklmans/wow-dashboard-api/internal/auth/authctx"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/domain"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/password"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/service"
@@ -441,6 +442,74 @@ func TestServiceCompleteMfaSignIn(t *testing.T) {
 			t.Fatal("the code was verified for a disabled account; want refused before verification")
 		}
 	})
+}
+
+func TestServiceSignInRecordsClientInfo(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+	store := &unitUserStore{
+		authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password"),
+	}
+	refreshStore := &unitRefreshTokenStore{}
+	authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"},
+		service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+	ctx := authctx.WithClientInfo(context.Background(),
+		authctx.ClientInfo{UserAgent: "TestUA/1.0", IPAddress: "203.0.113.7"})
+	if _, err := authSvc.SignIn(ctx, service.SignInInput{Email: "demo@example.com", Password: "correct-password"}); err != nil {
+		t.Fatalf("SignIn: %v", err)
+	}
+
+	if refreshStore.created.UserAgent != "TestUA/1.0" {
+		t.Errorf("UserAgent = %q, want TestUA/1.0", refreshStore.created.UserAgent)
+	}
+	if refreshStore.created.IPAddress != "203.0.113.7" {
+		t.Errorf("IPAddress = %q, want 203.0.113.7", refreshStore.created.IPAddress)
+	}
+	if refreshStore.created.LastUsedAt.IsZero() {
+		t.Error("LastUsedAt was not set on sign-in")
+	}
+}
+
+func TestServiceRefreshCarriesDeviceInfoForward(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+	familyID := uuid.MustParse("00000000-0000-0000-0000-0000000000fa")
+	sessionStart := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+
+	store := &unitUserStore{
+		user: domain.User{ID: userID, Email: "demo@example.com", Status: domain.UserStatusActive},
+	}
+	refreshStore := &unitRefreshTokenStore{
+		token: domain.RefreshToken{
+			ID:        uuid.New(),
+			UserID:    userID,
+			FamilyID:  familyID,
+			ExpiresAt: time.Now().Add(time.Hour),
+			UserAgent: "OriginalUA/1.0",
+			IPAddress: "203.0.113.9",
+			CreatedAt: sessionStart,
+		},
+	}
+	authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"},
+		service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+	// A different device refreshes; the recorded device identity must stay the
+	// one captured at sign-in (carried forward), and the session start preserved.
+	ctx := authctx.WithClientInfo(context.Background(),
+		authctx.ClientInfo{UserAgent: "DifferentUA/9", IPAddress: "198.51.100.1"})
+	if _, err := authSvc.Refresh(ctx, "raw-refresh-token"); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	got := refreshStore.rotatedInput
+	if got.UserAgent != "OriginalUA/1.0" || got.IPAddress != "203.0.113.9" {
+		t.Fatalf("rotated UA/IP = %q/%q, want the original device carried forward", got.UserAgent, got.IPAddress)
+	}
+	if !got.CreatedAt.Equal(sessionStart) {
+		t.Fatalf("rotated CreatedAt = %s, want the session start %s preserved", got.CreatedAt, sessionStart)
+	}
+	if !got.LastUsedAt.After(sessionStart) {
+		t.Fatalf("LastUsedAt = %s, want it bumped past the session start", got.LastUsedAt)
+	}
 }
 
 func TestServiceChangePassword(t *testing.T) {
