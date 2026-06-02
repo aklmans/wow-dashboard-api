@@ -942,6 +942,16 @@ export interface components {
             /** @description Base32 TOTP secret for manual entry as an alternative to the QR code */
             secret: string;
         };
+        MfaSetupInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaSetupInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description The current account password, re-entered to authorize MFA enrollment */
+            password: string;
+        };
         NotificationItem: {
             /**
              * @description Optional longer text
@@ -1842,7 +1852,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaSetupInputBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -1855,6 +1869,7 @@ export interface operations {
             };
             401: components["responses"]["APIError"];
             409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
             429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };

@@ -150,4 +150,5 @@ var (
 	ErrRefreshTokenNotFound = errors.New("auth refresh token store: token not found")
 	ErrAuthTokenNotFound    = errors.New("auth token store: token not found")
 	ErrMfaSecretNotFound    = errors.New("auth mfa store: secret not found")
+	ErrMfaAlreadyEnabled    = errors.New("auth mfa store: mfa already enabled")
 )

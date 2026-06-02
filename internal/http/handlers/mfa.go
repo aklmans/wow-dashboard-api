@@ -8,14 +8,17 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 
+	"github.com/aklmans/wow-dashboard-api/internal/auth/domain"
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
 	"github.com/aklmans/wow-dashboard-api/internal/http/apierror"
 	mfaservice "github.com/aklmans/wow-dashboard-api/internal/mfa/service"
 )
 
-// MfaAuthenticator resolves the bearer token to the current user.
+// MfaAuthenticator resolves the bearer token to the current user and
+// reauthenticates a password for sensitive changes.
 type MfaAuthenticator interface {
 	CurrentUser(ctx context.Context, rawAccessToken string) (*authservice.PublicUser, error)
+	VerifyPassword(ctx context.Context, userID uuid.UUID, rawPassword string) error
 }
 
 // MfaService is the MFA enrollment use-case port.
@@ -26,6 +29,9 @@ type MfaService interface {
 
 type mfaSetupInput struct {
 	Authorization string `header:"Authorization" doc:"Bearer access token"`
+	Body          struct {
+		Password string `json:"password" minLength:"1" doc:"The current account password, re-entered to authorize MFA enrollment"`
+	}
 }
 
 type mfaSetupBody struct {
@@ -67,6 +73,7 @@ func RegisterMfa(api huma.API, authSvc MfaAuthenticator, mfaSvc MfaService, auth
 			http.StatusUnauthorized,
 			http.StatusConflict,
 			http.StatusTooManyRequests,
+			http.StatusUnprocessableEntity,
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *mfaSetupInput) (*mfaSetupResponse, error) {
@@ -81,10 +88,15 @@ func RegisterMfa(api huma.API, authSvc MfaAuthenticator, mfaSvc MfaService, auth
 		if err != nil {
 			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 		}
+		// Reauthenticate: a stolen access token alone must not be able to enroll
+		// an attacker-controlled TOTP secret.
+		if err := authSvc.VerifyPassword(ctx, userID, input.Body.Password); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
 
 		result, err := mfaSvc.Setup(ctx, userID, currentUser.Email)
 		if err != nil {
-			return nil, apierror.InternalError(err).ForContext(ctx)
+			return nil, mapMfaError(ctx, err)
 		}
 		return &mfaSetupResponse{Body: mfaSetupBody{OtpauthURL: result.OtpauthURL, Secret: result.Secret}}, nil
 	})
@@ -137,6 +149,12 @@ func authenticateForMfa(ctx context.Context, authSvc MfaAuthenticator, authHeade
 	if user == nil {
 		return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 	}
+	// An impersonation session resolves to the target user; an admin must not be
+	// able to enroll MFA on someone else's account with an admin-controlled
+	// secret, which would lock the real user out once enforcement lands.
+	if user.ImpersonatorID != "" {
+		return nil, apierror.Forbidden("MFA cannot be managed while impersonating a user.").ForContext(ctx)
+	}
 	return user, nil
 }
 
@@ -146,6 +164,8 @@ func mapMfaError(ctx context.Context, err error) huma.StatusError {
 		return apierror.ValidationFailed("That code is not valid. Try the current code from your authenticator app.").ForContext(ctx)
 	case errors.Is(err, mfaservice.ErrNotEnrolling):
 		return apierror.Conflict("Start MFA setup before confirming.").ForContext(ctx)
+	case errors.Is(err, domain.ErrMfaAlreadyEnabled):
+		return apierror.Conflict("MFA is already enabled.").ForContext(ctx)
 	default:
 		return apierror.InternalError(err).ForContext(ctx)
 	}

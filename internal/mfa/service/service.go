@@ -45,14 +45,13 @@ type Cipher interface {
 	Decrypt(ciphertext string) (string, error)
 }
 
-// Store is the persistence the MFA service needs.
+// Store is the persistence the MFA service needs. StoreSetupSecret and
+// CompleteEnrollment serialize concurrent setup/confirm per user (a row lock)
+// and refuse once MFA is enabled, so enrollment is race-safe.
 type Store interface {
-	UpsertMfaSecret(ctx context.Context, input domain.UpsertMfaSecretInput) (domain.MfaSecret, error)
 	GetMfaSecret(ctx context.Context, userID uuid.UUID) (domain.MfaSecret, error)
-	DeleteMfaSecret(ctx context.Context, userID uuid.UUID) error
-	SetUserMfaEnabled(ctx context.Context, userID uuid.UUID, enabled bool, confirmedAt *time.Time, now time.Time) error
-	DeleteRecoveryCodes(ctx context.Context, userID uuid.UUID) error
-	CreateRecoveryCode(ctx context.Context, id, userID uuid.UUID, codeHash string, createdAt time.Time) error
+	StoreSetupSecret(ctx context.Context, input domain.UpsertMfaSecretInput) error
+	CompleteEnrollment(ctx context.Context, userID uuid.UUID, codeHashes []string, confirmedAt time.Time, now time.Time) error
 }
 
 // Service orchestrates MFA enrollment.
@@ -127,7 +126,7 @@ func (s *Service) Setup(ctx context.Context, userID uuid.UUID, accountName strin
 	}
 
 	now := s.now().UTC().Truncate(time.Microsecond)
-	if _, err := s.store.UpsertMfaSecret(ctx, domain.UpsertMfaSecretInput{
+	if err := s.store.StoreSetupSecret(ctx, domain.UpsertMfaSecretInput{
 		ID:              uuid.New(),
 		UserID:          userID,
 		SecretEncrypted: encrypted,
@@ -170,39 +169,27 @@ func (s *Service) Confirm(ctx context.Context, userID uuid.UUID, code string) ([
 		return nil, ErrInvalidCode
 	}
 
-	codes, err := s.regenerateRecoveryCodes(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	now := s.now().UTC().Truncate(time.Microsecond)
-	if err := s.store.SetUserMfaEnabled(ctx, userID, true, &now, now); err != nil {
-		return nil, fmt.Errorf("mfa: enable: %w", err)
-	}
-
-	s.recordAudit(ctx, authservice.EventAuthMfaEnabled, userID)
-	return codes, nil
-}
-
-// regenerateRecoveryCodes replaces the user's recovery codes with a fresh set,
-// returning the raw codes and persisting only their hashes.
-func (s *Service) regenerateRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]string, error) {
-	if err := s.store.DeleteRecoveryCodes(ctx, userID); err != nil {
-		return nil, fmt.Errorf("mfa: clear recovery codes: %w", err)
-	}
-	now := s.now().UTC().Truncate(time.Microsecond)
-	codes := make([]string, 0, recoveryCodeCount)
+	// Generate the recovery codes up front, then persist their hashes and enable
+	// MFA atomically — CompleteEnrollment locks the user row, so concurrent
+	// confirms can't both write a set of codes or double-enable.
+	rawCodes := make([]string, 0, recoveryCodeCount)
+	hashes := make([]string, 0, recoveryCodeCount)
 	for range recoveryCodeCount {
-		code, err := newRecoveryCode()
+		raw, err := newRecoveryCode()
 		if err != nil {
 			return nil, fmt.Errorf("mfa: generate recovery code: %w", err)
 		}
-		if err := s.store.CreateRecoveryCode(ctx, uuid.New(), userID, HashRecoveryCode(code), now); err != nil {
-			return nil, fmt.Errorf("mfa: store recovery code: %w", err)
-		}
-		codes = append(codes, code)
+		rawCodes = append(rawCodes, raw)
+		hashes = append(hashes, HashRecoveryCode(raw))
 	}
-	return codes, nil
+
+	now := s.now().UTC().Truncate(time.Microsecond)
+	if err := s.store.CompleteEnrollment(ctx, userID, hashes, now, now); err != nil {
+		return nil, err
+	}
+
+	s.recordAudit(ctx, authservice.EventAuthMfaEnabled, userID)
+	return rawCodes, nil
 }
 
 func (s *Service) recordAudit(ctx context.Context, eventType string, userID uuid.UUID) {

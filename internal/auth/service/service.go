@@ -955,6 +955,31 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 	return nil
 }
 
+// VerifyPassword confirms rawPassword is the user's current password. It is the
+// reauthentication step before a sensitive account change (e.g. enrolling MFA),
+// so a stolen access token alone cannot perform the change. A mismatch, missing
+// user, or over-long input all surface as ErrInvalidCredentials.
+func (s *Service) VerifyPassword(ctx context.Context, userID uuid.UUID, rawPassword string) error {
+	if len(rawPassword) == 0 || len(rawPassword) > maxPasswordLength {
+		return ErrInvalidCredentials
+	}
+	user, err := s.store.GetUserByIDForAuth(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return ErrInvalidCredentials
+		}
+		return fmt.Errorf("auth: failed to retrieve user: %w", err)
+	}
+	match, err := password.Verify(rawPassword, user.PasswordHash)
+	if err != nil {
+		return fmt.Errorf("auth: failed to verify password: %w", err)
+	}
+	if !match {
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
 // ForgotPassword issues a password-reset token and emails it. To avoid account
 // enumeration the result is always nil whether or not the email matches an
 // active account.

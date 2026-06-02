@@ -104,6 +104,10 @@ func (openAPIAuthService) SignOutOtherSessions(context.Context, string) error {
 	return nil
 }
 
+func (openAPIAuthService) VerifyPassword(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 type openAPIMfaService struct{}
 
 func (openAPIMfaService) Setup(context.Context, uuid.UUID, string) (mfaservice.SetupResult, error) {

@@ -639,6 +639,29 @@
         ],
         "type": "object"
       },
+      "MfaSetupInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MfaSetupInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "password": {
+            "description": "The current account password, re-entered to authorize MFA enrollment",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "type": "object"
+      },
       "NotificationItem": {
         "additionalProperties": false,
         "properties": {
@@ -2275,6 +2298,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaSetupInputBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -2290,6 +2323,9 @@
             "$ref": "#/components/responses/APIError"
           },
           "409": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
             "$ref": "#/components/responses/APIError"
           },
           "429": {

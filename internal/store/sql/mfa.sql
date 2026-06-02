@@ -1,3 +1,9 @@
+-- name: LockUserMfaEnabled :one
+-- Locks the user row for the duration of the transaction so concurrent MFA
+-- setup/confirm requests for the same user serialize, and returns the current
+-- mfa_enabled flag observed under that lock.
+SELECT mfa_enabled FROM users WHERE id = @id FOR UPDATE;
+
 -- name: SetUserMfaEnabled :exec
 UPDATE users
 SET mfa_enabled = @mfa_enabled,

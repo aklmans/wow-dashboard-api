@@ -252,7 +252,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("app: mfa cipher: %w", err)
 	}
-	mfaSvc := mfaservice.NewService(authrepo.NewMfaStore(queries), mfaCipher, cfg.AppName,
+	mfaSvc := mfaservice.NewService(authrepo.NewMfaStore(pool), mfaCipher, cfg.AppName,
 		mfaservice.WithAuditRecorder(auditRecorder))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(pool),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)),

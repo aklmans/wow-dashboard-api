@@ -73,6 +73,20 @@ func (q *Queries) GetUserMfaSecret(ctx context.Context, userID pgtype.UUID) (Use
 	return i, err
 }
 
+const lockUserMfaEnabled = `-- name: LockUserMfaEnabled :one
+SELECT mfa_enabled FROM users WHERE id = $1 FOR UPDATE
+`
+
+// Locks the user row for the duration of the transaction so concurrent MFA
+// setup/confirm requests for the same user serialize, and returns the current
+// mfa_enabled flag observed under that lock.
+func (q *Queries) LockUserMfaEnabled(ctx context.Context, id pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, lockUserMfaEnabled, id)
+	var mfa_enabled bool
+	err := row.Scan(&mfa_enabled)
+	return mfa_enabled, err
+}
+
 const setUserMfaEnabled = `-- name: SetUserMfaEnabled :exec
 UPDATE users
 SET mfa_enabled = $1,

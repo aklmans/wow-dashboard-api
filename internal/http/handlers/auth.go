@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/google/uuid"
 
 	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/service"
@@ -22,6 +23,7 @@ type AuthService interface {
 	RefreshSession(ctx context.Context, rawCurrentAccessToken, rawRefreshToken string) (*service.Session, error)
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error
+	VerifyPassword(ctx context.Context, userID uuid.UUID, rawPassword string) error
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
 	Impersonate(ctx context.Context, actor *service.PublicUser, targetID string) (*service.Session, error)
 	StopImpersonation(ctx context.Context, rawCurrentToken, rawRefreshToken string) (*service.Session, error)

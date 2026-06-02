@@ -134,7 +134,17 @@ type fakeStore struct {
 	recoveryCodeHashes []string
 }
 
-func (f *fakeStore) UpsertMfaSecret(_ context.Context, input domain.UpsertMfaSecretInput) (domain.MfaSecret, error) {
+func (f *fakeStore) GetMfaSecret(_ context.Context, _ uuid.UUID) (domain.MfaSecret, error) {
+	if !f.hasSecret {
+		return domain.MfaSecret{}, domain.ErrMfaSecretNotFound
+	}
+	return f.secret, nil
+}
+
+func (f *fakeStore) StoreSetupSecret(_ context.Context, input domain.UpsertMfaSecretInput) error {
+	if f.enabled {
+		return domain.ErrMfaAlreadyEnabled
+	}
 	f.secret = domain.MfaSecret{
 		ID:              input.ID,
 		UserID:          input.UserID,
@@ -144,33 +154,15 @@ func (f *fakeStore) UpsertMfaSecret(_ context.Context, input domain.UpsertMfaSec
 		Period:          input.Period,
 	}
 	f.hasSecret = true
-	return f.secret, nil
+	return nil
 }
 
-func (f *fakeStore) GetMfaSecret(_ context.Context, _ uuid.UUID) (domain.MfaSecret, error) {
-	if !f.hasSecret {
-		return domain.MfaSecret{}, domain.ErrMfaSecretNotFound
+func (f *fakeStore) CompleteEnrollment(_ context.Context, _ uuid.UUID, codeHashes []string, confirmedAt time.Time, _ time.Time) error {
+	if f.enabled {
+		return domain.ErrMfaAlreadyEnabled
 	}
-	return f.secret, nil
-}
-
-func (f *fakeStore) DeleteMfaSecret(_ context.Context, _ uuid.UUID) error {
-	f.hasSecret = false
-	return nil
-}
-
-func (f *fakeStore) SetUserMfaEnabled(_ context.Context, _ uuid.UUID, enabled bool, confirmedAt *time.Time, _ time.Time) error {
-	f.enabled = enabled
-	f.confirmedAt = confirmedAt
-	return nil
-}
-
-func (f *fakeStore) DeleteRecoveryCodes(_ context.Context, _ uuid.UUID) error {
-	f.recoveryCodeHashes = nil
-	return nil
-}
-
-func (f *fakeStore) CreateRecoveryCode(_ context.Context, _, _ uuid.UUID, codeHash string, _ time.Time) error {
-	f.recoveryCodeHashes = append(f.recoveryCodeHashes, codeHash)
+	f.enabled = true
+	f.confirmedAt = &confirmedAt
+	f.recoveryCodeHashes = codeHashes
 	return nil
 }
