@@ -422,6 +422,25 @@ func TestServiceCompleteMfaSignIn(t *testing.T) {
 			t.Fatalf("CompleteMfaSignIn error = %v, want ErrInvalidToken for a non-pending token", err)
 		}
 	})
+
+	t.Run("an account disabled after the password step is refused", func(t *testing.T) {
+		// An admin disabled the account between sign-in and verify; even a valid
+		// code must not mint a session.
+		authUser := testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusDisabled, "correct-password")
+		authUser.MfaEnabled = true
+		store := &unitUserStore{authUser: authUser}
+		verifier := &fakeMfaVerifier{valid: true}
+		authSvc := service.NewService(store, pendingTokenManager(),
+			service.WithRefreshTokenStore(&unitRefreshTokenStore{}, 14*24*time.Hour),
+			service.WithMfaVerifier(verifier))
+
+		if _, err := authSvc.CompleteMfaSignIn(context.Background(), "pending", "123456"); !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Fatalf("CompleteMfaSignIn error = %v, want ErrInvalidCredentials for a disabled account", err)
+		}
+		if verifier.verifiedCode != "" {
+			t.Fatal("the code was verified for a disabled account; want refused before verification")
+		}
+	})
 }
 
 func TestServiceChangePassword(t *testing.T) {

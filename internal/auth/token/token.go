@@ -194,9 +194,40 @@ func (m *Manager) IssueMfaPendingToken(userID string, ttl time.Duration) (string
 }
 
 // VerifyAccessToken parses and validates a JWT string. It enforces HS256
-// signing method and validates issuer, audience, and expiration. It returns
-// the Claims on success.
+// signing method and validates issuer, audience, and expiration. It rejects
+// mfa_pending tickets, which are valid only at /api/auth/mfa/verify, so a
+// pre-second-factor ticket can never authorize a normal request. It returns the
+// Claims on success.
 func (m *Manager) VerifyAccessToken(raw string) (*Claims, error) {
+	claims, err := m.parseSignedClaims(raw)
+	if err != nil {
+		return nil, err
+	}
+	if claims.MfaPending {
+		return nil, errors.New("token: invalid or expired token")
+	}
+	return claims, nil
+}
+
+// VerifyMfaPendingToken validates an mfa_pending ticket issued by
+// IssueMfaPendingToken. It enforces the same signature/issuer/audience/expiry
+// checks as an access token but additionally REQUIRES the mfa_pending marker,
+// so a normal access token can never be replayed at /api/auth/mfa/verify.
+func (m *Manager) VerifyMfaPendingToken(raw string) (*Claims, error) {
+	claims, err := m.parseSignedClaims(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !claims.MfaPending {
+		return nil, errors.New("token: invalid or expired token")
+	}
+	return claims, nil
+}
+
+// parseSignedClaims parses a JWT and validates its signature, method, issuer,
+// audience, and expiry. It does not interpret the mfa_pending marker — callers
+// decide whether a pending ticket is acceptable for their flow.
+func (m *Manager) parseSignedClaims(raw string) (*Claims, error) {
 	claims := &Claims{}
 
 	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {

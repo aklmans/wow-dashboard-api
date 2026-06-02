@@ -175,6 +175,7 @@ type TokenManager interface {
 	IssueImpersonationToken(targetID, actorID string) (string, error)
 	IssueMfaPendingToken(userID string, ttl time.Duration) (string, error)
 	VerifyAccessToken(raw string) (*token.Claims, error)
+	VerifyMfaPendingToken(raw string) (*token.Claims, error)
 	ParseClaimsAllowExpired(raw string) (*token.Claims, error)
 }
 
@@ -615,8 +616,11 @@ func (s *Service) CompleteMfaSignIn(ctx context.Context, rawPendingToken string,
 	if s.mfaVerifier == nil {
 		return nil, fmt.Errorf("auth: mfa is not configured")
 	}
-	claims, err := s.tokenManager.VerifyAccessToken(rawPendingToken)
-	if err != nil || claims == nil || !claims.MfaPending {
+	// VerifyMfaPendingToken accepts only mfa_pending tickets — a normal access
+	// token cannot be replayed here, and the pending ticket cannot authorize any
+	// other endpoint (VerifyAccessToken rejects it).
+	claims, err := s.tokenManager.VerifyMfaPendingToken(rawPendingToken)
+	if err != nil || claims == nil {
 		return nil, ErrInvalidToken
 	}
 	userID, err := uuid.Parse(claims.Subject)
@@ -632,6 +636,12 @@ func (s *Service) CompleteMfaSignIn(ctx context.Context, rawPendingToken string,
 			return nil, ErrInvalidToken
 		}
 		return nil, fmt.Errorf("auth: failed to retrieve user: %w", err)
+	}
+	// Re-check status: an admin may have disabled the account between the password
+	// step and now. Mirror SignIn — never issue a session for a disabled user.
+	if user.Status == domain.UserStatusDisabled {
+		s.recordSignInFailed(ctx, AuditMetadata{UserID: userIDStr, Reason: AuditReasonUserDisabled})
+		return nil, ErrInvalidCredentials
 	}
 	if user.LockedUntil != nil && user.LockedUntil.After(now) {
 		s.recordSignInFailed(ctx, AuditMetadata{UserID: userIDStr, Reason: AuditReasonAccountLocked})

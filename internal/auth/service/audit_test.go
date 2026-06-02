@@ -348,6 +348,19 @@ func (f *fakeTokenManager) VerifyAccessToken(raw string) (*token.Claims, error) 
 	if f.verifyErr != nil {
 		return nil, f.verifyErr
 	}
+	if f.claims != nil && f.claims.MfaPending {
+		return nil, errors.New("token: invalid or expired token")
+	}
+	return f.claims, nil
+}
+
+func (f *fakeTokenManager) VerifyMfaPendingToken(raw string) (*token.Claims, error) {
+	if f.verifyErr != nil {
+		return nil, f.verifyErr
+	}
+	if f.claims == nil || !f.claims.MfaPending {
+		return nil, errors.New("token: invalid or expired token")
+	}
 	return f.claims, nil
 }
 

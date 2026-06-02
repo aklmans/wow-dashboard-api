@@ -61,6 +61,36 @@ func TestIssueAndVerify(t *testing.T) {
 	}
 }
 
+func TestMfaPendingTokenIsSeparateFromAccess(t *testing.T) {
+	m := newTestManager(t)
+
+	pending, err := m.IssueMfaPendingToken(testUserID, time.Minute)
+	if err != nil {
+		t.Fatalf("IssueMfaPendingToken: %v", err)
+	}
+
+	// The pending ticket verifies only via the pending path...
+	claims, err := m.VerifyMfaPendingToken(pending)
+	if err != nil {
+		t.Fatalf("VerifyMfaPendingToken(pending): %v", err)
+	}
+	if !claims.MfaPending || claims.Subject != testUserID {
+		t.Fatalf("pending claims = %+v, want mfa_pending for %q", claims, testUserID)
+	}
+	// ...and is rejected as a normal access token, so it cannot authorize a
+	// request before the second factor is provided.
+	if _, err := m.VerifyAccessToken(pending); err == nil {
+		t.Fatal("VerifyAccessToken accepted an mfa_pending ticket; want rejection")
+	}
+
+	// Conversely, a normal access token is not accepted at the pending path, so
+	// it cannot be replayed at /api/auth/mfa/verify.
+	access, _ := m.IssueAccessToken(testUserID)
+	if _, err := m.VerifyMfaPendingToken(access); err == nil {
+		t.Fatal("VerifyMfaPendingToken accepted a normal access token; want rejection")
+	}
+}
+
 func TestImpersonationToken(t *testing.T) {
 	m := newTestManager(t)
 
