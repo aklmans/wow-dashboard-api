@@ -2204,6 +2204,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
             429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
@@ -2234,6 +2235,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
             404: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
             429: components["responses"]["APIError"];

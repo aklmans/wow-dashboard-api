@@ -169,16 +169,19 @@ WHERE user_id = @user_id
 ORDER BY last_used_at DESC NULLS LAST, created_at DESC;
 
 -- name: RevokeUserRefreshTokenFamily :execrows
--- Revoke one session (family) belonging to the user. Scoped by user_id so a
--- user can never revoke another account's session; rows affected = 0 means the
--- family was not the user's active session (wrong id or already revoked).
+-- Revoke one active session (family) belonging to the user. Scoped by user_id so
+-- a user can never revoke another account's session, and limited to unexpired
+-- tokens so it matches exactly what the list exposes; rows affected = 0 means the
+-- family was not one of the user's active sessions (wrong id, expired, or already
+-- revoked) and the caller gets a 404.
 UPDATE refresh_tokens
 SET
     revoked_at = @revoked_at,
     updated_at = @revoked_at
 WHERE user_id = @user_id
   AND family_id = @family_id
-  AND revoked_at IS NULL;
+  AND revoked_at IS NULL
+  AND expires_at > now();
 
 -- name: DeleteExpiredRefreshTokens :execrows
 -- Retention purge: drop refresh tokens that have already expired. Revoked but

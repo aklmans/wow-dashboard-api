@@ -2822,6 +2822,9 @@
           "401": {
             "$ref": "#/components/responses/APIError"
           },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
           "429": {
             "$ref": "#/components/responses/APIError"
           },
@@ -2885,6 +2888,9 @@
             }
           },
           "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
             "$ref": "#/components/responses/APIError"
           },
           "404": {

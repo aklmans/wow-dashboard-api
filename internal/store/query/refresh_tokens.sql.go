@@ -273,6 +273,7 @@ SET
 WHERE user_id = $2
   AND family_id = $3
   AND revoked_at IS NULL
+  AND expires_at > now()
 `
 
 type RevokeUserRefreshTokenFamilyParams struct {
@@ -281,9 +282,11 @@ type RevokeUserRefreshTokenFamilyParams struct {
 	FamilyID  pgtype.UUID
 }
 
-// Revoke one session (family) belonging to the user. Scoped by user_id so a
-// user can never revoke another account's session; rows affected = 0 means the
-// family was not the user's active session (wrong id or already revoked).
+// Revoke one active session (family) belonging to the user. Scoped by user_id so
+// a user can never revoke another account's session, and limited to unexpired
+// tokens so it matches exactly what the list exposes; rows affected = 0 means the
+// family was not one of the user's active sessions (wrong id, expired, or already
+// revoked) and the caller gets a 404.
 func (q *Queries) RevokeUserRefreshTokenFamily(ctx context.Context, arg RevokeUserRefreshTokenFamilyParams) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeUserRefreshTokenFamily, arg.RevokedAt, arg.UserID, arg.FamilyID)
 	if err != nil {

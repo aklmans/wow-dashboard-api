@@ -458,6 +458,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		Middlewares: huma.Middlewares(authMiddlewares),
 		Responses: apiErrorResponses(api,
 			http.StatusUnauthorized,
+			http.StatusForbidden,
 			http.StatusTooManyRequests,
 			http.StatusInternalServerError,
 		),
@@ -485,6 +486,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 		Middlewares: huma.Middlewares(authMiddlewares),
 		Responses: apiErrorResponses(api,
 			http.StatusUnauthorized,
+			http.StatusForbidden,
 			http.StatusNotFound,
 			http.StatusTooManyRequests,
 			http.StatusUnprocessableEntity,
@@ -961,6 +963,11 @@ func currentUserID(ctx context.Context, authSvc AuthService, authHeader string) 
 	}
 	if user == nil {
 		return uuid.Nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+	}
+	// An impersonation session resolves to the target user; an admin must not be
+	// able to view or revoke the impersonated user's sessions.
+	if user.ImpersonatorID != "" {
+		return uuid.Nil, apierror.Forbidden("Sessions cannot be managed while impersonating a user.").ForContext(ctx)
 	}
 	id, parseErr := uuid.Parse(user.ID)
 	if parseErr != nil {

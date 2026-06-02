@@ -329,6 +329,24 @@ func TestAuthHandlers(t *testing.T) {
 			"Authorization token missing or invalid.")
 	})
 
+	t.Run("managing sessions is blocked while impersonating", func(t *testing.T) {
+		authSvc := &fakeAuthService{
+			currentUser: &service.PublicUser{ID: "00000000-0000-0000-0000-000000000123", ImpersonatorID: "admin-1"},
+		}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/sessions", nil)
+		req.Header.Set("Authorization", "Bearer impersonation-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden,
+			"Sessions cannot be managed while impersonating a user.")
+		if authSvc.listSessionsUserID != uuid.Nil {
+			t.Error("ListSessions was called during impersonation")
+		}
+	})
+
 	t.Run("revokes a session by id, scoped to the current user", func(t *testing.T) {
 		authSvc := &fakeAuthService{currentUser: &service.PublicUser{ID: "00000000-0000-0000-0000-000000000123"}}
 		router := newAuthTestRouter(authSvc)
