@@ -76,18 +76,28 @@ type RefreshToken struct {
 	ExpiresAt         time.Time
 	RevokedAt         *time.Time
 	ReplacedByTokenID *uuid.UUID
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// Device/session metadata for the active-sessions list. UserAgent and
+	// IPAddress are captured at sign-in and carried forward across rotations;
+	// LastUsedAt is bumped on each rotation. All are empty/nil for tokens issued
+	// before this was added.
+	UserAgent  string
+	IPAddress  string
+	LastUsedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type CreateRefreshTokenInput struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	TokenHash string
-	FamilyID  uuid.UUID
-	ExpiresAt time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         uuid.UUID
+	UserID     uuid.UUID
+	TokenHash  string
+	FamilyID   uuid.UUID
+	ExpiresAt  time.Time
+	UserAgent  string
+	IPAddress  string
+	LastUsedAt time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Auth token purposes for the email-driven flows.

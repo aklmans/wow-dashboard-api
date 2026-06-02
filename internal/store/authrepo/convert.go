@@ -120,6 +120,14 @@ func pgTextPtr(value *string) pgtype.Text {
 	return pgtype.Text{String: *value, Valid: true}
 }
 
+// pgText maps a plain string to a nullable text arg, treating "" as NULL.
+func pgText(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
+}
+
 func authUserFromRow(row query.User) (domain.AuthUser, error) {
 	id, err := domainUUID(row.ID)
 	if err != nil {
@@ -184,6 +192,9 @@ func refreshTokenFromRow(row query.RefreshToken) (domain.RefreshToken, error) {
 		ExpiresAt:         expiresAt,
 		RevokedAt:         nullableDomainTimestamp(row.RevokedAt),
 		ReplacedByTokenID: nullableDomainUUID(row.ReplacedByTokenID),
+		UserAgent:         pgTextValue(row.UserAgent),
+		IPAddress:         pgTextValue(row.IpAddress),
+		LastUsedAt:        nullableDomainTimestamp(row.LastUsedAt),
 		CreatedAt:         createdAt,
 		UpdatedAt:         updatedAt,
 	}, nil

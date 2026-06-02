@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aklmans/wow-dashboard-api/internal/auth/authctx"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/domain"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/password"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/rbac"
@@ -450,7 +451,7 @@ func (s *Service) signUpWithUnitOfWork(ctx context.Context, input domain.CreateU
 		return nil, err
 	}
 
-	rawRefreshToken, refreshInput, err := s.newRefreshTokenInput(input.ID, uuid.Nil)
+	rawRefreshToken, refreshInput, err := s.newRefreshTokenInput(input.ID, uuid.Nil, authctx.ClientInfoFrom(ctx), time.Time{})
 	if err != nil {
 		return nil, err
 	}
@@ -1362,7 +1363,7 @@ func (s *Service) issueSession(ctx context.Context, user domain.User, familyID u
 		return session, nil
 	}
 
-	rawRefreshToken, input, err := s.newRefreshTokenInput(user.ID, familyID)
+	rawRefreshToken, input, err := s.newRefreshTokenInput(user.ID, familyID, authctx.ClientInfoFrom(ctx), time.Time{})
 	if err != nil {
 		return nil, err
 	}
@@ -1381,7 +1382,11 @@ func (s *Service) rotateSession(ctx context.Context, user domain.User, currentTo
 		return nil, err
 	}
 
-	rawRefreshToken, input, err := s.newRefreshTokenInput(user.ID, currentToken.FamilyID)
+	// Carry the device identity forward and preserve the session's start time so
+	// the active-sessions list stays stable across rotations; LastUsedAt bumps to
+	// now inside newRefreshTokenInput.
+	carried := authctx.ClientInfo{UserAgent: currentToken.UserAgent, IPAddress: currentToken.IPAddress}
+	rawRefreshToken, input, err := s.newRefreshTokenInput(user.ID, currentToken.FamilyID, carried, currentToken.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1412,7 +1417,12 @@ func publicUserFromDomain(user domain.User) PublicUser {
 	}
 }
 
-func (s *Service) newRefreshTokenInput(userID uuid.UUID, familyID uuid.UUID) (string, domain.CreateRefreshTokenInput, error) {
+// newRefreshTokenInput builds the row for a refresh token. client carries the
+// device fingerprint (UA/IP) recorded for the active-sessions list; createdAt is
+// the session's start time — pass zero for a fresh session (it defaults to now)
+// or the family's original CreatedAt on rotation so the list keeps showing when
+// the session began. LastUsedAt is always set to now.
+func (s *Service) newRefreshTokenInput(userID uuid.UUID, familyID uuid.UUID, client authctx.ClientInfo, createdAt time.Time) (string, domain.CreateRefreshTokenInput, error) {
 	rawRefreshToken, err := newRefreshToken()
 	if err != nil {
 		return "", domain.CreateRefreshTokenInput{}, err
@@ -1421,14 +1431,20 @@ func (s *Service) newRefreshTokenInput(userID uuid.UUID, familyID uuid.UUID) (st
 		familyID = uuid.New()
 	}
 	now := s.now().UTC().Truncate(time.Microsecond)
+	if createdAt.IsZero() {
+		createdAt = now
+	}
 	return rawRefreshToken, domain.CreateRefreshTokenInput{
-		ID:        uuid.New(),
-		UserID:    userID,
-		TokenHash: hashRefreshToken(rawRefreshToken),
-		FamilyID:  familyID,
-		ExpiresAt: now.Add(s.refreshTokenTTL),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         uuid.New(),
+		UserID:     userID,
+		TokenHash:  hashRefreshToken(rawRefreshToken),
+		FamilyID:   familyID,
+		ExpiresAt:  now.Add(s.refreshTokenTTL),
+		UserAgent:  client.UserAgent,
+		IPAddress:  client.IPAddress,
+		LastUsedAt: now,
+		CreatedAt:  createdAt,
+		UpdatedAt:  now,
 	}, nil
 }
 

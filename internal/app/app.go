@@ -118,7 +118,12 @@ func NewAPI(router chi.Router, docsEnabled bool) huma.API {
 	// the generic client envelope. It passes nil to resolve slog.Default(),
 	// which Run() has already configured via slog.SetDefault.
 	humaCfg.Transformers = append(humaCfg.Transformers, apierror.LoggingTransformer(nil), apierror.HumaErrorTransformer)
-	return humachi.New(router, humaCfg)
+	api := humachi.New(router, humaCfg)
+	// Capture the User-Agent + client IP into context for every request so the
+	// session-issuing flows can record them on the refresh token (active-sessions
+	// list). Cheap and side-effect-free.
+	api.UseMiddleware(httpmiddleware.ClientInfo())
+	return api
 }
 
 // Run sets up and executes the main HTTP server process with graceful shutdown orchestration.

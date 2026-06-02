@@ -8,7 +8,10 @@ INSERT INTO refresh_tokens (
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 ) VALUES (
     @id,
     @user_id,
@@ -18,7 +21,10 @@ INSERT INTO refresh_tokens (
     NULL,
     NULL,
     @created_at,
-    @updated_at
+    @updated_at,
+    @user_agent,
+    @ip_address,
+    @last_used_at
 )
 RETURNING
     id,
@@ -29,7 +35,10 @@ RETURNING
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at;
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at;
 
 -- name: GetRefreshTokenByHash :one
 SELECT
@@ -41,7 +50,10 @@ SELECT
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 FROM refresh_tokens
 WHERE token_hash = @token_hash;
 
@@ -65,7 +77,10 @@ INSERT INTO refresh_tokens (
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
 )
 SELECT
     sqlc.arg(new_id),
@@ -76,7 +91,10 @@ SELECT
     NULL,
     NULL,
     sqlc.arg(created_at),
-    sqlc.arg(updated_at)
+    sqlc.arg(updated_at),
+    sqlc.arg(user_agent),
+    sqlc.arg(ip_address),
+    sqlc.arg(last_used_at)
 WHERE EXISTS (SELECT 1 FROM revoked)
 RETURNING
     id,
@@ -87,7 +105,10 @@ RETURNING
     revoked_at,
     replaced_by_token_id,
     created_at,
-    updated_at;
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at;
 
 -- name: RevokeRefreshTokenByHash :exec
 UPDATE refresh_tokens
