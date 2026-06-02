@@ -337,6 +337,13 @@ func (f *fakeTokenManager) IssueImpersonationToken(targetID, actorID string) (st
 	return f.issuedToken, nil
 }
 
+func (f *fakeTokenManager) IssueMfaPendingToken(userID string, _ time.Duration) (string, error) {
+	if f.issueErr != nil {
+		return "", f.issueErr
+	}
+	return f.issuedToken, nil
+}
+
 func (f *fakeTokenManager) VerifyAccessToken(raw string) (*token.Claims, error) {
 	if f.verifyErr != nil {
 		return nil, f.verifyErr

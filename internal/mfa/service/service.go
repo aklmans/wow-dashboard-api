@@ -52,6 +52,7 @@ type Store interface {
 	GetMfaSecret(ctx context.Context, userID uuid.UUID) (domain.MfaSecret, error)
 	StoreSetupSecret(ctx context.Context, input domain.UpsertMfaSecretInput) error
 	CompleteEnrollment(ctx context.Context, userID uuid.UUID, codeHashes []string, confirmedAt time.Time, now time.Time) error
+	ConsumeRecoveryCode(ctx context.Context, userID uuid.UUID, codeHash string, now time.Time) (bool, error)
 }
 
 // Service orchestrates MFA enrollment.
@@ -190,6 +191,38 @@ func (s *Service) Confirm(ctx context.Context, userID uuid.UUID, code string) ([
 
 	s.recordAudit(ctx, authservice.EventAuthMfaEnabled, userID)
 	return rawCodes, nil
+}
+
+// Verify reports whether code is a currently-valid TOTP code or an unused
+// recovery code for the user; a valid recovery code is consumed. It returns
+// (false, nil) for an invalid code and an error only for internal failures, so
+// the caller can count an invalid code toward the sign-in lockout.
+func (s *Service) Verify(ctx context.Context, userID uuid.UUID, code string) (bool, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return false, nil
+	}
+	secret, err := s.store.GetMfaSecret(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrMfaSecretNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	plain, err := s.cipher.Decrypt(secret.SecretEncrypted)
+	if err != nil {
+		return false, fmt.Errorf("mfa: decrypt secret: %w", err)
+	}
+	if valid, _ := totp.ValidateCustom(code, plain, s.now().UTC(), totp.ValidateOpts{
+		Period:    uint(secret.Period),
+		Skew:      totpSkew,
+		Digits:    otp.DigitsSix,
+		Algorithm: otp.AlgorithmSHA1,
+	}); valid {
+		return true, nil
+	}
+	// Not a current TOTP code — try it as a one-time recovery code.
+	return s.store.ConsumeRecoveryCode(ctx, userID, HashRecoveryCode(code), s.now().UTC().Truncate(time.Microsecond))
 }
 
 func (s *Service) recordAudit(ctx context.Context, eventType string, userID uuid.UUID) {

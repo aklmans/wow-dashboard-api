@@ -32,6 +32,7 @@ var (
 	ErrUserNotFound        = errors.New("auth: user not found")
 	ErrCannotImpersonate   = errors.New("auth: cannot impersonate this user")
 	ErrImpersonationActive = errors.New("auth: stop impersonation before refreshing")
+	ErrInvalidMfaCode      = errors.New("auth: invalid mfa code")
 )
 
 const (
@@ -50,6 +51,9 @@ const (
 	// after reaching the failure threshold. The lock is self-healing — it simply
 	// expires; deployments override it with WithLockoutPolicy.
 	defaultAccountLockoutWindow = 15 * time.Minute
+	// mfaPendingTokenTTL bounds how long the post-password MFA challenge ticket is
+	// valid — short, since the user is mid-sign-in with their authenticator open.
+	mfaPendingTokenTTL = 5 * time.Minute
 	// passwordResetTokenTTL bounds how long a password-reset link is valid.
 	passwordResetTokenTTL = time.Hour
 	// emailVerificationTokenTTL bounds how long an email-verification link is valid.
@@ -90,6 +94,11 @@ type Session struct {
 	User         PublicUser `json:"user"`
 	AccessToken  string     `json:"accessToken"`
 	RefreshToken string     `json:"-"`
+	// MfaRequired is true when sign-in needs a second factor: no real session is
+	// issued (AccessToken/RefreshToken are empty); MfaPendingToken is a
+	// short-lived ticket the client exchanges at /api/auth/mfa/verify.
+	MfaRequired     bool   `json:"-"`
+	MfaPendingToken string `json:"-"`
 }
 
 // SignUpInput defines the inputs required to register a new user.
@@ -164,8 +173,18 @@ type UnitOfWork interface {
 type TokenManager interface {
 	IssueAccessToken(userID string) (string, error)
 	IssueImpersonationToken(targetID, actorID string) (string, error)
+	IssueMfaPendingToken(userID string, ttl time.Duration) (string, error)
 	VerifyAccessToken(raw string) (*token.Claims, error)
 	ParseClaimsAllowExpired(raw string) (*token.Claims, error)
+}
+
+// MfaVerifier checks a TOTP/recovery code for a user during the sign-in second
+// factor. It returns (true, nil) when the code is valid (consuming a recovery
+// code), (false, nil) for an invalid code, and an error only on internal
+// failures. An interface here keeps auth/service from importing the mfa service
+// (which imports this package), avoiding an import cycle.
+type MfaVerifier interface {
+	Verify(ctx context.Context, userID uuid.UUID, code string) (bool, error)
 }
 
 // Service provides the orchestration layer for auth business logic.
@@ -179,6 +198,7 @@ type Service struct {
 	emailSender       email.Sender
 	appBaseURL        string
 	auditRecorder     AuditRecorder
+	mfaVerifier       MfaVerifier
 	now               func() time.Time
 
 	maxFailedLoginAttempts int
@@ -242,6 +262,16 @@ func WithEmailSender(sender email.Sender) Option {
 	return func(s *Service) {
 		if sender != nil {
 			s.emailSender = sender
+		}
+	}
+}
+
+// WithMfaVerifier enables the sign-in second factor. When set, sign-in for an
+// MFA-enabled user returns an mfa-pending session instead of a full one.
+func WithMfaVerifier(verifier MfaVerifier) Option {
+	return func(s *Service) {
+		if verifier != nil {
+			s.mfaVerifier = verifier
 		}
 	}
 }
@@ -534,6 +564,24 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		return nil, ErrInvalidCredentials
 	}
 
+	// MFA gate: the password alone is not enough for an MFA-enabled account.
+	// Issue a short-lived mfa-pending ticket and stop — do NOT issue a session or
+	// clear the failure counter yet, so failed codes at /mfa/verify still count
+	// toward the lockout (clearing here would let an attacker who knows the
+	// password reset the counter on every attempt and brute-force the code).
+	if s.mfaVerifier != nil && user.User.MfaEnabled {
+		pendingToken, err := s.tokenManager.IssueMfaPendingToken(userIDStr, mfaPendingTokenTTL)
+		if err != nil {
+			s.recordSignInFailed(ctx, AuditMetadata{Email: email, UserID: userIDStr, Reason: AuditReasonInternalError})
+			return nil, fmt.Errorf("auth: failed to issue mfa-pending token: %w", err)
+		}
+		return &Session{
+			User:            publicUserFromDomain(user.User),
+			MfaRequired:     true,
+			MfaPendingToken: pendingToken,
+		}, nil
+	}
+
 	// The credentials are valid: record the successful sign-in. This clears any
 	// accumulated failure/lock state and stamps last_login_at, so it runs on
 	// every sign-in, not only when failures had accrued. Best-effort — a
@@ -555,6 +603,71 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		Email:  session.User.Email,
 		UserID: session.User.ID,
 	})
+	return session, nil
+}
+
+// CompleteMfaSignIn finishes a sign-in for an MFA-enabled user: it validates the
+// mfa-pending ticket, checks the second-factor code (TOTP or recovery), and on
+// success issues the real session. A wrong code counts toward the account
+// lockout (so the 6-digit code can't be brute-forced); a locked account is
+// refused.
+func (s *Service) CompleteMfaSignIn(ctx context.Context, rawPendingToken string, code string) (*Session, error) {
+	if s.mfaVerifier == nil {
+		return nil, fmt.Errorf("auth: mfa is not configured")
+	}
+	claims, err := s.tokenManager.VerifyAccessToken(rawPendingToken)
+	if err != nil || claims == nil || !claims.MfaPending {
+		return nil, ErrInvalidToken
+	}
+	userID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return nil, ErrInvalidToken
+	}
+	userIDStr := userID.String()
+
+	now := s.now().UTC().Truncate(time.Microsecond)
+	user, err := s.store.GetUserByIDForAuth(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return nil, ErrInvalidToken
+		}
+		return nil, fmt.Errorf("auth: failed to retrieve user: %w", err)
+	}
+	if user.LockedUntil != nil && user.LockedUntil.After(now) {
+		s.recordSignInFailed(ctx, AuditMetadata{UserID: userIDStr, Reason: AuditReasonAccountLocked})
+		return nil, ErrInvalidCredentials
+	}
+	if !user.MfaEnabled {
+		// MFA was disabled between sign-in and verify; the pending ticket is moot.
+		return nil, ErrInvalidToken
+	}
+
+	valid, err := s.mfaVerifier.Verify(ctx, userID, code)
+	if err != nil {
+		s.recordSignInFailed(ctx, AuditMetadata{UserID: userIDStr, Reason: AuditReasonInternalError})
+		return nil, fmt.Errorf("auth: failed to verify mfa code: %w", err)
+	}
+	if !valid {
+		reason := AuditReasonInvalidCredentials
+		if locked, ferr := s.store.RegisterLoginFailure(ctx, userID, s.maxFailedLoginAttempts, now.Add(s.accountLockoutWindow), now); ferr != nil {
+			slog.ErrorContext(ctx, "failed to record mfa failure", "error", ferr)
+		} else if locked {
+			reason = AuditReasonAccountLocked
+		}
+		s.recordSignInFailed(ctx, AuditMetadata{UserID: userIDStr, Reason: reason})
+		return nil, ErrInvalidMfaCode
+	}
+
+	// Verified: clear the failure counter and issue the real session.
+	if cerr := s.store.ClearLoginFailures(ctx, userID, now); cerr != nil {
+		slog.ErrorContext(ctx, "failed to clear login failures after mfa", "error", cerr)
+	}
+	session, err := s.issueSession(ctx, user.User, uuid.Nil)
+	if err != nil {
+		s.recordSignInFailed(ctx, AuditMetadata{UserID: userIDStr, Reason: AuditReasonInternalError})
+		return nil, fmt.Errorf("auth: failed to issue session: %w", err)
+	}
+	s.recordSignInSucceeded(ctx, AuditMetadata{Email: session.User.Email, UserID: session.User.ID})
 	return session, nil
 }
 

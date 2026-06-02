@@ -245,6 +245,10 @@
             "readOnly": true,
             "type": "string"
           },
+          "mfaRequired": {
+            "description": "True when a second factor is required to finish sign-in",
+            "type": "boolean"
+          },
           "user": {
             "$ref": "#/components/schemas/AuthUser",
             "description": "Authenticated user profile"
@@ -659,6 +663,33 @@
         },
         "required": [
           "password"
+        ],
+        "type": "object"
+      },
+      "MfaVerifyInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MfaVerifyInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "code": {
+            "description": "A code from the authenticator app, or a recovery code",
+            "examples": [
+              "123456"
+            ],
+            "maxLength": 16,
+            "minLength": 6,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
         ],
         "type": "object"
       },
@@ -2336,6 +2367,71 @@
           }
         },
         "summary": "Start MFA enrollment",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/mfa/verify": {
+      "post": {
+        "description": "Exchanges the mfa_pending cookie + a TOTP or recovery code for a full session. A wrong code counts toward the account lockout.",
+        "operationId": "post-auth-mfa-verify",
+        "parameters": [
+          {
+            "description": "The mfa_pending cookie set by sign-in",
+            "in": "header",
+            "name": "Cookie",
+            "schema": {
+              "description": "The mfa_pending cookie set by sign-in",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Complete sign-in with an MFA code",
         "tags": [
           "Auth"
         ]

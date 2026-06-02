@@ -39,6 +39,11 @@ type Claims struct {
 	// It is used for audit attribution and to surface impersonation in /me.
 	Act string `json:"act,omitempty"`
 
+	// MfaPending marks a short-lived token issued after a correct password when
+	// the account has MFA: it is NOT a session token and grants no access — it
+	// only authorizes the /api/auth/mfa/verify step that completes sign-in.
+	MfaPending bool `json:"mfa_pending,omitempty"`
+
 	jwt.RegisteredClaims
 }
 
@@ -143,6 +148,38 @@ func (m *Manager) IssueImpersonationToken(targetID, actorID string) (string, err
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
+		},
+	}
+
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signed, err := t.SignedString(m.secret)
+	if err != nil {
+		return "", errors.New("token: failed to sign token")
+	}
+
+	return signed, nil
+}
+
+// IssueMfaPendingToken creates a short-lived JWT (its own ttl, shorter than an
+// access token) carrying the mfa_pending claim. It is exchanged at
+// /api/auth/mfa/verify for a real session and grants no access on its own.
+func (m *Manager) IssueMfaPendingToken(userID string, ttl time.Duration) (string, error) {
+	if userID == "" {
+		return "", ErrEmptyUserID
+	}
+
+	now := m.now()
+
+	claims := Claims{
+		MfaPending: true,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			Issuer:    m.issuer,
+			Audience:  jwt.ClaimStrings{m.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},
 	}
 

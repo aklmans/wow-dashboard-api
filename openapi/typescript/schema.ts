@@ -148,6 +148,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/mfa/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete sign-in with an MFA code
+         * @description Exchanges the mfa_pending cookie + a TOTP or recovery code for a full session. A wrong code counts toward the account lockout.
+         */
+        post: operations["post-auth-mfa-verify"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/refresh": {
         parameters: {
             query?: never;
@@ -745,6 +765,8 @@ export interface components {
              * @example https://example.com/schemas/AuthSessionBody.json
              */
             readonly $schema?: string;
+            /** @description True when a second factor is required to finish sign-in */
+            mfaRequired?: boolean;
             /** @description Authenticated user profile */
             user: components["schemas"]["AuthUser"];
         };
@@ -951,6 +973,19 @@ export interface components {
             readonly $schema?: string;
             /** @description The current account password, re-entered to authorize MFA enrollment */
             password: string;
+        };
+        MfaVerifyInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaVerifyInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description A code from the authenticator app, or a recovery code
+             * @example 123456
+             */
+            code: string;
         };
         NotificationItem: {
             /**
@@ -1869,6 +1904,39 @@ export interface operations {
             };
             401: components["responses"]["APIError"];
             409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-mfa-verify": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The mfa_pending cookie set by sign-in */
+                Cookie?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaVerifyInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSessionBody"];
+                };
+            };
+            400: components["responses"]["APIError"];
+            401: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
             429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];

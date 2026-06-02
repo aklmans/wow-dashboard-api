@@ -80,6 +80,86 @@ func TestAuthHandlers(t *testing.T) {
 		assertRefreshCookie(t, rec, "refresh-token-123")
 	})
 
+	t.Run("sign-in with MFA returns a pending challenge, not a session", func(t *testing.T) {
+		authSvc := &fakeAuthService{
+			signInSession: &service.Session{
+				User:            service.PublicUser{ID: "user-123", Email: "demo@wow-dashboard.test", DisplayName: "Demo User", Status: "active"},
+				MfaRequired:     true,
+				MfaPendingToken: "pending-ticket-123",
+			},
+		}
+		router := newAuthTestRouter(authSvc)
+
+		rec := postJSON(router, "/api/auth/sign-in", map[string]string{
+			"email":    "demo@wow-dashboard.test",
+			"password": "@Password",
+		})
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var body struct {
+			User        starterUser `json:"user"`
+			MfaRequired bool        `json:"mfaRequired"`
+		}
+		decodeJSON(t, rec, &body)
+		if !body.MfaRequired {
+			t.Fatalf("mfaRequired = false, want true; body=%s", rec.Body.String())
+		}
+		// Only the short-lived pending cookie is set — no session is issued yet.
+		pending := cookieByName(t, rec, "wow_dashboard_mfa_pending")
+		if pending.Value != "pending-ticket-123" {
+			t.Fatalf("mfa_pending cookie value = %q, want pending-ticket-123", pending.Value)
+		}
+		if !pending.HttpOnly || pending.Path != "/api/auth/mfa" {
+			t.Fatalf("mfa_pending cookie = %#v, want HttpOnly scoped to /api/auth/mfa", pending)
+		}
+		for _, name := range []string{"wow_dashboard_access_token", "wow_dashboard_refresh_token"} {
+			for _, c := range rec.Result().Cookies() {
+				if c.Name == name {
+					t.Fatalf("a session cookie %q was set before MFA was completed", name)
+				}
+			}
+		}
+	})
+
+	t.Run("mfa verify exchanges the pending cookie for a session", func(t *testing.T) {
+		authSvc := &fakeAuthService{completeMfaSession: testSession()}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/mfa/verify", strings.NewReader(`{"code":"123456"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "wow_dashboard_mfa_pending", Value: "pending-ticket-123"})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if authSvc.completeMfaToken != "pending-ticket-123" {
+			t.Errorf("CompleteMfaSignIn token = %q, want pending-ticket-123", authSvc.completeMfaToken)
+		}
+		if authSvc.completeMfaCode != "123456" {
+			t.Errorf("CompleteMfaSignIn code = %q, want 123456", authSvc.completeMfaCode)
+		}
+		assertAccessCookie(t, rec, "access-token-123")
+		assertRefreshCookie(t, rec, "refresh-token-123")
+		// The pending ticket is cleared once the session is issued.
+		pending := cookieByName(t, rec, "wow_dashboard_mfa_pending")
+		if pending.Value != "" || pending.MaxAge >= 0 {
+			t.Fatalf("mfa_pending cookie = %#v, want cleared", pending)
+		}
+	})
+
+	t.Run("mfa verify without the pending cookie is unauthorized", func(t *testing.T) {
+		router := newAuthTestRouter(&fakeAuthService{})
+
+		rec := postJSON(router, "/api/auth/mfa/verify", map[string]string{"code": "123456"})
+
+		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized,
+			"Your sign-in session expired. Sign in again.")
+	})
+
 	t.Run("refresh missing cookie returns safe unauthorized envelope", func(t *testing.T) {
 		router := newAuthTestRouter(&fakeAuthService{})
 
@@ -605,6 +685,11 @@ type fakeAuthService struct {
 	verifyPasswordCalledWith string
 	verifyPasswordErr        error
 
+	completeMfaToken   string
+	completeMfaCode    string
+	completeMfaSession *service.Session
+	completeMfaErr     error
+
 	impersonateActor   *service.PublicUser
 	impersonateTarget  string
 	impersonateSession *service.Session
@@ -728,6 +813,12 @@ func (f *fakeAuthService) SignOutOtherSessions(ctx context.Context, rawRefreshTo
 func (f *fakeAuthService) VerifyPassword(ctx context.Context, userID uuid.UUID, rawPassword string) error {
 	f.verifyPasswordCalledWith = rawPassword
 	return f.verifyPasswordErr
+}
+
+func (f *fakeAuthService) CompleteMfaSignIn(ctx context.Context, rawPendingToken string, code string) (*service.Session, error) {
+	f.completeMfaToken = rawPendingToken
+	f.completeMfaCode = code
+	return f.completeMfaSession, f.completeMfaErr
 }
 
 func TestImpersonateHandler(t *testing.T) {
