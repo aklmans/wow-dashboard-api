@@ -39,6 +39,11 @@ type Claims struct {
 	// It is used for audit attribution and to surface impersonation in /me.
 	Act string `json:"act,omitempty"`
 
+	// MfaPending marks a short-lived token issued after a correct password when
+	// the account has MFA: it is NOT a session token and grants no access — it
+	// only authorizes the /api/auth/mfa/verify step that completes sign-in.
+	MfaPending bool `json:"mfa_pending,omitempty"`
+
 	jwt.RegisteredClaims
 }
 
@@ -156,10 +161,73 @@ func (m *Manager) IssueImpersonationToken(targetID, actorID string) (string, err
 	return signed, nil
 }
 
+// IssueMfaPendingToken creates a short-lived JWT (its own ttl, shorter than an
+// access token) carrying the mfa_pending claim. It is exchanged at
+// /api/auth/mfa/verify for a real session and grants no access on its own.
+func (m *Manager) IssueMfaPendingToken(userID string, ttl time.Duration) (string, error) {
+	if userID == "" {
+		return "", ErrEmptyUserID
+	}
+
+	now := m.now()
+
+	claims := Claims{
+		MfaPending: true,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			Issuer:    m.issuer,
+			Audience:  jwt.ClaimStrings{m.audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+		},
+	}
+
+	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signed, err := t.SignedString(m.secret)
+	if err != nil {
+		return "", errors.New("token: failed to sign token")
+	}
+
+	return signed, nil
+}
+
 // VerifyAccessToken parses and validates a JWT string. It enforces HS256
-// signing method and validates issuer, audience, and expiration. It returns
-// the Claims on success.
+// signing method and validates issuer, audience, and expiration. It rejects
+// mfa_pending tickets, which are valid only at /api/auth/mfa/verify, so a
+// pre-second-factor ticket can never authorize a normal request. It returns the
+// Claims on success.
 func (m *Manager) VerifyAccessToken(raw string) (*Claims, error) {
+	claims, err := m.parseSignedClaims(raw)
+	if err != nil {
+		return nil, err
+	}
+	if claims.MfaPending {
+		return nil, errors.New("token: invalid or expired token")
+	}
+	return claims, nil
+}
+
+// VerifyMfaPendingToken validates an mfa_pending ticket issued by
+// IssueMfaPendingToken. It enforces the same signature/issuer/audience/expiry
+// checks as an access token but additionally REQUIRES the mfa_pending marker,
+// so a normal access token can never be replayed at /api/auth/mfa/verify.
+func (m *Manager) VerifyMfaPendingToken(raw string) (*Claims, error) {
+	claims, err := m.parseSignedClaims(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !claims.MfaPending {
+		return nil, errors.New("token: invalid or expired token")
+	}
+	return claims, nil
+}
+
+// parseSignedClaims parses a JWT and validates its signature, method, issuer,
+// audience, and expiry. It does not interpret the mfa_pending marker — callers
+// decide whether a pending ticket is acceptable for their flow.
+func (m *Manager) parseSignedClaims(raw string) (*Claims, error) {
 	claims := &Claims{}
 
 	_, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (any, error) {

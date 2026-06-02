@@ -37,6 +37,24 @@ func (s *MfaStore) GetMfaSecret(ctx context.Context, userID uuid.UUID) (domain.M
 	return mfaSecretFromRow(row)
 }
 
+// ConsumeRecoveryCode atomically marks the matching unused recovery code as
+// used, returning true if one was consumed. A wrong or already-used code
+// returns false (not an error).
+func (s *MfaStore) ConsumeRecoveryCode(ctx context.Context, userID uuid.UUID, codeHash string, now time.Time) (bool, error) {
+	_, err := s.queries.ConsumeMfaRecoveryCode(ctx, query.ConsumeMfaRecoveryCodeParams{
+		UsedAt:   pgTimestamp(now),
+		UserID:   pgUUID(userID),
+		CodeHash: codeHash,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("authrepo: consume recovery code: %w", err)
+	}
+	return true, nil
+}
+
 // DeleteMfaSecret removes the user's TOTP secret (used on disable / re-setup).
 func (s *MfaStore) DeleteMfaSecret(ctx context.Context, userID uuid.UUID) error {
 	if err := s.queries.DeleteUserMfaSecret(ctx, pgUUID(userID)); err != nil {

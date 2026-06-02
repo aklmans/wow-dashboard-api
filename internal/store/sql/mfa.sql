@@ -38,3 +38,11 @@ DELETE FROM user_mfa_recovery_codes WHERE user_id = @user_id;
 -- name: CreateMfaRecoveryCode :exec
 INSERT INTO user_mfa_recovery_codes (id, user_id, code_hash, created_at)
 VALUES (@id, @user_id, @code_hash, @created_at);
+
+-- name: ConsumeMfaRecoveryCode :one
+-- Atomically mark an unused recovery code as used and return its id. No row
+-- (pgx.ErrNoRows) means the code was wrong or already used.
+UPDATE user_mfa_recovery_codes
+SET used_at = @used_at
+WHERE user_id = @user_id AND code_hash = @code_hash AND used_at IS NULL
+RETURNING id;

@@ -24,6 +24,7 @@ type AuthService interface {
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error
 	VerifyPassword(ctx context.Context, userID uuid.UUID, rawPassword string) error
+	CompleteMfaSignIn(ctx context.Context, rawPendingToken string, code string) (*service.Session, error)
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
 	Impersonate(ctx context.Context, actor *service.PublicUser, targetID string) (*service.Session, error)
 	StopImpersonation(ctx context.Context, rawCurrentToken, rawRefreshToken string) (*service.Session, error)
@@ -63,6 +64,10 @@ type authMeUser struct {
 
 type authSessionBody struct {
 	User authUser `json:"user" doc:"Authenticated user profile"`
+	// MfaRequired is true when the password was correct but the account has MFA:
+	// no session cookies are set, an mfa_pending cookie is, and the client must
+	// call /api/auth/mfa/verify with a code to finish signing in.
+	MfaRequired bool `json:"mfaRequired,omitempty" doc:"True when a second factor is required to finish sign-in"`
 }
 
 type authSessionResponse struct {
@@ -149,6 +154,13 @@ type signOutInput struct {
 
 type signOutOthersInput struct {
 	Cookie string `header:"Cookie" doc:"Refresh token cookie identifying the session to keep"`
+}
+
+type mfaVerifyInput struct {
+	Cookie string `header:"Cookie" doc:"The mfa_pending cookie set by sign-in"`
+	Body   struct {
+		Code string `json:"code" minLength:"6" maxLength:"16" example:"123456" doc:"A code from the authenticator app, or a recovery code"`
+	}
 }
 
 type impersonateInput struct {
@@ -245,6 +257,36 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			return nil, mapAuthError(ctx, err)
 		}
 		return sessionResponse(session, refreshCookie, accessCookie), nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "post-auth-mfa-verify",
+		Method:      http.MethodPost,
+		Path:        "/api/auth/mfa/verify",
+		Summary:     "Complete sign-in with an MFA code",
+		Description: "Exchanges the mfa_pending cookie + a TOTP or recovery code for a full session. A wrong code counts toward the account lockout.",
+		Tags:        []string{"Auth"},
+		Middlewares: huma.Middlewares(authMiddlewares),
+		Responses: apiErrorResponses(api,
+			http.StatusBadRequest,
+			http.StatusUnauthorized,
+			http.StatusTooManyRequests,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *mfaVerifyInput) (*authSessionResponse, error) {
+		rawPending, ok := parseCookieValue(input.Cookie, mfaPendingCookieName)
+		if !ok {
+			return nil, apierror.Unauthorized("Your sign-in session expired. Sign in again.").ForContext(ctx)
+		}
+		session, err := authSvc.CompleteMfaSignIn(ctx, rawPending, input.Body.Code)
+		if err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		// Sign-in completed: set the session cookies and clear the pending ticket.
+		resp := sessionResponse(session, refreshCookie, accessCookie)
+		resp.SetCookie = append(resp.SetCookie, clearMfaPendingCookie(refreshCookie))
+		return resp, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -559,6 +601,17 @@ type patchMeInput struct {
 }
 
 func sessionResponse(session *service.Session, refreshCookie RefreshCookieConfig, accessCookie AccessCookieConfig) *authSessionResponse {
+	// MFA gate: no session yet — set only the short-lived mfa_pending cookie and
+	// tell the client a second factor is required.
+	if session.MfaRequired {
+		return &authSessionResponse{
+			SetCookie: []http.Cookie{newMfaPendingCookie(refreshCookie, session.MfaPendingToken)},
+			Body: authSessionBody{
+				User:        publicUserResponse(session.User),
+				MfaRequired: true,
+			},
+		}
+	}
 	resp := &authSessionResponse{
 		Body: authSessionBody{
 			User: publicUserResponse(session.User),
@@ -694,6 +747,41 @@ func clearRefreshCookie(cfg RefreshCookieConfig) http.Cookie {
 	}
 }
 
+const (
+	// mfaPendingCookieName / Path scope the short-lived MFA challenge ticket to
+	// the verify endpoint only; mfaPendingCookieMaxAge matches the token TTL.
+	mfaPendingCookieName   = "wow_dashboard_mfa_pending"
+	mfaPendingCookiePath   = "/api/auth/mfa"
+	mfaPendingCookieMaxAge = 300
+)
+
+// newMfaPendingCookie borrows Secure/SameSite from the refresh cookie config so
+// the pending ticket has the same transport protection as the session cookies.
+func newMfaPendingCookie(refreshCookie RefreshCookieConfig, value string) http.Cookie {
+	return http.Cookie{
+		Name:     mfaPendingCookieName,
+		Value:    value,
+		Path:     mfaPendingCookiePath,
+		MaxAge:   mfaPendingCookieMaxAge,
+		HttpOnly: true,
+		Secure:   refreshCookie.Secure,
+		SameSite: refreshCookie.SameSite,
+	}
+}
+
+func clearMfaPendingCookie(refreshCookie RefreshCookieConfig) http.Cookie {
+	return http.Cookie{
+		Name:     mfaPendingCookieName,
+		Value:    "",
+		Path:     mfaPendingCookiePath,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0).UTC(),
+		HttpOnly: true,
+		Secure:   refreshCookie.Secure,
+		SameSite: refreshCookie.SameSite,
+	}
+}
+
 func DefaultAccessCookieConfig() AccessCookieConfig {
 	return AccessCookieConfig{
 		Name:     "wow_dashboard_access_token",
@@ -757,6 +845,8 @@ func mapAuthError(ctx context.Context, err error) huma.StatusError {
 		return apierror.Unauthorized("Invalid email or password.").ForContext(ctx)
 	case errors.Is(err, service.ErrUserDisabled):
 		return apierror.Forbidden("User account is disabled.").ForContext(ctx)
+	case errors.Is(err, service.ErrInvalidMfaCode):
+		return apierror.ValidationFailed("That code is not valid. Try the current code from your authenticator app, or a recovery code.").ForContext(ctx)
 	case errors.Is(err, service.ErrInvalidToken):
 		return apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 	case errors.Is(err, service.ErrCannotImpersonate):

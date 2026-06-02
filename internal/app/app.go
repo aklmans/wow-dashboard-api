@@ -240,6 +240,12 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	authTokenStore := authrepo.NewAuthTokenStore(queries)
 	unitOfWork := authrepo.NewUnitOfWork(pool)
 	auditRecorder := authrepo.NewSystemEventRecorder(queries)
+	mfaCipher, err := appcrypto.NewCipher(cfg.MfaEncryptionKey)
+	if err != nil {
+		return fmt.Errorf("app: mfa cipher: %w", err)
+	}
+	mfaSvc := mfaservice.NewService(authrepo.NewMfaStore(pool), mfaCipher, cfg.AppName,
+		mfaservice.WithAuditRecorder(auditRecorder))
 	authSvc := authservice.NewService(authStore, tokenManager,
 		authservice.WithRefreshTokenStore(refreshTokenStore, cfg.RefreshTokenTTL()),
 		authservice.WithUnitOfWork(unitOfWork),
@@ -247,13 +253,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		authservice.WithAuthTokenStore(authTokenStore),
 		authservice.WithEmailSender(emailSender),
 		authservice.WithAppBaseURL(cfg.AppBaseURL),
-		authservice.WithLockoutPolicy(cfg.AuthMaxFailedLoginAttempts, cfg.AuthAccountLockoutWindow()))
-	mfaCipher, err := appcrypto.NewCipher(cfg.MfaEncryptionKey)
-	if err != nil {
-		return fmt.Errorf("app: mfa cipher: %w", err)
-	}
-	mfaSvc := mfaservice.NewService(authrepo.NewMfaStore(pool), mfaCipher, cfg.AppName,
-		mfaservice.WithAuditRecorder(auditRecorder))
+		authservice.WithLockoutPolicy(cfg.AuthMaxFailedLoginAttempts, cfg.AuthAccountLockoutWindow()),
+		authservice.WithMfaVerifier(mfaSvc))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(pool),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)),
 		userservice.WithUnitOfWork(usersrepo.NewUnitOfWork(pool)))

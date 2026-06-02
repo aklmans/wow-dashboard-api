@@ -11,6 +11,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const consumeMfaRecoveryCode = `-- name: ConsumeMfaRecoveryCode :one
+UPDATE user_mfa_recovery_codes
+SET used_at = $1
+WHERE user_id = $2 AND code_hash = $3 AND used_at IS NULL
+RETURNING id
+`
+
+type ConsumeMfaRecoveryCodeParams struct {
+	UsedAt   pgtype.Timestamptz
+	UserID   pgtype.UUID
+	CodeHash string
+}
+
+// Atomically mark an unused recovery code as used and return its id. No row
+// (pgx.ErrNoRows) means the code was wrong or already used.
+func (q *Queries) ConsumeMfaRecoveryCode(ctx context.Context, arg ConsumeMfaRecoveryCodeParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, consumeMfaRecoveryCode, arg.UsedAt, arg.UserID, arg.CodeHash)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createMfaRecoveryCode = `-- name: CreateMfaRecoveryCode :exec
 INSERT INTO user_mfa_recovery_codes (id, user_id, code_hash, created_at)
 VALUES ($1, $2, $3, $4)

@@ -108,6 +108,10 @@ func (openAPIAuthService) VerifyPassword(context.Context, uuid.UUID, string) err
 	return nil
 }
 
+func (openAPIAuthService) CompleteMfaSignIn(context.Context, string, string) (*authservice.Session, error) {
+	return &authservice.Session{}, nil
+}
+
 type openAPIMfaService struct{}
 
 func (openAPIMfaService) Setup(context.Context, uuid.UUID, string) (mfaservice.SetupResult, error) {

@@ -318,6 +318,131 @@ func TestServiceSignInWithDomainStore(t *testing.T) {
 	})
 }
 
+type fakeMfaVerifier struct {
+	valid        bool
+	err          error
+	verifiedCode string
+}
+
+func (f *fakeMfaVerifier) Verify(_ context.Context, _ uuid.UUID, code string) (bool, error) {
+	f.verifiedCode = code
+	return f.valid, f.err
+}
+
+func TestServiceSignInGatesOnMfa(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+	authUser := testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password")
+	authUser.MfaEnabled = true
+	store := &unitUserStore{authUser: authUser}
+	authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "pending-token"},
+		service.WithRefreshTokenStore(&unitRefreshTokenStore{}, 14*24*time.Hour),
+		service.WithMfaVerifier(&fakeMfaVerifier{}))
+
+	session, err := authSvc.SignIn(context.Background(), service.SignInInput{Email: "demo@example.com", Password: "correct-password"})
+	if err != nil {
+		t.Fatalf("SignIn returned error: %v", err)
+	}
+	if !session.MfaRequired {
+		t.Fatal("session.MfaRequired = false, want true for an MFA-enabled account")
+	}
+	if session.AccessToken != "" || session.RefreshToken != "" {
+		t.Fatalf("a session was issued before MFA: access=%q refresh=%q", session.AccessToken, session.RefreshToken)
+	}
+	if session.MfaPendingToken != "pending-token" {
+		t.Fatalf("MfaPendingToken = %q, want the pending ticket", session.MfaPendingToken)
+	}
+	// The failure counter must NOT be cleared on a correct password while MFA is
+	// still pending — otherwise an attacker who knows the password could reset the
+	// lockout on every attempt and brute-force the 6-digit code.
+	if store.clearFailuresCalls != 0 {
+		t.Fatalf("clearFailuresCalls = %d, want 0 while MFA is pending", store.clearFailuresCalls)
+	}
+}
+
+func TestServiceCompleteMfaSignIn(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+	mkStore := func() *unitUserStore {
+		authUser := testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password")
+		authUser.MfaEnabled = true
+		return &unitUserStore{authUser: authUser}
+	}
+	// A token manager whose verified claims carry the mfa_pending marker.
+	pendingTokenManager := func() *fakeTokenManager {
+		c := testClaims(userID.String())
+		c.MfaPending = true
+		return &fakeTokenManager{issuedToken: "access-token", claims: c}
+	}
+
+	t.Run("valid code issues a full session", func(t *testing.T) {
+		store := mkStore()
+		verifier := &fakeMfaVerifier{valid: true}
+		authSvc := service.NewService(store, pendingTokenManager(),
+			service.WithRefreshTokenStore(&unitRefreshTokenStore{}, 14*24*time.Hour),
+			service.WithMfaVerifier(verifier))
+
+		session, err := authSvc.CompleteMfaSignIn(context.Background(), "pending", "123456")
+		if err != nil {
+			t.Fatalf("CompleteMfaSignIn returned error: %v", err)
+		}
+		if session.MfaRequired || session.AccessToken != "access-token" || session.RefreshToken == "" {
+			t.Fatalf("session = %#v, want a full session", session)
+		}
+		if verifier.verifiedCode != "123456" {
+			t.Fatalf("verified code = %q, want 123456", verifier.verifiedCode)
+		}
+		if store.clearFailuresCalls != 1 {
+			t.Fatalf("clearFailuresCalls = %d, want 1 after a verified code", store.clearFailuresCalls)
+		}
+	})
+
+	t.Run("invalid code is rejected and counts toward lockout", func(t *testing.T) {
+		store := mkStore()
+		authSvc := service.NewService(store, pendingTokenManager(),
+			service.WithRefreshTokenStore(&unitRefreshTokenStore{}, 14*24*time.Hour),
+			service.WithMfaVerifier(&fakeMfaVerifier{valid: false}))
+
+		if _, err := authSvc.CompleteMfaSignIn(context.Background(), "pending", "000000"); !errors.Is(err, service.ErrInvalidMfaCode) {
+			t.Fatalf("CompleteMfaSignIn error = %v, want ErrInvalidMfaCode", err)
+		}
+		if store.registerFailureCalls != 1 {
+			t.Fatalf("registerFailureCalls = %d, want 1 after a wrong code", store.registerFailureCalls)
+		}
+		if store.clearFailuresCalls != 0 {
+			t.Fatalf("clearFailuresCalls = %d, want 0 after a wrong code", store.clearFailuresCalls)
+		}
+	})
+
+	t.Run("a non-pending token is rejected", func(t *testing.T) {
+		store := mkStore()
+		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())},
+			service.WithRefreshTokenStore(&unitRefreshTokenStore{}, 14*24*time.Hour),
+			service.WithMfaVerifier(&fakeMfaVerifier{valid: true}))
+
+		if _, err := authSvc.CompleteMfaSignIn(context.Background(), "an-ordinary-access-token", "123456"); !errors.Is(err, service.ErrInvalidToken) {
+			t.Fatalf("CompleteMfaSignIn error = %v, want ErrInvalidToken for a non-pending token", err)
+		}
+	})
+
+	t.Run("an account disabled after the password step is refused", func(t *testing.T) {
+		// An admin disabled the account between sign-in and verify; even a valid
+		// code must not mint a session.
+		authUser := testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusDisabled, "correct-password")
+		authUser.MfaEnabled = true
+		store := &unitUserStore{authUser: authUser}
+		verifier := &fakeMfaVerifier{valid: true}
+		authSvc := service.NewService(store, pendingTokenManager(),
+			service.WithRefreshTokenStore(&unitRefreshTokenStore{}, 14*24*time.Hour),
+			service.WithMfaVerifier(verifier))
+
+		if _, err := authSvc.CompleteMfaSignIn(context.Background(), "pending", "123456"); !errors.Is(err, service.ErrInvalidCredentials) {
+			t.Fatalf("CompleteMfaSignIn error = %v, want ErrInvalidCredentials for a disabled account", err)
+		}
+		if verifier.verifiedCode != "" {
+			t.Fatal("the code was verified for a disabled account; want refused before verification")
+		}
+	})
+}
+
 func TestServiceChangePassword(t *testing.T) {
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 

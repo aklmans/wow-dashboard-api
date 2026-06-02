@@ -107,6 +107,38 @@ func TestConfirmRejectsAnInvalidCode(t *testing.T) {
 	}
 }
 
+func TestVerifyAcceptsTotpAndConsumesRecoveryCodes(t *testing.T) {
+	store := &fakeStore{}
+	svc := newService(t, store)
+	userID := uuid.New()
+
+	setup, err := svc.Setup(context.Background(), userID, "demo@example.com")
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	code, _ := totp.GenerateCode(setup.Secret, fixedNow)
+	recovery, err := svc.Confirm(context.Background(), userID, code)
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	// A current TOTP code verifies.
+	if ok, err := svc.Verify(context.Background(), userID, code); err != nil || !ok {
+		t.Fatalf("Verify(totp) = %v, %v; want true, nil", ok, err)
+	}
+	// A wrong code does not.
+	if ok, _ := svc.Verify(context.Background(), userID, "000000"); ok {
+		t.Fatal("Verify(wrong) = true; want false")
+	}
+	// A recovery code verifies once, then is consumed.
+	if ok, err := svc.Verify(context.Background(), userID, recovery[0]); err != nil || !ok {
+		t.Fatalf("Verify(recovery) = %v, %v; want true, nil", ok, err)
+	}
+	if ok, _ := svc.Verify(context.Background(), userID, recovery[0]); ok {
+		t.Fatal("a recovery code verified twice; want one-time use")
+	}
+}
+
 func TestConfirmWithoutSetupIsNotEnrolling(t *testing.T) {
 	store := &fakeStore{}
 	svc := newService(t, store)
@@ -165,4 +197,15 @@ func (f *fakeStore) CompleteEnrollment(_ context.Context, _ uuid.UUID, codeHashe
 	f.confirmedAt = &confirmedAt
 	f.recoveryCodeHashes = codeHashes
 	return nil
+}
+
+func (f *fakeStore) ConsumeRecoveryCode(_ context.Context, _ uuid.UUID, codeHash string, _ time.Time) (bool, error) {
+	for i, h := range f.recoveryCodeHashes {
+		if h == codeHash {
+			// Consume it (one-time use).
+			f.recoveryCodeHashes = append(f.recoveryCodeHashes[:i], f.recoveryCodeHashes[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
 }
