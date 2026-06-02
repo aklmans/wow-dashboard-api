@@ -35,6 +35,9 @@ const (
 	// EventAuthOtherSessionsRevoked is recorded when a user signs out their other
 	// sessions, keeping only the calling device.
 	EventAuthOtherSessionsRevoked = "auth.sessions.revoked_others"
+	// EventAuthMfaEnabled / Disabled bracket a user turning TOTP MFA on or off.
+	EventAuthMfaEnabled  = "auth.mfa.enabled"
+	EventAuthMfaDisabled = "auth.mfa.disabled"
 
 	AuditReasonInvalidInput       = "invalid_input"
 	AuditReasonEmailAlreadyExists = "email_already_exists"

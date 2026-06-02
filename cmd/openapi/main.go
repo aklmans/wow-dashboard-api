@@ -12,6 +12,7 @@ import (
 
 	"github.com/aklmans/wow-dashboard-api/internal/app"
 	authservice "github.com/aklmans/wow-dashboard-api/internal/auth/service"
+	mfaservice "github.com/aklmans/wow-dashboard-api/internal/mfa/service"
 	notificationsdomain "github.com/aklmans/wow-dashboard-api/internal/notifications/domain"
 	notificationsservice "github.com/aklmans/wow-dashboard-api/internal/notifications/service"
 	projectsdomain "github.com/aklmans/wow-dashboard-api/internal/projects/domain"
@@ -34,6 +35,7 @@ func main() {
 
 	app.RegisterRoutes(api, app.Dependencies{
 		AuthService:          openAPIAuthService{},
+		MfaService:           openAPIMfaService{},
 		UsersService:         openAPIUsersService{},
 		RolesService:         openAPIRolesService{},
 		ProjectsService:      openAPIProjectsService{},
@@ -100,6 +102,20 @@ func (openAPIAuthService) SignOut(context.Context, string) error {
 
 func (openAPIAuthService) SignOutOtherSessions(context.Context, string) error {
 	return nil
+}
+
+func (openAPIAuthService) VerifyPassword(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
+type openAPIMfaService struct{}
+
+func (openAPIMfaService) Setup(context.Context, uuid.UUID, string) (mfaservice.SetupResult, error) {
+	return mfaservice.SetupResult{}, nil
+}
+
+func (openAPIMfaService) Confirm(context.Context, uuid.UUID, string) ([]string, error) {
+	return nil, nil
 }
 
 func (openAPIAuthService) CurrentUser(context.Context, string) (*authservice.PublicUser, error) {

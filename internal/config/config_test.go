@@ -39,6 +39,7 @@ var configEnvKeys = []string{
 	"AUTH_MAX_FAILED_LOGIN_ATTEMPTS",
 	"AUTH_ACCOUNT_LOCKOUT_SECONDS",
 	"JWT_ACCESS_SECRET",
+	"MFA_ENCRYPTION_KEY",
 	"JWT_ISSUER",
 	"JWT_AUDIENCE",
 	"JWT_ACCESS_TOKEN_TTL_SECONDS",
@@ -78,6 +79,7 @@ func setProductionMinima(t *testing.T) {
 	t.Setenv("APP_BASE_URL", "https://app.example.com")
 	t.Setenv("DATABASE_URL", "postgres://test")
 	t.Setenv("EMAIL_SMTP_HOST", "smtp.example.test")
+	t.Setenv("MFA_ENCRYPTION_KEY", "production-mfa-encryption-key-value-at-least-32-chars!!")
 }
 
 // --- Default values ---
@@ -254,6 +256,7 @@ func TestLoad_EnvOverrides(t *testing.T) {
 	t.Setenv("AUTH_RATE_LIMIT_WINDOW_SECONDS", "120")
 	t.Setenv("AUTH_RATE_LIMIT_BURST", "8")
 	t.Setenv("JWT_ACCESS_SECRET", "override-token-signing-key-value-at-least-32-chars!!")
+	t.Setenv("MFA_ENCRYPTION_KEY", "override-mfa-encryption-key-value-at-least-32-chars!!")
 	t.Setenv("JWT_ISSUER", "custom-issuer")
 	t.Setenv("JWT_AUDIENCE", "custom-audience")
 	t.Setenv("JWT_ACCESS_TOKEN_TTL_SECONDS", "3600")
@@ -948,6 +951,31 @@ func TestLoad_JWTSecretTooShort(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("Load() should return error for JWT_ACCESS_SECRET shorter than 32 chars, got nil")
+	}
+}
+
+func TestLoad_MfaEncryptionKeyTooShort(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JWT_ACCESS_SECRET", "a-valid-jwt-signing-secret-at-least-32-chars")
+	t.Setenv("MFA_ENCRYPTION_KEY", "short")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() should return error for MFA_ENCRYPTION_KEY shorter than 32 chars, got nil")
+	}
+}
+
+func TestLoad_MfaEncryptionKeyDefaultRejectedInProduction(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("ENV", "production")
+	setProductionMinima(t)
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com")
+	t.Setenv("JWT_ACCESS_SECRET", "production-token-signing-key-value-at-least-32-chars!!")
+	// Override setProductionMinima's valid key with the dev default.
+	t.Setenv("MFA_ENCRYPTION_KEY", "dev-only-change-me-mfa-encryption-key-32+")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() should reject the default MFA_ENCRYPTION_KEY in production")
 	}
 }
 

@@ -26,8 +26,10 @@ type User struct {
 	JobTitle      string
 	Company       string
 	LastLoginAt   *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// MfaEnabled is true once the user has confirmed TOTP MFA enrollment.
+	MfaEnabled bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // UpdateProfileInput is the self-service profile-edit input. Each pointer is
@@ -115,6 +117,31 @@ type CreateAuthTokenInput struct {
 	CreatedAt time.Time
 }
 
+// MfaSecret is a user's TOTP secret + parameters. SecretEncrypted is the
+// AES-256-GCM ciphertext as stored; the service decrypts it to validate codes.
+type MfaSecret struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	SecretEncrypted string
+	Algorithm       string
+	Digits          int
+	Period          int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// UpsertMfaSecretInput stores (or replaces) a user's TOTP secret during setup.
+type UpsertMfaSecretInput struct {
+	ID              uuid.UUID
+	UserID          uuid.UUID
+	SecretEncrypted string
+	Algorithm       string
+	Digits          int
+	Period          int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 var (
 	ErrUserNotFound         = errors.New("auth user store: user not found")
 	ErrEmailAlreadyExists   = errors.New("auth user store: email already exists")
@@ -122,4 +149,6 @@ var (
 	ErrRoleNotFound         = errors.New("auth user store: role not found")
 	ErrRefreshTokenNotFound = errors.New("auth refresh token store: token not found")
 	ErrAuthTokenNotFound    = errors.New("auth token store: token not found")
+	ErrMfaSecretNotFound    = errors.New("auth mfa store: secret not found")
+	ErrMfaAlreadyEnabled    = errors.New("auth mfa store: mfa already enabled")
 )

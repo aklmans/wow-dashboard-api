@@ -15,7 +15,7 @@ RETURNING id, email, display_name, status, created_at, updated_at;
 
 -- name: GetUserByID :one
 SELECT id, email, display_name, status, created_at, updated_at, email_verified_at,
-       avatar_url, phone, job_title, company, last_login_at
+       avatar_url, phone, job_title, company, last_login_at, mfa_enabled
 FROM users
 WHERE id = @id;
 
@@ -27,14 +27,14 @@ WHERE email = lower(@email);
 -- name: GetUserByEmailForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
        failed_login_count, locked_until, email_verified_at,
-       avatar_url, phone, job_title, company, last_login_at
+       avatar_url, phone, job_title, company, last_login_at, mfa_enabled, mfa_confirmed_at
 FROM users
 WHERE email = lower(@email);
 
 -- name: GetUserByIDForAuth :one
 SELECT id, email, display_name, password_hash, status, created_at, updated_at,
        failed_login_count, locked_until, email_verified_at,
-       avatar_url, phone, job_title, company, last_login_at
+       avatar_url, phone, job_title, company, last_login_at, mfa_enabled, mfa_confirmed_at
 FROM users
 WHERE id = @id;
 

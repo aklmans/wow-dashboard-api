@@ -95,6 +95,7 @@ func userFromGetByIDRow(row query.GetUserByIDRow) (domain.User, error) {
 		JobTitle:      pgTextValue(row.JobTitle),
 		Company:       pgTextValue(row.Company),
 		LastLoginAt:   nullableDomainTimestamp(row.LastLoginAt),
+		MfaEnabled:    row.MfaEnabled,
 		CreatedAt:     createdAt,
 		UpdatedAt:     updatedAt,
 	}, nil
@@ -139,6 +140,7 @@ func authUserFromRow(row query.User) (domain.AuthUser, error) {
 			DisplayName:   row.DisplayName,
 			Status:        domain.UserStatus(row.Status),
 			EmailVerified: row.EmailVerifiedAt.Valid,
+			MfaEnabled:    row.MfaEnabled,
 			CreatedAt:     createdAt,
 			UpdatedAt:     updatedAt,
 		},

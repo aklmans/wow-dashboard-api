@@ -108,6 +108,46 @@ export interface paths {
         patch: operations["patch-auth-me"];
         trace?: never;
     };
+    "/api/auth/mfa/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm MFA enrollment
+         * @description Verifies the first authenticator code, turns MFA on, and returns one-time recovery codes (shown only once).
+         */
+        post: operations["post-auth-mfa-confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/mfa/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start MFA enrollment
+         * @description Generates a new TOTP secret for the current user and returns an otpauth URI + the raw secret. MFA is not active until the code is confirmed.
+         */
+        post: operations["post-auth-mfa-setup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/refresh": {
         parameters: {
             query?: never;
@@ -683,6 +723,11 @@ export interface components {
              * @description Last successful sign-in time; null if the user has never signed in
              */
             lastLoginAt?: string;
+            /**
+             * @description Whether the user has confirmed TOTP MFA
+             * @example false
+             */
+            mfaEnabled: boolean;
             /** @description Effective permission strings granted by the user's roles */
             permissions: string[];
             /**
@@ -861,6 +906,51 @@ export interface components {
              * @example ok
              */
             status: string;
+        };
+        MfaConfirmBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaConfirmBody.json
+             */
+            readonly $schema?: string;
+            /** @description One-time recovery codes — shown once, store them somewhere safe */
+            recoveryCodes: string[];
+        };
+        MfaConfirmInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaConfirmInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description The current code from the authenticator app
+             * @example 123456
+             */
+            code: string;
+        };
+        MfaSetupBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaSetupBody.json
+             */
+            readonly $schema?: string;
+            /** @description otpauth:// URI to render as a QR code in an authenticator app */
+            otpauthUrl: string;
+            /** @description Base32 TOTP secret for manual entry as an alternative to the QR code */
+            secret: string;
+        };
+        MfaSetupInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaSetupInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description The current account password, re-entered to authorize MFA enrollment */
+            password: string;
         };
         NotificationItem: {
             /**
@@ -1717,6 +1807,70 @@ export interface operations {
             401: components["responses"]["APIError"];
             403: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-mfa-confirm": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaConfirmInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaConfirmBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "post-auth-mfa-setup": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaSetupInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaSetupBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

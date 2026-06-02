@@ -15,6 +15,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	"github.com/aklmans/wow-dashboard-api/internal/app"
 	"github.com/aklmans/wow-dashboard-api/internal/auth/service"
@@ -601,6 +602,9 @@ type fakeAuthService struct {
 	signOutOthersToken string
 	signOutOthersErr   error
 
+	verifyPasswordCalledWith string
+	verifyPasswordErr        error
+
 	impersonateActor   *service.PublicUser
 	impersonateTarget  string
 	impersonateSession *service.Session
@@ -719,6 +723,11 @@ func (f *fakeAuthService) SignOut(ctx context.Context, rawRefreshToken string) e
 func (f *fakeAuthService) SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error {
 	f.signOutOthersToken = rawRefreshToken
 	return f.signOutOthersErr
+}
+
+func (f *fakeAuthService) VerifyPassword(ctx context.Context, userID uuid.UUID, rawPassword string) error {
+	f.verifyPasswordCalledWith = rawPassword
+	return f.verifyPasswordErr
 }
 
 func TestImpersonateHandler(t *testing.T) {

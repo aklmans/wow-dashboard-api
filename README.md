@@ -85,6 +85,7 @@ All configuration is loaded from environment variables (via `caarlos0/env`). Mos
 | `AUTH_MAX_FAILED_LOGIN_ATTEMPTS` | `10` | Consecutive failed sign-ins that lock an account (per-account, complements the per-IP limiter) |
 | `AUTH_ACCOUNT_LOCKOUT_SECONDS` | `900` | How long a locked account stays locked, in seconds (self-healing) |
 | `JWT_ACCESS_SECRET` | `dev-only-change-me-min-32-characters` | JWT signing secret (minimum 32 characters, default forbidden in production) |
+| `MFA_ENCRYPTION_KEY` | `dev-only-change-me-mfa-encryption-key-32+` | Key encrypting TOTP secrets at rest (AES-256-GCM); >= 32 chars, must differ from `JWT_ACCESS_SECRET`, default forbidden in production |
 | `JWT_ISSUER` | `wow-dashboard-api` | Expected JWT issuer claim |
 | `JWT_AUDIENCE` | `wow-dashboard` | Expected JWT audience claim |
 | `JWT_ACCESS_TOKEN_TTL_SECONDS` | `900` | Access token time-to-live in seconds (defaults to 15 minutes / 900 seconds) |
@@ -187,6 +188,8 @@ Starter-compatible JWT auth HTTP endpoints are implemented under `/api/auth`:
 | `POST` | `/api/auth/sign-out` | Revoke the current refresh token when present and clear the refresh cookie |
 | `POST` | `/api/auth/sign-out-others` | Revoke every *other* active session for the current user, keeping the calling device signed in (identified by the current refresh cookie) |
 | `POST` | `/api/auth/change-password` | Verify the current password and set a new one for the bearer-token user; revokes every refresh token and clears the cookie |
+| `POST` | `/api/auth/mfa/setup` | Begin TOTP MFA enrollment for the current user: returns an `otpauth://` URI + raw secret (not yet active) |
+| `POST` | `/api/auth/mfa/confirm` | Verify the first authenticator code, enable MFA, and return one-time recovery codes (shown once) |
 | `POST` | `/api/auth/forgot-password` | Email a password-reset link for the given address; always returns `200` so the response cannot enumerate accounts |
 | `POST` | `/api/auth/reset-password` | Set a new password from a reset token, then revoke every session for the account |
 | `POST` | `/api/auth/verify-email` | Confirm an email address using a verification token |
