@@ -55,52 +55,31 @@ func (s *MfaStore) ConsumeRecoveryCode(ctx context.Context, userID uuid.UUID, co
 	return true, nil
 }
 
-// DeleteMfaSecret removes the user's TOTP secret (used on disable / re-setup).
-func (s *MfaStore) DeleteMfaSecret(ctx context.Context, userID uuid.UUID) error {
-	if err := s.queries.DeleteUserMfaSecret(ctx, pgUUID(userID)); err != nil {
-		return fmt.Errorf("authrepo: delete mfa secret: %w", err)
-	}
-	return nil
-}
-
-// SetUserMfaEnabled flips the user's mfa_enabled flag. confirmedAt is nil to
-// clear the timestamp (on disable).
-func (s *MfaStore) SetUserMfaEnabled(ctx context.Context, userID uuid.UUID, enabled bool, confirmedAt *time.Time, now time.Time) error {
-	confirmed := pgtype.Timestamptz{}
-	if confirmedAt != nil {
-		confirmed = pgTimestamp(*confirmedAt)
-	}
-	if err := s.queries.SetUserMfaEnabled(ctx, query.SetUserMfaEnabledParams{
-		MfaEnabled:     enabled,
-		MfaConfirmedAt: confirmed,
-		UpdatedAt:      pgTimestamp(now),
-		ID:             pgUUID(userID),
-	}); err != nil {
-		return fmt.Errorf("authrepo: set mfa enabled: %w", err)
-	}
-	return nil
-}
-
-// DeleteRecoveryCodes removes all of the user's recovery codes (before a fresh
-// set is generated, or on disable).
-func (s *MfaStore) DeleteRecoveryCodes(ctx context.Context, userID uuid.UUID) error {
-	if err := s.queries.DeleteMfaRecoveryCodesForUser(ctx, pgUUID(userID)); err != nil {
-		return fmt.Errorf("authrepo: delete recovery codes: %w", err)
-	}
-	return nil
-}
-
-// CreateRecoveryCode stores one hashed recovery code.
-func (s *MfaStore) CreateRecoveryCode(ctx context.Context, id, userID uuid.UUID, codeHash string, createdAt time.Time) error {
-	if err := s.queries.CreateMfaRecoveryCode(ctx, query.CreateMfaRecoveryCodeParams{
-		ID:        pgUUID(id),
-		UserID:    pgUUID(userID),
-		CodeHash:  codeHash,
-		CreatedAt: pgTimestamp(createdAt),
-	}); err != nil {
-		return fmt.Errorf("authrepo: create recovery code: %w", err)
-	}
-	return nil
+// DisableMfa turns MFA off for the user and wipes the TOTP secret + recovery
+// codes in a single transaction, serialized by the user-row lock so it can't
+// race a concurrent confirm. It is idempotent — disabling already-off MFA is a
+// no-op beyond the (cleared) timestamp.
+func (s *MfaStore) DisableMfa(ctx context.Context, userID uuid.UUID, now time.Time) error {
+	return s.inTx(ctx, func(q *query.Queries) error {
+		if _, err := lockUser(ctx, q, userID); err != nil {
+			return err
+		}
+		if err := q.DeleteUserMfaSecret(ctx, pgUUID(userID)); err != nil {
+			return fmt.Errorf("authrepo: delete mfa secret: %w", err)
+		}
+		if err := q.DeleteMfaRecoveryCodesForUser(ctx, pgUUID(userID)); err != nil {
+			return fmt.Errorf("authrepo: clear recovery codes: %w", err)
+		}
+		if err := q.SetUserMfaEnabled(ctx, query.SetUserMfaEnabledParams{
+			MfaEnabled:     false,
+			MfaConfirmedAt: pgtype.Timestamptz{},
+			UpdatedAt:      pgTimestamp(now),
+			ID:             pgUUID(userID),
+		}); err != nil {
+			return fmt.Errorf("authrepo: disable mfa: %w", err)
+		}
+		return nil
+	})
 }
 
 // StoreSetupSecret stores a fresh (unconfirmed) TOTP secret, serialized against
