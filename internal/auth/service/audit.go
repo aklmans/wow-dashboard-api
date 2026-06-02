@@ -35,6 +35,9 @@ const (
 	// EventAuthOtherSessionsRevoked is recorded when a user signs out their other
 	// sessions, keeping only the calling device.
 	EventAuthOtherSessionsRevoked = "auth.sessions.revoked_others"
+	// EventAuthSessionRevoked is recorded when a user revokes one specific session
+	// (device) from the active-sessions list.
+	EventAuthSessionRevoked = "auth.session.revoked"
 	// EventAuthMfaEnabled / Disabled bracket a user turning TOTP MFA on or off.
 	EventAuthMfaEnabled  = "auth.mfa.enabled"
 	EventAuthMfaDisabled = "auth.mfa.disabled"
@@ -191,6 +194,14 @@ func (s *Service) recordOtherSessionsRevoked(ctx context.Context, metadata Audit
 	s.recordAudit(ctx, AuditEvent{
 		EventType: EventAuthOtherSessionsRevoked,
 		Message:   "Other sessions revoked.",
+		Metadata:  metadata,
+	})
+}
+
+func (s *Service) recordSessionRevoked(ctx context.Context, metadata AuditMetadata) {
+	s.recordAudit(ctx, AuditEvent{
+		EventType: EventAuthSessionRevoked,
+		Message:   "Session revoked.",
 		Metadata:  metadata,
 	})
 }

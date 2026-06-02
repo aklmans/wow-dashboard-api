@@ -112,6 +112,14 @@ func (openAPIAuthService) CompleteMfaSignIn(context.Context, string, string) (*a
 	return &authservice.Session{}, nil
 }
 
+func (openAPIAuthService) ListSessions(context.Context, uuid.UUID, string) ([]authservice.SessionInfo, error) {
+	return nil, nil
+}
+
+func (openAPIAuthService) RevokeSession(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
+}
+
 type openAPIMfaService struct{}
 
 func (openAPIMfaService) Setup(context.Context, uuid.UUID, string) (mfaservice.SetupResult, error) {

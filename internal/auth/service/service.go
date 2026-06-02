@@ -34,6 +34,7 @@ var (
 	ErrCannotImpersonate   = errors.New("auth: cannot impersonate this user")
 	ErrImpersonationActive = errors.New("auth: stop impersonation before refreshing")
 	ErrInvalidMfaCode      = errors.New("auth: invalid mfa code")
+	ErrSessionNotFound     = errors.New("auth: session not found")
 )
 
 const (
@@ -152,6 +153,8 @@ type RefreshTokenStore interface {
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID, revokedAt time.Time) error
 	RevokeAllForUser(ctx context.Context, userID uuid.UUID, revokedAt time.Time) error
 	RevokeAllForUserExceptFamily(ctx context.Context, userID uuid.UUID, familyID uuid.UUID, revokedAt time.Time) error
+	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]domain.RefreshToken, error)
+	RevokeFamilyForUser(ctx context.Context, userID, familyID uuid.UUID, revokedAt time.Time) (int64, error)
 }
 
 // WorkDeps contains transaction-scoped stores for a unit of work.
@@ -785,6 +788,83 @@ func (s *Service) SignOutOtherSessions(ctx context.Context, rawRefreshToken stri
 	}
 
 	s.recordOtherSessionsRevoked(ctx, AuditMetadata{UserID: current.UserID.String()})
+	return nil
+}
+
+// SessionInfo is one active session (refresh-token family) in the
+// active-sessions list. Current marks the device making the request.
+type SessionInfo struct {
+	ID         string
+	UserAgent  string
+	IPAddress  string
+	LastUsedAt *time.Time
+	CreatedAt  time.Time
+	Current    bool
+}
+
+// ListSessions returns the user's active sessions (one per refresh-token
+// family), most-recently-used first. rawCurrentRefreshToken (from the refresh
+// cookie) is optional and only used to mark which session is the current device;
+// an empty or unknown value simply leaves none marked.
+func (s *Service) ListSessions(ctx context.Context, userID uuid.UUID, rawCurrentRefreshToken string) ([]SessionInfo, error) {
+	if s.refreshTokenStore == nil {
+		return nil, fmt.Errorf("auth: refresh tokens are not configured")
+	}
+
+	tokens, err := s.refreshTokenStore.ListActiveSessions(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("auth: failed to list sessions: %w", err)
+	}
+
+	currentFamily := s.currentFamilyID(ctx, userID, rawCurrentRefreshToken)
+
+	sessions := make([]SessionInfo, 0, len(tokens))
+	for _, token := range tokens {
+		sessions = append(sessions, SessionInfo{
+			ID:         token.FamilyID.String(),
+			UserAgent:  token.UserAgent,
+			IPAddress:  token.IPAddress,
+			LastUsedAt: token.LastUsedAt,
+			CreatedAt:  token.CreatedAt,
+			Current:    currentFamily != uuid.Nil && token.FamilyID == currentFamily,
+		})
+	}
+	return sessions, nil
+}
+
+// currentFamilyID resolves the caller's current session family from the refresh
+// cookie, best-effort: any lookup miss (missing/expired/foreign token) yields
+// uuid.Nil so no session is marked current rather than failing the list.
+func (s *Service) currentFamilyID(ctx context.Context, userID uuid.UUID, rawRefreshToken string) uuid.UUID {
+	rawRefreshToken = strings.TrimSpace(rawRefreshToken)
+	if rawRefreshToken == "" {
+		return uuid.Nil
+	}
+	current, err := s.refreshTokenStore.GetRefreshTokenByHash(ctx, hashRefreshToken(rawRefreshToken))
+	if err != nil || current.UserID != userID || current.RevokedAt != nil {
+		return uuid.Nil
+	}
+	return current.FamilyID
+}
+
+// RevokeSession revokes one session (family) belonging to the user. It is scoped
+// to userID so one user can never revoke another's session; an id that is not
+// one of the user's active sessions returns ErrSessionNotFound.
+func (s *Service) RevokeSession(ctx context.Context, userID, familyID uuid.UUID) error {
+	if s.refreshTokenStore == nil {
+		return fmt.Errorf("auth: refresh tokens are not configured")
+	}
+
+	now := s.now().UTC().Truncate(time.Microsecond)
+	revoked, err := s.refreshTokenStore.RevokeFamilyForUser(ctx, userID, familyID, now)
+	if err != nil {
+		return fmt.Errorf("auth: failed to revoke session: %w", err)
+	}
+	if revoked == 0 {
+		return ErrSessionNotFound
+	}
+
+	s.recordSessionRevoked(ctx, AuditMetadata{UserID: userID.String()})
 	return nil
 }
 

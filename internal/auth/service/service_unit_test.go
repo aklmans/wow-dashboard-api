@@ -512,6 +512,70 @@ func TestServiceRefreshCarriesDeviceInfoForward(t *testing.T) {
 	}
 }
 
+func TestServiceListSessions(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+	currentFamily := uuid.MustParse("00000000-0000-0000-0000-0000000000c1")
+	otherFamily := uuid.MustParse("00000000-0000-0000-0000-0000000000c2")
+	last := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+
+	refreshStore := &unitRefreshTokenStore{
+		listSessions: []domain.RefreshToken{
+			{FamilyID: currentFamily, UserAgent: "Chrome", IPAddress: "203.0.113.1", LastUsedAt: &last, CreatedAt: last},
+			{FamilyID: otherFamily, UserAgent: "Safari", IPAddress: "203.0.113.2", CreatedAt: last},
+		},
+		// GetRefreshTokenByHash resolves the caller's current family for marking.
+		token: domain.RefreshToken{UserID: userID, FamilyID: currentFamily},
+	}
+	authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{},
+		service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+	sessions, err := authSvc.ListSessions(context.Background(), userID, "current-raw-refresh")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2", len(sessions))
+	}
+	if sessions[0].ID != currentFamily.String() || !sessions[0].Current {
+		t.Fatalf("session[0] = %#v, want the current family flagged", sessions[0])
+	}
+	if sessions[1].Current {
+		t.Fatal("session[1] should not be marked current")
+	}
+	if sessions[0].UserAgent != "Chrome" || sessions[0].IPAddress != "203.0.113.1" {
+		t.Fatalf("device fields not mapped: %#v", sessions[0])
+	}
+}
+
+func TestServiceRevokeSession(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+	familyID := uuid.MustParse("00000000-0000-0000-0000-0000000000c1")
+
+	t.Run("revokes the user's own session, scoped to the user", func(t *testing.T) {
+		refreshStore := &unitRefreshTokenStore{revokeFamilyRows: 1}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.RevokeSession(context.Background(), userID, familyID); err != nil {
+			t.Fatalf("RevokeSession: %v", err)
+		}
+		if refreshStore.revokeFamilyUser != userID || refreshStore.revokeFamilyID != familyID {
+			t.Fatalf("revoke scoped to user=%s family=%s, want %s/%s",
+				refreshStore.revokeFamilyUser, refreshStore.revokeFamilyID, userID, familyID)
+		}
+	})
+
+	t.Run("an unknown or foreign session is not found", func(t *testing.T) {
+		refreshStore := &unitRefreshTokenStore{revokeFamilyRows: 0}
+		authSvc := service.NewService(&unitUserStore{}, &fakeTokenManager{},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+
+		if err := authSvc.RevokeSession(context.Background(), userID, familyID); !errors.Is(err, service.ErrSessionNotFound) {
+			t.Fatalf("RevokeSession error = %v, want ErrSessionNotFound", err)
+		}
+	})
+}
+
 func TestServiceChangePassword(t *testing.T) {
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 
@@ -1089,6 +1153,30 @@ type unitRefreshTokenStore struct {
 	revokedExceptFamilyUser uuid.UUID
 	revokedExceptFamily     uuid.UUID
 	revokeExceptFamilyErr   error
+
+	listSessions    []domain.RefreshToken
+	listSessionsErr error
+
+	revokeFamilyUser  uuid.UUID
+	revokeFamilyID    uuid.UUID
+	revokeFamilyRows  int64
+	revokeFamilyError error
+}
+
+func (s *unitRefreshTokenStore) ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]domain.RefreshToken, error) {
+	if s.listSessionsErr != nil {
+		return nil, s.listSessionsErr
+	}
+	return s.listSessions, nil
+}
+
+func (s *unitRefreshTokenStore) RevokeFamilyForUser(ctx context.Context, userID, familyID uuid.UUID, revokedAt time.Time) (int64, error) {
+	s.revokeFamilyUser = userID
+	s.revokeFamilyID = familyID
+	if s.revokeFamilyError != nil {
+		return 0, s.revokeFamilyError
+	}
+	return s.revokeFamilyRows, nil
 }
 
 func (s *unitRefreshTokenStore) CreateRefreshToken(ctx context.Context, input domain.CreateRefreshTokenInput) (domain.RefreshToken, error) {

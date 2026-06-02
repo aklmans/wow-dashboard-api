@@ -151,6 +151,63 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (
 	return i, err
 }
 
+const listActiveSessionsByUserID = `-- name: ListActiveSessionsByUserID :many
+SELECT
+    id,
+    user_id,
+    token_hash,
+    family_id,
+    expires_at,
+    revoked_at,
+    replaced_by_token_id,
+    created_at,
+    updated_at,
+    user_agent,
+    ip_address,
+    last_used_at
+FROM refresh_tokens
+WHERE user_id = $1
+  AND revoked_at IS NULL
+  AND expires_at > now()
+ORDER BY last_used_at DESC NULLS LAST, created_at DESC
+`
+
+// One row per active session (refresh-token family): the family's current,
+// non-revoked, unexpired token, carrying the device metadata captured at
+// sign-in. Most-recently-used first.
+func (q *Queries) ListActiveSessionsByUserID(ctx context.Context, userID pgtype.UUID) ([]RefreshToken, error) {
+	rows, err := q.db.Query(ctx, listActiveSessionsByUserID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RefreshToken
+	for rows.Next() {
+		var i RefreshToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TokenHash,
+			&i.FamilyID,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.ReplacedByTokenID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UserAgent,
+			&i.IpAddress,
+			&i.LastUsedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAllUserRefreshTokens = `-- name: RevokeAllUserRefreshTokens :exec
 UPDATE refresh_tokens
 SET
@@ -206,6 +263,33 @@ type RevokeRefreshTokenFamilyParams struct {
 func (q *Queries) RevokeRefreshTokenFamily(ctx context.Context, arg RevokeRefreshTokenFamilyParams) error {
 	_, err := q.db.Exec(ctx, revokeRefreshTokenFamily, arg.RevokedAt, arg.FamilyID)
 	return err
+}
+
+const revokeUserRefreshTokenFamily = `-- name: RevokeUserRefreshTokenFamily :execrows
+UPDATE refresh_tokens
+SET
+    revoked_at = $1,
+    updated_at = $1
+WHERE user_id = $2
+  AND family_id = $3
+  AND revoked_at IS NULL
+`
+
+type RevokeUserRefreshTokenFamilyParams struct {
+	RevokedAt pgtype.Timestamptz
+	UserID    pgtype.UUID
+	FamilyID  pgtype.UUID
+}
+
+// Revoke one session (family) belonging to the user. Scoped by user_id so a
+// user can never revoke another account's session; rows affected = 0 means the
+// family was not the user's active session (wrong id or already revoked).
+func (q *Queries) RevokeUserRefreshTokenFamily(ctx context.Context, arg RevokeUserRefreshTokenFamilyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUserRefreshTokenFamily, arg.RevokedAt, arg.UserID, arg.FamilyID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeUserRefreshTokensExceptFamily = `-- name: RevokeUserRefreshTokensExceptFamily :exec
