@@ -53,6 +53,7 @@ type Store interface {
 	StoreSetupSecret(ctx context.Context, input domain.UpsertMfaSecretInput) error
 	CompleteEnrollment(ctx context.Context, userID uuid.UUID, codeHashes []string, confirmedAt time.Time, now time.Time) error
 	ConsumeRecoveryCode(ctx context.Context, userID uuid.UUID, codeHash string, now time.Time) (bool, error)
+	DisableMfa(ctx context.Context, userID uuid.UUID, now time.Time) error
 }
 
 // Service orchestrates MFA enrollment.
@@ -223,6 +224,25 @@ func (s *Service) Verify(ctx context.Context, userID uuid.UUID, code string) (bo
 	}
 	// Not a current TOTP code — try it as a one-time recovery code.
 	return s.store.ConsumeRecoveryCode(ctx, userID, HashRecoveryCode(code), s.now().UTC().Truncate(time.Microsecond))
+}
+
+// Disable verifies the supplied TOTP or recovery code, then turns MFA off and
+// wipes the secret + recovery codes. The caller (handler) must have already
+// reauthenticated the user's password, so disabling needs both factors. An
+// invalid code returns ErrInvalidCode and changes nothing.
+func (s *Service) Disable(ctx context.Context, userID uuid.UUID, code string) error {
+	valid, err := s.Verify(ctx, userID, code)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrInvalidCode
+	}
+	if err := s.store.DisableMfa(ctx, userID, s.now().UTC().Truncate(time.Microsecond)); err != nil {
+		return err
+	}
+	s.recordAudit(ctx, authservice.EventAuthMfaDisabled, userID)
+	return nil
 }
 
 func (s *Service) recordAudit(ctx context.Context, eventType string, userID uuid.UUID) {

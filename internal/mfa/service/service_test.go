@@ -139,6 +139,63 @@ func TestVerifyAcceptsTotpAndConsumesRecoveryCodes(t *testing.T) {
 	}
 }
 
+func TestDisableTurnsMfaOffWithAValidCode(t *testing.T) {
+	store := &fakeStore{}
+	svc := newService(t, store)
+	userID := uuid.New()
+
+	setup, err := svc.Setup(context.Background(), userID, "demo@example.com")
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	code, _ := totp.GenerateCode(setup.Secret, fixedNow)
+	if _, err := svc.Confirm(context.Background(), userID, code); err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	// A wrong code leaves MFA on.
+	if err := svc.Disable(context.Background(), userID, "000000"); !errors.Is(err, service.ErrInvalidCode) {
+		t.Fatalf("Disable(wrong) error = %v, want ErrInvalidCode", err)
+	}
+	if !store.enabled {
+		t.Fatal("MFA was disabled by a wrong code")
+	}
+
+	// The current authenticator code turns it off and wipes the secret + codes.
+	code, _ = totp.GenerateCode(setup.Secret, fixedNow)
+	if err := svc.Disable(context.Background(), userID, code); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if store.enabled || store.hasSecret || len(store.recoveryCodeHashes) != 0 {
+		t.Fatalf("after disable: enabled=%v hasSecret=%v codes=%d, want all cleared",
+			store.enabled, store.hasSecret, len(store.recoveryCodeHashes))
+	}
+}
+
+func TestDisableAcceptsARecoveryCode(t *testing.T) {
+	store := &fakeStore{}
+	svc := newService(t, store)
+	userID := uuid.New()
+
+	setup, err := svc.Setup(context.Background(), userID, "demo@example.com")
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	code, _ := totp.GenerateCode(setup.Secret, fixedNow)
+	recovery, err := svc.Confirm(context.Background(), userID, code)
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	// A recovery code is a valid second factor for disabling.
+	if err := svc.Disable(context.Background(), userID, recovery[0]); err != nil {
+		t.Fatalf("Disable(recovery): %v", err)
+	}
+	if store.enabled || store.hasSecret {
+		t.Fatalf("after disable: enabled=%v hasSecret=%v, want off", store.enabled, store.hasSecret)
+	}
+}
+
 func TestConfirmWithoutSetupIsNotEnrolling(t *testing.T) {
 	store := &fakeStore{}
 	svc := newService(t, store)
@@ -208,4 +265,13 @@ func (f *fakeStore) ConsumeRecoveryCode(_ context.Context, _ uuid.UUID, codeHash
 		}
 	}
 	return false, nil
+}
+
+func (f *fakeStore) DisableMfa(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	f.enabled = false
+	f.hasSecret = false
+	f.secret = domain.MfaSecret{}
+	f.confirmedAt = nil
+	f.recoveryCodeHashes = nil
+	return nil
 }

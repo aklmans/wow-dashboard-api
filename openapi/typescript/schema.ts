@@ -108,6 +108,26 @@ export interface paths {
         patch: operations["patch-auth-me"];
         trace?: never;
     };
+    "/api/auth/mfa": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disable MFA
+         * @description Turns MFA off and wipes the TOTP secret + recovery codes. Requires the current password AND a valid authenticator or recovery code, so a stolen session alone cannot remove the second factor.
+         */
+        delete: operations["delete-auth-mfa"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/mfa/confirm": {
         parameters: {
             query?: never;
@@ -951,6 +971,31 @@ export interface components {
              * @example 123456
              */
             code: string;
+        };
+        MfaDisableBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaDisableBody.json
+             */
+            readonly $schema?: string;
+            /** @description Always false — MFA is now off for the account */
+            mfaEnabled: boolean;
+        };
+        MfaDisableInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/MfaDisableInputBody.json
+             */
+            readonly $schema?: string;
+            /**
+             * @description A current authenticator code, or one of the recovery codes
+             * @example 123456
+             */
+            code: string;
+            /** @description The current account password, re-entered to authorize turning MFA off */
+            password: string;
         };
         MfaSetupBody: {
             /**
@@ -1842,6 +1887,39 @@ export interface operations {
             401: components["responses"]["APIError"];
             403: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "delete-auth-mfa": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaDisableInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaDisableBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            409: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

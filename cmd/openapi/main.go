@@ -122,6 +122,10 @@ func (openAPIMfaService) Confirm(context.Context, uuid.UUID, string) ([]string, 
 	return nil, nil
 }
 
+func (openAPIMfaService) Disable(context.Context, uuid.UUID, string) error {
+	return nil
+}
+
 func (openAPIAuthService) CurrentUser(context.Context, string) (*authservice.PublicUser, error) {
 	return nil, nil
 }

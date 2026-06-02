@@ -25,6 +25,7 @@ type MfaAuthenticator interface {
 type MfaService interface {
 	Setup(ctx context.Context, userID uuid.UUID, accountName string) (mfaservice.SetupResult, error)
 	Confirm(ctx context.Context, userID uuid.UUID, code string) ([]string, error)
+	Disable(ctx context.Context, userID uuid.UUID, code string) error
 }
 
 type mfaSetupInput struct {
@@ -56,6 +57,22 @@ type mfaConfirmBody struct {
 
 type mfaConfirmResponse struct {
 	Body mfaConfirmBody
+}
+
+type mfaDisableInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer access token"`
+	Body          struct {
+		Password string `json:"password" minLength:"1" doc:"The current account password, re-entered to authorize turning MFA off"`
+		Code     string `json:"code" minLength:"6" maxLength:"16" example:"123456" doc:"A current authenticator code, or one of the recovery codes"`
+	}
+}
+
+type mfaDisableBody struct {
+	MfaEnabled bool `json:"mfaEnabled" doc:"Always false — MFA is now off for the account"`
+}
+
+type mfaDisableResponse struct {
+	Body mfaDisableBody
 }
 
 // RegisterMfa registers the MFA enrollment endpoints. authMiddlewares carries
@@ -134,6 +151,46 @@ func RegisterMfa(api huma.API, authSvc MfaAuthenticator, mfaSvc MfaService, auth
 			return nil, mapMfaError(ctx, err)
 		}
 		return &mfaConfirmResponse{Body: mfaConfirmBody{RecoveryCodes: codes}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-auth-mfa",
+		Method:      http.MethodDelete,
+		Path:        "/api/auth/mfa",
+		Summary:     "Disable MFA",
+		Description: "Turns MFA off and wipes the TOTP secret + recovery codes. Requires the current password AND a valid authenticator or recovery code, so a stolen session alone cannot remove the second factor.",
+		Tags:        []string{"Auth"},
+		Middlewares: huma.Middlewares(authMiddlewares),
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusConflict,
+			http.StatusForbidden,
+			http.StatusTooManyRequests,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *mfaDisableInput) (*mfaDisableResponse, error) {
+		currentUser, authErr := authenticateForMfa(ctx, authSvc, input.Authorization)
+		if authErr != nil {
+			return nil, authErr
+		}
+		if !currentUser.MfaEnabled {
+			return nil, apierror.Conflict("MFA is not enabled.").ForContext(ctx)
+		}
+		userID, err := uuid.Parse(currentUser.ID)
+		if err != nil {
+			return nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+		}
+		// Reauthenticate: a stolen access token alone must not be able to strip the
+		// second factor off the account.
+		if err := authSvc.VerifyPassword(ctx, userID, input.Body.Password); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+
+		if err := mfaSvc.Disable(ctx, userID, input.Body.Code); err != nil {
+			return nil, mapMfaError(ctx, err)
+		}
+		return &mfaDisableResponse{Body: mfaDisableBody{MfaEnabled: false}}, nil
 	})
 }
 

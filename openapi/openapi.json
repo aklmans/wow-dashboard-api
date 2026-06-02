@@ -616,6 +616,61 @@
         ],
         "type": "object"
       },
+      "MfaDisableBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MfaDisableBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "mfaEnabled": {
+            "description": "Always false — MFA is now off for the account",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mfaEnabled"
+        ],
+        "type": "object"
+      },
+      "MfaDisableInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/MfaDisableInputBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "code": {
+            "description": "A current authenticator code, or one of the recovery codes",
+            "examples": [
+              "123456"
+            ],
+            "maxLength": 16,
+            "minLength": 6,
+            "type": "string"
+          },
+          "password": {
+            "description": "The current account password, re-entered to authorize turning MFA off",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "password",
+          "code"
+        ],
+        "type": "object"
+      },
       "MfaSetupBody": {
         "additionalProperties": false,
         "properties": {
@@ -2251,6 +2306,67 @@
           }
         },
         "summary": "Update own profile",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/mfa": {
+      "delete": {
+        "description": "Turns MFA off and wipes the TOTP secret + recovery codes. Requires the current password AND a valid authenticator or recovery code, so a stolen session alone cannot remove the second factor.",
+        "operationId": "delete-auth-mfa",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaDisableInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaDisableBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "409": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Disable MFA",
         "tags": [
           "Auth"
         ]
