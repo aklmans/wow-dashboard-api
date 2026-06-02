@@ -248,6 +248,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active sessions
+         * @description Returns the current user's active sessions — one per device/login — with the device captured at sign-in and when each was last active. The session making the request is flagged.
+         */
+        get: operations["get-auth-sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a session
+         * @description Signs out one of the current user's sessions (devices). The id comes from the active-sessions list; revoking the current session signs this device out on the next token refresh.
+         */
+        delete: operations["delete-auth-session"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/sign-in": {
         parameters: {
             query?: never;
@@ -1380,6 +1420,42 @@ export interface components {
             /** @description All roles */
             roles: components["schemas"]["RoleBody"][];
         };
+        SessionItem: {
+            /**
+             * Format: date-time
+             * @description When this session began
+             */
+            createdAt: string;
+            /**
+             * @description True for the session making this request
+             * @example false
+             */
+            current: boolean;
+            /**
+             * @description Session identifier (refresh-token family); pass it to DELETE to revoke this session
+             * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
+             */
+            id: string;
+            /** @description Client IP captured at sign-in */
+            ipAddress: string;
+            /**
+             * Format: date-time
+             * @description When this session was last refreshed
+             */
+            lastUsedAt?: string;
+            /** @description Browser/device User-Agent captured at sign-in */
+            userAgent: string;
+        };
+        SessionsListBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SessionsListBody.json
+             */
+            readonly $schema?: string;
+            /** @description Active sessions, most-recently-used first */
+            sessions: components["schemas"]["SessionItem"][];
+        };
         SignInInputBody: {
             /**
              * Format: uri
@@ -2101,6 +2177,68 @@ export interface operations {
             };
             401: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "get-auth-sessions": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+                /** @description Refresh token cookie, used only to flag the current session */
+                Cookie?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionsListBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "delete-auth-session": {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path: {
+                /** @description Session id (refresh-token family) to revoke, from the active-sessions list */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthSuccessBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            404: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

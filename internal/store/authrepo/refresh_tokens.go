@@ -120,6 +120,41 @@ func (s *RefreshTokenStore) RevokeAllForUser(ctx context.Context, userID uuid.UU
 	return nil
 }
 
+// ListActiveSessions returns one entry per active session (refresh-token family)
+// for the user — the family's current, non-revoked, unexpired token with its
+// device metadata — most-recently-used first.
+func (s *RefreshTokenStore) ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]domain.RefreshToken, error) {
+	rows, err := s.queries.ListActiveSessionsByUserID(ctx, pgUUID(userID))
+	if err != nil {
+		return nil, mapRefreshTokenError(err)
+	}
+	sessions := make([]domain.RefreshToken, 0, len(rows))
+	for _, row := range rows {
+		token, convErr := refreshTokenFromRow(row)
+		if convErr != nil {
+			return nil, fmt.Errorf("authrepo: convert session: %w", convErr)
+		}
+		sessions = append(sessions, token)
+	}
+	return sessions, nil
+}
+
+// RevokeFamilyForUser revokes a single session (family) that belongs to the
+// user, returning how many active tokens were revoked. Scoped by user_id so a
+// user can never revoke another account's session; 0 means the family was not
+// the user's active session.
+func (s *RefreshTokenStore) RevokeFamilyForUser(ctx context.Context, userID, familyID uuid.UUID, revokedAt time.Time) (int64, error) {
+	rows, err := s.queries.RevokeUserRefreshTokenFamily(ctx, query.RevokeUserRefreshTokenFamilyParams{
+		UserID:    pgUUID(userID),
+		FamilyID:  pgUUID(familyID),
+		RevokedAt: pgTimestamp(revokedAt),
+	})
+	if err != nil {
+		return 0, mapRefreshTokenError(err)
+	}
+	return rows, nil
+}
+
 // RevokeAllForUserExceptFamily revokes every active refresh token belonging to a
 // user except the given token family (the caller's current session), so "sign
 // out other sessions" leaves the calling device signed in.

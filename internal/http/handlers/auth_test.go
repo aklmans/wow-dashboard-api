@@ -279,6 +279,125 @@ func TestAuthHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("lists the current user's sessions and flags the current one", func(t *testing.T) {
+		last := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+		authSvc := &fakeAuthService{
+			currentUser: &service.PublicUser{ID: "00000000-0000-0000-0000-000000000123"},
+			listSessionsResult: []service.SessionInfo{
+				{ID: "00000000-0000-0000-0000-0000000000c1", UserAgent: "Chrome", IPAddress: "203.0.113.1", LastUsedAt: &last, CreatedAt: last, Current: true},
+			},
+		}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/sessions", nil)
+		req.Header.Set("Authorization", "Bearer access-token")
+		req.AddCookie(&http.Cookie{Name: "wow_dashboard_refresh_token", Value: "current-refresh"})
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Sessions []struct {
+				ID        string `json:"id"`
+				UserAgent string `json:"userAgent"`
+				Current   bool   `json:"current"`
+			} `json:"sessions"`
+		}
+		decodeJSON(t, rec, &body)
+		if len(body.Sessions) != 1 || !body.Sessions[0].Current ||
+			body.Sessions[0].ID != "00000000-0000-0000-0000-0000000000c1" {
+			t.Fatalf("sessions = %#v, want one current session", body.Sessions)
+		}
+		if authSvc.listSessionsRefresh != "current-refresh" {
+			t.Errorf("refresh forwarded for marking = %q, want current-refresh", authSvc.listSessionsRefresh)
+		}
+		if authSvc.listSessionsUserID.String() != "00000000-0000-0000-0000-000000000123" {
+			t.Errorf("ListSessions userID = %s, want the current user", authSvc.listSessionsUserID)
+		}
+	})
+
+	t.Run("listing sessions requires authentication", func(t *testing.T) {
+		router := newAuthTestRouter(&fakeAuthService{})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/sessions", nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assertAPIError(t, rec, http.StatusUnauthorized, apierror.CodeUnauthorized,
+			"Authorization token missing or invalid.")
+	})
+
+	t.Run("managing sessions is blocked while impersonating", func(t *testing.T) {
+		authSvc := &fakeAuthService{
+			currentUser: &service.PublicUser{ID: "00000000-0000-0000-0000-000000000123", ImpersonatorID: "admin-1"},
+		}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/auth/sessions", nil)
+		req.Header.Set("Authorization", "Bearer impersonation-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assertAPIError(t, rec, http.StatusForbidden, apierror.CodeForbidden,
+			"Sessions cannot be managed while impersonating a user.")
+		if authSvc.listSessionsUserID != uuid.Nil {
+			t.Error("ListSessions was called during impersonation")
+		}
+	})
+
+	t.Run("revokes a session by id, scoped to the current user", func(t *testing.T) {
+		authSvc := &fakeAuthService{currentUser: &service.PublicUser{ID: "00000000-0000-0000-0000-000000000123"}}
+		router := newAuthTestRouter(authSvc)
+		familyID := "00000000-0000-0000-0000-0000000000c1"
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/auth/sessions/"+familyID, nil)
+		req.Header.Set("Authorization", "Bearer access-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if authSvc.revokeSessionFamilyID.String() != familyID {
+			t.Errorf("revoked family = %s, want %s", authSvc.revokeSessionFamilyID, familyID)
+		}
+		if authSvc.revokeSessionUserID.String() != "00000000-0000-0000-0000-000000000123" {
+			t.Errorf("revoke userID = %s, want the current user", authSvc.revokeSessionUserID)
+		}
+	})
+
+	t.Run("revoking an unknown session returns 404", func(t *testing.T) {
+		authSvc := &fakeAuthService{
+			currentUser:      &service.PublicUser{ID: "00000000-0000-0000-0000-000000000123"},
+			revokeSessionErr: service.ErrSessionNotFound,
+		}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/auth/sessions/00000000-0000-0000-0000-0000000000c9", nil)
+		req.Header.Set("Authorization", "Bearer access-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assertAPIError(t, rec, http.StatusNotFound, apierror.CodeNotFound, "Session not found.")
+	})
+
+	t.Run("revoking with an invalid id returns 422 and skips the service", func(t *testing.T) {
+		authSvc := &fakeAuthService{currentUser: &service.PublicUser{ID: "00000000-0000-0000-0000-000000000123"}}
+		router := newAuthTestRouter(authSvc)
+
+		req := httptest.NewRequest(http.MethodDelete, "/api/auth/sessions/not-a-uuid", nil)
+		req.Header.Set("Authorization", "Bearer access-token")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		assertAPIError(t, rec, http.StatusUnprocessableEntity, apierror.CodeValidationFailed, "Invalid session id.")
+		if authSvc.revokeSessionFamilyID != uuid.Nil {
+			t.Error("RevokeSession was called despite an invalid id")
+		}
+	})
+
 	t.Run("me success returns starter user response and forwards raw token", func(t *testing.T) {
 		authSvc := &fakeAuthService{
 			currentUser: &testSession().User,
@@ -690,6 +809,14 @@ type fakeAuthService struct {
 	completeMfaSession *service.Session
 	completeMfaErr     error
 
+	listSessionsUserID    uuid.UUID
+	listSessionsRefresh   string
+	listSessionsResult    []service.SessionInfo
+	listSessionsErr       error
+	revokeSessionUserID   uuid.UUID
+	revokeSessionFamilyID uuid.UUID
+	revokeSessionErr      error
+
 	impersonateActor   *service.PublicUser
 	impersonateTarget  string
 	impersonateSession *service.Session
@@ -803,6 +930,18 @@ func (f *fakeAuthService) RefreshSession(ctx context.Context, rawCurrentAccessTo
 func (f *fakeAuthService) SignOut(ctx context.Context, rawRefreshToken string) error {
 	f.signOutToken = rawRefreshToken
 	return f.signOutErr
+}
+
+func (f *fakeAuthService) ListSessions(ctx context.Context, userID uuid.UUID, rawCurrentRefreshToken string) ([]service.SessionInfo, error) {
+	f.listSessionsUserID = userID
+	f.listSessionsRefresh = rawCurrentRefreshToken
+	return f.listSessionsResult, f.listSessionsErr
+}
+
+func (f *fakeAuthService) RevokeSession(ctx context.Context, userID, familyID uuid.UUID) error {
+	f.revokeSessionUserID = userID
+	f.revokeSessionFamilyID = familyID
+	return f.revokeSessionErr
 }
 
 func (f *fakeAuthService) SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error {

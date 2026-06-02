@@ -23,6 +23,8 @@ type AuthService interface {
 	RefreshSession(ctx context.Context, rawCurrentAccessToken, rawRefreshToken string) (*service.Session, error)
 	SignOut(ctx context.Context, rawRefreshToken string) error
 	SignOutOtherSessions(ctx context.Context, rawRefreshToken string) error
+	ListSessions(ctx context.Context, userID uuid.UUID, rawCurrentRefreshToken string) ([]service.SessionInfo, error)
+	RevokeSession(ctx context.Context, userID, familyID uuid.UUID) error
 	VerifyPassword(ctx context.Context, userID uuid.UUID, rawPassword string) error
 	CompleteMfaSignIn(ctx context.Context, rawPendingToken string, code string) (*service.Session, error)
 	CurrentUser(ctx context.Context, rawAccessToken string) (*service.PublicUser, error)
@@ -154,6 +156,33 @@ type signOutInput struct {
 
 type signOutOthersInput struct {
 	Cookie string `header:"Cookie" doc:"Refresh token cookie identifying the session to keep"`
+}
+
+type sessionsListInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
+	Cookie        string `header:"Cookie" doc:"Refresh token cookie, used only to flag the current session"`
+}
+
+type revokeSessionInput struct {
+	Authorization string `header:"Authorization" example:"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." doc:"Bearer access token"`
+	SessionID     string `path:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"Session id (refresh-token family) to revoke, from the active-sessions list"`
+}
+
+type sessionsListResponse struct {
+	Body sessionsListBody
+}
+
+type sessionsListBody struct {
+	Sessions []sessionItem `json:"sessions" nullable:"false" doc:"Active sessions, most-recently-used first"`
+}
+
+type sessionItem struct {
+	ID         string     `json:"id" example:"c8a89c0b-8e75-4e61-9fa0-70fb83554e66" doc:"Session identifier (refresh-token family); pass it to DELETE to revoke this session"`
+	UserAgent  string     `json:"userAgent" doc:"Browser/device User-Agent captured at sign-in"`
+	IPAddress  string     `json:"ipAddress" doc:"Client IP captured at sign-in"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty" doc:"When this session was last refreshed"`
+	CreatedAt  time.Time  `json:"createdAt" doc:"When this session began"`
+	Current    bool       `json:"current" example:"false" doc:"True for the session making this request"`
 }
 
 type mfaVerifyInput struct {
@@ -416,6 +445,65 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			return nil, mapAuthError(ctx, err)
 		}
 		// The calling session is intentionally untouched, so no cookies change.
+		return &authSuccessResponse{Body: authSuccessBody{Success: true}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-auth-sessions",
+		Method:      http.MethodGet,
+		Path:        "/api/auth/sessions",
+		Summary:     "List active sessions",
+		Description: "Returns the current user's active sessions — one per device/login — with the device captured at sign-in and when each was last active. The session making the request is flagged.",
+		Tags:        []string{"Auth"},
+		Middlewares: huma.Middlewares(authMiddlewares),
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusForbidden,
+			http.StatusTooManyRequests,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *sessionsListInput) (*sessionsListResponse, error) {
+		userID, authErr := currentUserID(ctx, authSvc, input.Authorization)
+		if authErr != nil {
+			return nil, authErr
+		}
+		// The refresh cookie only marks which session is "current"; it is optional.
+		rawRefreshToken, _ := parseCookieValue(input.Cookie, refreshCookie.Name)
+		sessions, err := authSvc.ListSessions(ctx, userID, rawRefreshToken)
+		if err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
+		return sessionsListResponseFromService(sessions), nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-auth-session",
+		Method:      http.MethodDelete,
+		Path:        "/api/auth/sessions/{id}",
+		Summary:     "Revoke a session",
+		Description: "Signs out one of the current user's sessions (devices). The id comes from the active-sessions list; revoking the current session signs this device out on the next token refresh.",
+		Tags:        []string{"Auth"},
+		Middlewares: huma.Middlewares(authMiddlewares),
+		Responses: apiErrorResponses(api,
+			http.StatusUnauthorized,
+			http.StatusForbidden,
+			http.StatusNotFound,
+			http.StatusTooManyRequests,
+			http.StatusUnprocessableEntity,
+			http.StatusInternalServerError,
+		),
+	}, func(ctx context.Context, input *revokeSessionInput) (*authSuccessResponse, error) {
+		userID, authErr := currentUserID(ctx, authSvc, input.Authorization)
+		if authErr != nil {
+			return nil, authErr
+		}
+		familyID, err := uuid.Parse(input.SessionID)
+		if err != nil {
+			return nil, apierror.ValidationFailed("Invalid session id.").ForContext(ctx)
+		}
+		if err := authSvc.RevokeSession(ctx, userID, familyID); err != nil {
+			return nil, mapAuthError(ctx, err)
+		}
 		return &authSuccessResponse{Body: authSuccessBody{Success: true}}, nil
 	})
 
@@ -855,7 +943,50 @@ func mapAuthError(ctx context.Context, err error) huma.StatusError {
 		return apierror.Conflict("Stop impersonation before refreshing the session.").ForContext(ctx)
 	case errors.Is(err, service.ErrUserNotFound):
 		return apierror.Unauthorized("Invalid authorization token.").ForContext(ctx)
+	case errors.Is(err, service.ErrSessionNotFound):
+		return apierror.NotFound("Session not found.").ForContext(ctx)
 	default:
 		return apierror.InternalError(err).ForContext(ctx)
 	}
+}
+
+// currentUserID resolves the signed-in user's id from the bearer access token,
+// for endpoints scoped to the current user.
+func currentUserID(ctx context.Context, authSvc AuthService, authHeader string) (uuid.UUID, huma.StatusError) {
+	rawAccessToken, ok := parseBearerToken(authHeader)
+	if !ok {
+		return uuid.Nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+	}
+	user, err := authSvc.CurrentUser(ctx, rawAccessToken)
+	if err != nil {
+		return uuid.Nil, mapAuthError(ctx, err)
+	}
+	if user == nil {
+		return uuid.Nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
+	}
+	// An impersonation session resolves to the target user; an admin must not be
+	// able to view or revoke the impersonated user's sessions.
+	if user.ImpersonatorID != "" {
+		return uuid.Nil, apierror.Forbidden("Sessions cannot be managed while impersonating a user.").ForContext(ctx)
+	}
+	id, parseErr := uuid.Parse(user.ID)
+	if parseErr != nil {
+		return uuid.Nil, apierror.InternalError(parseErr).ForContext(ctx)
+	}
+	return id, nil
+}
+
+func sessionsListResponseFromService(sessions []service.SessionInfo) *sessionsListResponse {
+	items := make([]sessionItem, 0, len(sessions))
+	for _, s := range sessions {
+		items = append(items, sessionItem{
+			ID:         s.ID,
+			UserAgent:  s.UserAgent,
+			IPAddress:  s.IPAddress,
+			LastUsedAt: s.LastUsedAt,
+			CreatedAt:  s.CreatedAt,
+			Current:    s.Current,
+		})
+	}
+	return &sessionsListResponse{Body: sessionsListBody{Sessions: items}}
 }

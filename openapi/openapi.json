@@ -1408,6 +1408,76 @@
         ],
         "type": "object"
       },
+      "SessionItem": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "description": "When this session began",
+            "format": "date-time",
+            "type": "string"
+          },
+          "current": {
+            "description": "True for the session making this request",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Session identifier (refresh-token family); pass it to DELETE to revoke this session",
+            "examples": [
+              "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+            ],
+            "type": "string"
+          },
+          "ipAddress": {
+            "description": "Client IP captured at sign-in",
+            "type": "string"
+          },
+          "lastUsedAt": {
+            "description": "When this session was last refreshed",
+            "format": "date-time",
+            "type": "string"
+          },
+          "userAgent": {
+            "description": "Browser/device User-Agent captured at sign-in",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "userAgent",
+          "ipAddress",
+          "createdAt",
+          "current"
+        ],
+        "type": "object"
+      },
+      "SessionsListBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SessionsListBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "sessions": {
+            "description": "Active sessions, most-recently-used first",
+            "items": {
+              "$ref": "#/components/schemas/SessionItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "type": "object"
+      },
       "SignInInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2706,6 +2776,137 @@
           }
         },
         "summary": "Reset a password with a token",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/sessions": {
+      "get": {
+        "description": "Returns the current user's active sessions — one per device/login — with the device captured at sign-in and when each was last active. The session making the request is flagged.",
+        "operationId": "get-auth-sessions",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Refresh token cookie, used only to flag the current session",
+            "in": "header",
+            "name": "Cookie",
+            "schema": {
+              "description": "Refresh token cookie, used only to flag the current session",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsListBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List active sessions",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/sessions/{id}": {
+      "delete": {
+        "description": "Signs out one of the current user's sessions (devices). The id comes from the active-sessions list; revoking the current session signs this device out on the next token refresh.",
+        "operationId": "delete-auth-session",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Session id (refresh-token family) to revoke, from the active-sessions list",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Session id (refresh-token family) to revoke, from the active-sessions list",
+              "examples": [
+                "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSuccessBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Set-Cookie": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "404": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "Revoke a session",
         "tags": [
           "Auth"
         ]
