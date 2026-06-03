@@ -330,10 +330,17 @@ func (f *fakeMfaVerifier) Verify(_ context.Context, _ uuid.UUID, code string) (b
 	return f.valid, f.err
 }
 
+type newSignInAlert struct {
+	userID    uuid.UUID
+	userAgent string
+	ipAddress string
+}
+
 type fakeSecurityAlerter struct {
 	passwordChanged []uuid.UUID
 	mfaEnabled      []uuid.UUID
 	mfaDisabled     []uuid.UUID
+	newSignIns      []newSignInAlert
 }
 
 func (f *fakeSecurityAlerter) PasswordChanged(_ context.Context, userID uuid.UUID) {
@@ -344,6 +351,9 @@ func (f *fakeSecurityAlerter) MfaEnabled(_ context.Context, userID uuid.UUID) {
 }
 func (f *fakeSecurityAlerter) MfaDisabled(_ context.Context, userID uuid.UUID) {
 	f.mfaDisabled = append(f.mfaDisabled, userID)
+}
+func (f *fakeSecurityAlerter) NewSignIn(_ context.Context, userID uuid.UUID, userAgent, ipAddress string) {
+	f.newSignIns = append(f.newSignIns, newSignInAlert{userID: userID, userAgent: userAgent, ipAddress: ipAddress})
 }
 
 func TestServiceSignInGatesOnMfa(t *testing.T) {
@@ -588,6 +598,60 @@ func TestServiceRevokeSession(t *testing.T) {
 
 		if err := authSvc.RevokeSession(context.Background(), userID, familyID); !errors.Is(err, service.ErrSessionNotFound) {
 			t.Fatalf("RevokeSession error = %v, want ErrSessionNotFound", err)
+		}
+	})
+}
+
+func TestServiceSignInAlertsOnNewDevice(t *testing.T) {
+	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
+
+	signIn := func(t *testing.T, refreshStore *unitRefreshTokenStore, alerter *fakeSecurityAlerter, userAgent string) {
+		t.Helper()
+		store := &unitUserStore{
+			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password"),
+		}
+		authSvc := service.NewService(store, &fakeTokenManager{issuedToken: "access-token"},
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour),
+			service.WithSecurityAlerter(alerter))
+		ctx := authctx.WithClientInfo(context.Background(),
+			authctx.ClientInfo{UserAgent: userAgent, IPAddress: "203.0.113.7"})
+		if _, err := authSvc.SignIn(ctx, service.SignInInput{Email: "demo@example.com", Password: "correct-password"}); err != nil {
+			t.Fatalf("SignIn: %v", err)
+		}
+	}
+
+	t.Run("alerts when no existing active session uses the device", func(t *testing.T) {
+		// The user's existing sessions are all on a different device.
+		refreshStore := &unitRefreshTokenStore{listSessions: []domain.RefreshToken{{UserAgent: "OtherDevice/9"}}}
+		alerter := &fakeSecurityAlerter{}
+		signIn(t, refreshStore, alerter, "NewUA/1.0")
+
+		if len(alerter.newSignIns) != 1 ||
+			alerter.newSignIns[0].userID != userID ||
+			alerter.newSignIns[0].userAgent != "NewUA/1.0" ||
+			alerter.newSignIns[0].ipAddress != "203.0.113.7" {
+			t.Fatalf("new-sign-in alerts = %#v, want one for the new device", alerter.newSignIns)
+		}
+	})
+
+	t.Run("does not alert for a known device", func(t *testing.T) {
+		// A prior active session already uses this device's User-Agent.
+		refreshStore := &unitRefreshTokenStore{listSessions: []domain.RefreshToken{{UserAgent: "KnownUA/1.0"}}}
+		alerter := &fakeSecurityAlerter{}
+		signIn(t, refreshStore, alerter, "KnownUA/1.0")
+
+		if len(alerter.newSignIns) != 0 {
+			t.Fatalf("new-sign-in alerts = %#v, want none for a known device", alerter.newSignIns)
+		}
+	})
+
+	t.Run("does not alert without a User-Agent", func(t *testing.T) {
+		refreshStore := &unitRefreshTokenStore{listSessions: []domain.RefreshToken{{UserAgent: ""}}}
+		alerter := &fakeSecurityAlerter{}
+		signIn(t, refreshStore, alerter, "")
+
+		if len(alerter.newSignIns) != 0 {
+			t.Fatalf("new-sign-in alerts = %#v, want none without a User-Agent", alerter.newSignIns)
 		}
 	})
 }
