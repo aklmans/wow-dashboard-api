@@ -330,6 +330,22 @@ func (f *fakeMfaVerifier) Verify(_ context.Context, _ uuid.UUID, code string) (b
 	return f.valid, f.err
 }
 
+type fakeSecurityAlerter struct {
+	passwordChanged []uuid.UUID
+	mfaEnabled      []uuid.UUID
+	mfaDisabled     []uuid.UUID
+}
+
+func (f *fakeSecurityAlerter) PasswordChanged(_ context.Context, userID uuid.UUID) {
+	f.passwordChanged = append(f.passwordChanged, userID)
+}
+func (f *fakeSecurityAlerter) MfaEnabled(_ context.Context, userID uuid.UUID) {
+	f.mfaEnabled = append(f.mfaEnabled, userID)
+}
+func (f *fakeSecurityAlerter) MfaDisabled(_ context.Context, userID uuid.UUID) {
+	f.mfaDisabled = append(f.mfaDisabled, userID)
+}
+
 func TestServiceSignInGatesOnMfa(t *testing.T) {
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000123")
 	authUser := testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "correct-password")
@@ -584,8 +600,10 @@ func TestServiceChangePassword(t *testing.T) {
 			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
 		}
 		refreshStore := &unitRefreshTokenStore{}
+		alerter := &fakeSecurityAlerter{}
 		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())},
-			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour),
+			service.WithSecurityAlerter(alerter))
 
 		if err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "new-password-123"); err != nil {
 			t.Fatalf("ChangePassword returned error: %v", err)
@@ -595,6 +613,9 @@ func TestServiceChangePassword(t *testing.T) {
 		}
 		if refreshStore.revokedAllForUser != userID {
 			t.Fatalf("revokedAllForUser = %s, want %s", refreshStore.revokedAllForUser, userID)
+		}
+		if len(alerter.passwordChanged) != 1 || alerter.passwordChanged[0] != userID {
+			t.Fatalf("password-changed alert = %v, want one for %s", alerter.passwordChanged, userID)
 		}
 	})
 
@@ -653,8 +674,10 @@ func TestServiceChangePasswordTransactionalAudit(t *testing.T) {
 			authUser: testDomainAuthUser(t, userID, "demo@example.com", "Demo User", domain.UserStatusActive, "current-password"),
 		}
 		uow := &unitOfWork{users: &unitUserStore{}, refreshTokens: &unitRefreshTokenStore{}}
+		alerter := &fakeSecurityAlerter{}
 		authSvc := service.NewService(store, &fakeTokenManager{claims: testClaims(userID.String())},
-			service.WithUnitOfWork(uow))
+			service.WithUnitOfWork(uow),
+			service.WithSecurityAlerter(alerter))
 
 		if err := authSvc.ChangePassword(context.Background(), "raw-token", "current-password", "new-password-123"); err != nil {
 			t.Fatalf("ChangePassword returned error: %v", err)
@@ -664,6 +687,10 @@ func TestServiceChangePasswordTransactionalAudit(t *testing.T) {
 		}
 		if uow.audit == nil || len(uow.audit.events) != 1 || uow.audit.events[0].EventType != service.EventAuthPasswordChanged {
 			t.Fatalf("transaction audit events = %#v, want one %s", uow.audit, service.EventAuthPasswordChanged)
+		}
+		// The alert fires only after the transaction commits.
+		if len(alerter.passwordChanged) != 1 || alerter.passwordChanged[0] != userID {
+			t.Fatalf("password-changed alert = %v, want one for %s after commit", alerter.passwordChanged, userID)
 		}
 	})
 
@@ -1400,9 +1427,11 @@ func TestServiceResetPassword(t *testing.T) {
 		store := &unitUserStore{}
 		tokens := &fakeAuthTokenStore{token: validToken()}
 		refreshStore := &unitRefreshTokenStore{}
+		alerter := &fakeSecurityAlerter{}
 		authSvc := service.NewService(store, &fakeTokenManager{},
 			service.WithAuthTokenStore(tokens),
-			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour),
+			service.WithSecurityAlerter(alerter))
 
 		if err := authSvc.ResetPassword(context.Background(), "raw-token", "new-password-123"); err != nil {
 			t.Fatalf("ResetPassword returned error: %v", err)
@@ -1415,6 +1444,10 @@ func TestServiceResetPassword(t *testing.T) {
 		}
 		if refreshStore.revokedAllForUser != userID {
 			t.Fatalf("revokedAllForUser = %s, want %s", refreshStore.revokedAllForUser, userID)
+		}
+		// A reset is a security-relevant password change → it alerts the user.
+		if len(alerter.passwordChanged) != 1 || alerter.passwordChanged[0] != userID {
+			t.Fatalf("password-changed alert = %v, want one for %s", alerter.passwordChanged, userID)
 		}
 	})
 

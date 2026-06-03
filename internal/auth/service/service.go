@@ -192,6 +192,16 @@ type MfaVerifier interface {
 	Verify(ctx context.Context, userID uuid.UUID, code string) (bool, error)
 }
 
+// SecurityAlerter delivers "something security-relevant happened to your
+// account" notices (email + in-app notification). Calls are best-effort — the
+// implementation logs and swallows failures — so they never affect the security
+// operation that triggered them. The same port is shared with the MFA service.
+type SecurityAlerter interface {
+	PasswordChanged(ctx context.Context, userID uuid.UUID)
+	MfaEnabled(ctx context.Context, userID uuid.UUID)
+	MfaDisabled(ctx context.Context, userID uuid.UUID)
+}
+
 // Service provides the orchestration layer for auth business logic.
 type Service struct {
 	store             UserStore
@@ -204,6 +214,7 @@ type Service struct {
 	appBaseURL        string
 	auditRecorder     AuditRecorder
 	mfaVerifier       MfaVerifier
+	securityAlerter   SecurityAlerter
 	now               func() time.Time
 
 	maxFailedLoginAttempts int
@@ -277,6 +288,17 @@ func WithMfaVerifier(verifier MfaVerifier) Option {
 	return func(s *Service) {
 		if verifier != nil {
 			s.mfaVerifier = verifier
+		}
+	}
+}
+
+// WithSecurityAlerter enables best-effort security alerts (email + in-app
+// notification) on sensitive account changes. Without it, those changes still
+// succeed and are audited — they just send no alert.
+func WithSecurityAlerter(alerter SecurityAlerter) Option {
+	return func(s *Service) {
+		if alerter != nil {
+			s.securityAlerter = alerter
 		}
 	}
 }
@@ -1129,7 +1151,7 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 
 	now := s.now().UTC().Truncate(time.Microsecond)
 	if s.unitOfWork != nil {
-		return s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
+		if err := s.unitOfWork.Do(ctx, func(ctx context.Context, deps WorkDeps) error {
 			if deps.Users == nil {
 				return fmt.Errorf("auth: unit of work missing user store")
 			}
@@ -1144,7 +1166,11 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 			// Record inside the transaction so the password change and its audit
 			// trail commit or roll back together — no un-audited password change.
 			return recordAuthEventTx(ctx, deps.Audit, EventAuthPasswordChanged, "Auth password changed.", AuditMetadata{UserID: userID.String()})
-		})
+		}); err != nil {
+			return err
+		}
+		s.alertPasswordChanged(ctx, userID)
+		return nil
 	}
 
 	if err := s.store.UpdateUserPassword(ctx, userID, newHash, now); err != nil {
@@ -1156,7 +1182,16 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 		}
 	}
 	s.recordPasswordChanged(ctx, AuditMetadata{UserID: userID.String()})
+	s.alertPasswordChanged(ctx, userID)
 	return nil
+}
+
+// alertPasswordChanged fires the best-effort "your password was changed"
+// security alert (email + in-app notification) once the change is durable.
+func (s *Service) alertPasswordChanged(ctx context.Context, userID uuid.UUID) {
+	if s.securityAlerter != nil {
+		s.securityAlerter.PasswordChanged(ctx, userID)
+	}
 }
 
 // VerifyPassword confirms rawPassword is the user's current password. It is the
@@ -1295,6 +1330,9 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPasswor
 		}
 		return err
 	}
+	// A reset-link password change is just as security-relevant as an in-app one,
+	// so it gets the same best-effort alert once the reset is durable.
+	s.alertPasswordChanged(ctx, authToken.UserID)
 	return nil
 }
 
