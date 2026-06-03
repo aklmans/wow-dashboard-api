@@ -58,11 +58,12 @@ type Store interface {
 
 // Service orchestrates MFA enrollment.
 type Service struct {
-	store  Store
-	cipher Cipher
-	audit  authservice.AuditRecorder
-	issuer string
-	now    func() time.Time
+	store   Store
+	cipher  Cipher
+	audit   authservice.AuditRecorder
+	alerter authservice.SecurityAlerter
+	issuer  string
+	now     func() time.Time
 }
 
 // SetupResult is returned from Setup so the client can render the QR / manual key.
@@ -79,6 +80,16 @@ func WithAuditRecorder(r authservice.AuditRecorder) Option {
 	return func(s *Service) {
 		if r != nil {
 			s.audit = r
+		}
+	}
+}
+
+// WithSecurityAlerter enables best-effort security alerts (email + in-app
+// notification) when MFA is enabled or disabled.
+func WithSecurityAlerter(alerter authservice.SecurityAlerter) Option {
+	return func(s *Service) {
+		if alerter != nil {
+			s.alerter = alerter
 		}
 	}
 }
@@ -191,6 +202,9 @@ func (s *Service) Confirm(ctx context.Context, userID uuid.UUID, code string) ([
 	}
 
 	s.recordAudit(ctx, authservice.EventAuthMfaEnabled, userID)
+	if s.alerter != nil {
+		s.alerter.MfaEnabled(ctx, userID)
+	}
 	return rawCodes, nil
 }
 
@@ -242,6 +256,9 @@ func (s *Service) Disable(ctx context.Context, userID uuid.UUID, code string) er
 		return err
 	}
 	s.recordAudit(ctx, authservice.EventAuthMfaDisabled, userID)
+	if s.alerter != nil {
+		s.alerter.MfaDisabled(ctx, userID)
+	}
 	return nil
 }
 

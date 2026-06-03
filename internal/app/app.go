@@ -31,6 +31,7 @@ import (
 	"github.com/aklmans/wow-dashboard-api/internal/observability"
 	projectservice "github.com/aklmans/wow-dashboard-api/internal/projects/service"
 	rolesservice "github.com/aklmans/wow-dashboard-api/internal/roles/service"
+	"github.com/aklmans/wow-dashboard-api/internal/securityalerts"
 	"github.com/aklmans/wow-dashboard-api/internal/store"
 	"github.com/aklmans/wow-dashboard-api/internal/store/authrepo"
 	"github.com/aklmans/wow-dashboard-api/internal/store/notificationsrepo"
@@ -249,12 +250,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	authTokenStore := authrepo.NewAuthTokenStore(queries)
 	unitOfWork := authrepo.NewUnitOfWork(pool)
 	auditRecorder := authrepo.NewSystemEventRecorder(queries)
+	notificationsSvc := notificationsservice.NewService(notificationsrepo.NewNotificationStore(queries))
+	// Security alerts: email (queued via River) + in-app notification on sensitive
+	// account changes. Shared by the auth and MFA services; resolves the user's
+	// email from their id via the auth user store.
+	securityAlerter := securityalerts.NewNotifier(authStore, emailSender, notificationsSvc, cfg.AppName)
 	mfaCipher, err := appcrypto.NewCipher(cfg.MfaEncryptionKey)
 	if err != nil {
 		return fmt.Errorf("app: mfa cipher: %w", err)
 	}
 	mfaSvc := mfaservice.NewService(authrepo.NewMfaStore(pool), mfaCipher, cfg.AppName,
-		mfaservice.WithAuditRecorder(auditRecorder))
+		mfaservice.WithAuditRecorder(auditRecorder),
+		mfaservice.WithSecurityAlerter(securityAlerter))
 	authSvc := authservice.NewService(authStore, tokenManager,
 		authservice.WithRefreshTokenStore(refreshTokenStore, cfg.RefreshTokenTTL()),
 		authservice.WithUnitOfWork(unitOfWork),
@@ -263,7 +270,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		authservice.WithEmailSender(emailSender),
 		authservice.WithAppBaseURL(cfg.AppBaseURL),
 		authservice.WithLockoutPolicy(cfg.AuthMaxFailedLoginAttempts, cfg.AuthAccountLockoutWindow()),
-		authservice.WithMfaVerifier(mfaSvc))
+		authservice.WithMfaVerifier(mfaSvc),
+		authservice.WithSecurityAlerter(securityAlerter))
 	usersSvc := userservice.NewService(usersrepo.NewUserStore(pool),
 		userservice.WithAuditRecorder(usersrepo.NewSystemEventRecorder(queries)),
 		userservice.WithUnitOfWork(usersrepo.NewUnitOfWork(pool)))
@@ -274,7 +282,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		projectservice.WithAuditRecorder(projectsrepo.NewSystemEventRecorder(queries)),
 		projectservice.WithUnitOfWork(projectsrepo.NewUnitOfWork(pool)))
 	systemEventsSvc := systemeventsservice.NewService(systemeventsrepo.NewEventStore(queries))
-	notificationsSvc := notificationsservice.NewService(notificationsrepo.NewNotificationStore(queries))
 	rateLimitConfig := httpmiddleware.RateLimitConfig{
 		Enabled:  cfg.AuthRateLimitEnabled,
 		Requests: cfg.AuthRateLimitRequests,

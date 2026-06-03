@@ -213,6 +213,48 @@ func contains(s []string, v string) bool {
 	return false
 }
 
+type fakeMfaAlerter struct {
+	enabled  int
+	disabled int
+}
+
+func (f *fakeMfaAlerter) PasswordChanged(context.Context, uuid.UUID) {}
+func (f *fakeMfaAlerter) MfaEnabled(_ context.Context, _ uuid.UUID)  { f.enabled++ }
+func (f *fakeMfaAlerter) MfaDisabled(_ context.Context, _ uuid.UUID) { f.disabled++ }
+
+func TestMfaAlertsOnEnableAndDisable(t *testing.T) {
+	store := &fakeStore{}
+	alerter := &fakeMfaAlerter{}
+	cipher, err := crypto.NewCipher(testKey)
+	if err != nil {
+		t.Fatalf("NewCipher: %v", err)
+	}
+	svc := service.NewService(store, cipher, "WOW Dashboard",
+		service.WithClock(func() time.Time { return fixedNow }),
+		service.WithSecurityAlerter(alerter))
+	userID := uuid.New()
+
+	setup, err := svc.Setup(context.Background(), userID, "demo@example.com")
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	code, _ := totp.GenerateCode(setup.Secret, fixedNow)
+	if _, err := svc.Confirm(context.Background(), userID, code); err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if alerter.enabled != 1 {
+		t.Fatalf("MfaEnabled alerts = %d, want 1 after confirm", alerter.enabled)
+	}
+
+	code, _ = totp.GenerateCode(setup.Secret, fixedNow)
+	if err := svc.Disable(context.Background(), userID, code); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if alerter.disabled != 1 {
+		t.Fatalf("MfaDisabled alerts = %d, want 1 after disable", alerter.disabled)
+	}
+}
+
 // --- fake store ---
 
 type fakeStore struct {
