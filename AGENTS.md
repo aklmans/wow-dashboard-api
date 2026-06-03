@@ -221,3 +221,7 @@ integration checks were skipped.
 - Keep commits focused on one coherent change.
 - PR summaries should include behavior changes, API contract changes, migration impact, test evidence, and deployment/config notes.
 - Preserve unrelated user changes. Do not rewrite history or remove local files unless explicitly asked.
+
+## Language
+
+Develop in English: code, comments, identifiers, commit messages, and PR descriptions all match the codebase's English. When reporting back to the maintainer in chat, reply in Chinese (中文).
