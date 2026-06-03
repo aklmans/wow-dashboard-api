@@ -620,9 +620,9 @@ func TestServiceSignInAlertsOnNewDevice(t *testing.T) {
 		}
 	}
 
-	t.Run("alerts when the device is not among the user's other active sessions", func(t *testing.T) {
-		// Only the just-created session uses this User-Agent.
-		refreshStore := &unitRefreshTokenStore{listSessions: []domain.RefreshToken{{UserAgent: "NewUA/1.0"}}}
+	t.Run("alerts when no existing active session uses the device", func(t *testing.T) {
+		// The user's existing sessions are all on a different device.
+		refreshStore := &unitRefreshTokenStore{listSessions: []domain.RefreshToken{{UserAgent: "OtherDevice/9"}}}
 		alerter := &fakeSecurityAlerter{}
 		signIn(t, refreshStore, alerter, "NewUA/1.0")
 
@@ -635,10 +635,8 @@ func TestServiceSignInAlertsOnNewDevice(t *testing.T) {
 	})
 
 	t.Run("does not alert for a known device", func(t *testing.T) {
-		// A prior active session already uses this User-Agent (plus the new one).
-		refreshStore := &unitRefreshTokenStore{listSessions: []domain.RefreshToken{
-			{UserAgent: "KnownUA/1.0"}, {UserAgent: "KnownUA/1.0"},
-		}}
+		// A prior active session already uses this device's User-Agent.
+		refreshStore := &unitRefreshTokenStore{listSessions: []domain.RefreshToken{{UserAgent: "KnownUA/1.0"}}}
 		alerter := &fakeSecurityAlerter{}
 		signIn(t, refreshStore, alerter, "KnownUA/1.0")
 

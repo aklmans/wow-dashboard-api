@@ -620,6 +620,9 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		slog.ErrorContext(ctx, "failed to record successful sign-in", "error", cerr)
 	}
 
+	// Decide "is this a new device?" against the user's sessions BEFORE issuing the
+	// new one (see isNewDeviceSignIn for why the order matters).
+	newDevice := s.isNewDeviceSignIn(ctx, user.User.ID)
 	session, err := s.issueSession(ctx, user.User, uuid.Nil)
 	if err != nil {
 		s.recordSignInFailed(ctx, AuditMetadata{
@@ -633,7 +636,9 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		Email:  session.User.Email,
 		UserID: session.User.ID,
 	})
-	s.alertNewDeviceSignIn(ctx, user.User.ID)
+	if newDevice {
+		s.alertNewDeviceSignIn(ctx, user.User.ID)
+	}
 	return session, nil
 }
 
@@ -702,13 +707,17 @@ func (s *Service) CompleteMfaSignIn(ctx context.Context, rawPendingToken string,
 	if cerr := s.store.ClearLoginFailures(ctx, userID, now); cerr != nil {
 		slog.ErrorContext(ctx, "failed to clear login failures after mfa", "error", cerr)
 	}
+	// New-device check before issuing the session — see isNewDeviceSignIn.
+	newDevice := s.isNewDeviceSignIn(ctx, user.User.ID)
 	session, err := s.issueSession(ctx, user.User, uuid.Nil)
 	if err != nil {
 		s.recordSignInFailed(ctx, AuditMetadata{UserID: userIDStr, Reason: AuditReasonInternalError})
 		return nil, fmt.Errorf("auth: failed to issue session: %w", err)
 	}
 	s.recordSignInSucceeded(ctx, AuditMetadata{Email: session.User.Email, UserID: session.User.ID})
-	s.alertNewDeviceSignIn(ctx, user.User.ID)
+	if newDevice {
+		s.alertNewDeviceSignIn(ctx, user.User.ID)
+	}
 	return session, nil
 }
 
@@ -1199,37 +1208,43 @@ func (s *Service) alertPasswordChanged(ctx context.Context, userID uuid.UUID) {
 	}
 }
 
-// alertNewDeviceSignIn fires a best-effort "new sign-in" alert when the device
-// (User-Agent) that just signed in is not already among the user's other active
-// sessions. Called after the new session is persisted, so the user's freshly
-// created session is included in the list — a brand-new device is therefore the
-// only active session with that User-Agent. No-op without an alerter, a session
-// store, or a usable User-Agent (an empty UA can't identify a device).
-func (s *Service) alertNewDeviceSignIn(ctx context.Context, userID uuid.UUID) {
+// isNewDeviceSignIn reports whether the signing-in device (User-Agent) is NOT
+// among the user's existing active sessions. It is evaluated BEFORE the new
+// session is issued, on purpose: if it ran afterwards, two concurrent sign-ins
+// from the same new browser would each see the other's freshly created row and
+// both stay silent. Checking the prior state means at least one of them observes
+// no match and alerts (the email queue dedupes any resulting duplicate). No-op
+// conditions (no alerter/session store, or an empty User-Agent that can't
+// identify a device) return false.
+func (s *Service) isNewDeviceSignIn(ctx context.Context, userID uuid.UUID) bool {
 	if s.securityAlerter == nil || s.refreshTokenStore == nil {
-		return
+		return false
 	}
 	client := authctx.ClientInfoFrom(ctx)
 	if strings.TrimSpace(client.UserAgent) == "" {
-		return
+		return false
 	}
-
 	sessions, err := s.refreshTokenStore.ListActiveSessions(ctx, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "new-device sign-in check: failed to list sessions", "error", err)
-		return
+		return false
 	}
-	matches := 0
 	for _, sess := range sessions {
 		if sess.UserAgent == client.UserAgent {
-			matches++
+			return false // a prior active session already uses this device
 		}
 	}
-	// Exactly one match is the session we just created — i.e. a new device. More
-	// than one means a prior active session already used this device.
-	if matches <= 1 {
-		s.securityAlerter.NewSignIn(ctx, userID, client.UserAgent, client.IPAddress)
+	return true
+}
+
+// alertNewDeviceSignIn fires the best-effort new-device "new sign-in" alert.
+// Pair it with an isNewDeviceSignIn check taken before the session was issued.
+func (s *Service) alertNewDeviceSignIn(ctx context.Context, userID uuid.UUID) {
+	if s.securityAlerter == nil {
+		return
 	}
+	client := authctx.ClientInfoFrom(ctx)
+	s.securityAlerter.NewSignIn(ctx, userID, client.UserAgent, client.IPAddress)
 }
 
 // VerifyPassword confirms rawPassword is the user's current password. It is the
