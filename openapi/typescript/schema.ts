@@ -248,6 +248,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/security-activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my recent security activity
+         * @description Returns the signed-in user's own recent auth events — sign-ins (and failed attempts), password and MFA changes, and session revocations — newest first.
+         */
+        get: operations["get-auth-security-activity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/sessions": {
         parameters: {
             query?: never;
@@ -1420,6 +1440,50 @@ export interface components {
             /** @description All roles */
             roles: components["schemas"]["RoleBody"][];
         };
+        SecurityActivityBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/schemas/SecurityActivityBody.json
+             */
+            readonly $schema?: string;
+            /** @description Your recent security events, newest first */
+            events: components["schemas"]["SecurityActivityItem"][];
+            /**
+             * Format: int64
+             * @description Requested event limit after defaulting
+             * @example 20
+             */
+            limit: number;
+            /** @description Opaque cursor for the next page; absent when there are no more events */
+            nextCursor?: string;
+        };
+        SecurityActivityItem: {
+            /**
+             * Format: date-time
+             * @description When the event occurred
+             */
+            createdAt: string;
+            /**
+             * @description Stable auth event type
+             * @example auth.sign_in.succeeded
+             */
+            eventType: string;
+            /**
+             * @description Event identifier
+             * @example c8a89c0b-8e75-4e61-9fa0-70fb83554e66
+             */
+            id: string;
+            /**
+             * @description Safe human-readable message
+             * @example Auth sign-in succeeded.
+             */
+            message: string;
+            /** @description Safe metadata: masked email, reason, request id */
+            metadata: {
+                [key: string]: unknown;
+            };
+        };
         SessionItem: {
             /**
              * Format: date-time
@@ -2177,6 +2241,39 @@ export interface operations {
             };
             401: components["responses"]["APIError"];
             422: components["responses"]["APIError"];
+            500: components["responses"]["APIError"];
+        };
+    };
+    "get-auth-security-activity": {
+        parameters: {
+            query?: {
+                /** @description Maximum events per page; defaults to 20 and must not exceed 100 */
+                limit?: number;
+                /** @description Opaque pagination cursor from a previous response's nextCursor; returns the next page of older events */
+                cursor?: string;
+            };
+            header?: {
+                /** @description Bearer access token */
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityActivityBody"];
+                };
+            };
+            401: components["responses"]["APIError"];
+            403: components["responses"]["APIError"];
+            422: components["responses"]["APIError"];
+            429: components["responses"]["APIError"];
             500: components["responses"]["APIError"];
         };
     };

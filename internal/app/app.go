@@ -51,6 +51,7 @@ type Dependencies struct {
 	RolesService            handlers.RolesService
 	ProjectsService         handlers.ProjectsService
 	SystemEventsService     handlers.SystemEventsService
+	SecurityActivityService handlers.SecurityActivityService
 	NotificationsService    handlers.NotificationsService
 	RefreshCookie           handlers.RefreshCookieConfig
 	AccessCookie            handlers.AccessCookieConfig
@@ -70,6 +71,9 @@ func RegisterRoutes(api huma.API, deps Dependencies) {
 		handlers.RegisterAuthWithCookies(api, deps.AuthService, deps.RefreshCookie, deps.AccessCookie, authMiddlewares...)
 		if deps.MfaService != nil {
 			handlers.RegisterMfa(api, deps.AuthService, deps.MfaService, authMiddlewares...)
+		}
+		if deps.SecurityActivityService != nil {
+			handlers.RegisterSecurityActivity(api, deps.AuthService, deps.SecurityActivityService, authMiddlewares...)
 		}
 	}
 	if deps.AuthService != nil && deps.UsersService != nil {
@@ -293,6 +297,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		RolesService:            rolesSvc,
 		ProjectsService:         projectsSvc,
 		SystemEventsService:     systemEventsSvc,
+		SecurityActivityService: systemEventsSvc,
 		NotificationsService:    notificationsSvc,
 		RefreshCookie:           refreshCookieConfig(cfg),
 		AccessCookie:            accessCookieConfig(cfg),

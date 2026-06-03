@@ -34,14 +34,15 @@ func main() {
 	api := app.NewAPI(router, true)
 
 	app.RegisterRoutes(api, app.Dependencies{
-		AuthService:          openAPIAuthService{},
-		MfaService:           openAPIMfaService{},
-		UsersService:         openAPIUsersService{},
-		RolesService:         openAPIRolesService{},
-		ProjectsService:      openAPIProjectsService{},
-		SystemEventsService:  openAPISystemEventsService{},
-		NotificationsService: openAPINotificationsService{},
-		ReadyChecker:         openAPIReadyChecker{},
+		AuthService:             openAPIAuthService{},
+		MfaService:              openAPIMfaService{},
+		UsersService:            openAPIUsersService{},
+		RolesService:            openAPIRolesService{},
+		ProjectsService:         openAPIProjectsService{},
+		SystemEventsService:     openAPISystemEventsService{},
+		SecurityActivityService: openAPISystemEventsService{},
+		NotificationsService:    openAPINotificationsService{},
+		ReadyChecker:            openAPIReadyChecker{},
 	})
 
 	spec := api.OpenAPI()
@@ -243,6 +244,10 @@ func (openAPIProjectsService) RemoveMember(context.Context, string, string, stri
 }
 
 func (openAPISystemEventsService) ListEvents(context.Context, systemeventsservice.ListEventsInput) (systemeventsdomain.ListEventsResult, error) {
+	return systemeventsdomain.ListEventsResult{}, nil
+}
+
+func (openAPISystemEventsService) ListUserActivity(context.Context, systemeventsservice.ListUserActivityInput) (systemeventsdomain.ListEventsResult, error) {
 	return systemeventsdomain.ListEventsResult{}, nil
 }
 
