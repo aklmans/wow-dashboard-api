@@ -218,9 +218,10 @@ type fakeMfaAlerter struct {
 	disabled int
 }
 
-func (f *fakeMfaAlerter) PasswordChanged(context.Context, uuid.UUID) {}
-func (f *fakeMfaAlerter) MfaEnabled(_ context.Context, _ uuid.UUID)  { f.enabled++ }
-func (f *fakeMfaAlerter) MfaDisabled(_ context.Context, _ uuid.UUID) { f.disabled++ }
+func (f *fakeMfaAlerter) PasswordChanged(context.Context, uuid.UUID)           {}
+func (f *fakeMfaAlerter) MfaEnabled(_ context.Context, _ uuid.UUID)            { f.enabled++ }
+func (f *fakeMfaAlerter) MfaDisabled(_ context.Context, _ uuid.UUID)           { f.disabled++ }
+func (f *fakeMfaAlerter) NewSignIn(context.Context, uuid.UUID, string, string) {}
 
 func TestMfaAlertsOnEnableAndDisable(t *testing.T) {
 	store := &fakeStore{}

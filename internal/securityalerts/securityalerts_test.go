@@ -103,6 +103,28 @@ func TestNotifierMfaDisabled(t *testing.T) {
 	}
 }
 
+func TestNotifierNewSignIn(t *testing.T) {
+	userID := uuid.New()
+	mailer := &fakeEmail{}
+	notifs := &fakeNotifications{}
+	n := securityalerts.NewNotifier(
+		fakeUserLookup{user: authdomain.User{ID: userID, Email: "demo@example.com", DisplayName: "Demo"}},
+		mailer, notifs, "WOW Dashboard")
+
+	n.NewSignIn(context.Background(), userID, "Mozilla/5.0 Chrome/120", "203.0.113.7")
+
+	if len(mailer.sent) != 1 || mailer.sent[0].Subject != "New sign-in to your account" {
+		t.Fatalf("email = %#v, want the new-sign-in subject", mailer.sent)
+	}
+	if !strings.Contains(mailer.sent[0].Body, "Mozilla/5.0 Chrome/120") ||
+		!strings.Contains(mailer.sent[0].Body, "203.0.113.7") {
+		t.Errorf("body missing device/IP details: %q", mailer.sent[0].Body)
+	}
+	if len(notifs.created) != 1 || notifs.created[0].Type != "auth.sign_in.new_device" {
+		t.Fatalf("notification = %#v, want auth.sign_in.new_device", notifs.created)
+	}
+}
+
 func TestNotifierSkipsEverythingWhenUserLookupFails(t *testing.T) {
 	mailer := &fakeEmail{}
 	notifs := &fakeNotifications{}

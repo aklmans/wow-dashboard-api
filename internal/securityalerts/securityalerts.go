@@ -98,6 +98,30 @@ func (n *Notifier) MfaDisabled(ctx context.Context, userID uuid.UUID) {
 	})
 }
 
+// NewSignIn alerts the user that their account was signed in to from a device
+// (User-Agent) not seen among their other active sessions.
+func (n *Notifier) NewSignIn(ctx context.Context, userID uuid.UUID, userAgent, ipAddress string) {
+	device := strings.TrimSpace(userAgent)
+	if device == "" {
+		device = "an unrecognised device"
+	}
+	ipLine := ""
+	if ip := strings.TrimSpace(ipAddress); ip != "" {
+		ipLine = "\nIP address: " + ip
+	}
+	n.deliver(ctx, userID, alert{
+		subject: "New sign-in to your account",
+		body: fmt.Sprintf("Your %s account was just signed in to from a device we haven't seen before.\n\n"+
+			"Device: %s%s\n\n"+
+			"If this was you, no action is needed. If it wasn't, reset your password "+
+			"immediately and review your active sessions in your account settings.",
+			n.appName, device, ipLine),
+		notifType:  "auth.sign_in.new_device",
+		notifTitle: "New sign-in",
+		notifBody:  "A new device signed in to your account.",
+	})
+}
+
 func (n *Notifier) deliver(ctx context.Context, userID uuid.UUID, a alert) {
 	user, err := n.users.GetUserByID(ctx, userID)
 	if err != nil {

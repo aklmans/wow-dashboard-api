@@ -200,6 +200,9 @@ type SecurityAlerter interface {
 	PasswordChanged(ctx context.Context, userID uuid.UUID)
 	MfaEnabled(ctx context.Context, userID uuid.UUID)
 	MfaDisabled(ctx context.Context, userID uuid.UUID)
+	// NewSignIn alerts the user that their account was signed in to from a device
+	// (User-Agent) not seen among their other active sessions.
+	NewSignIn(ctx context.Context, userID uuid.UUID, userAgent, ipAddress string)
 }
 
 // Service provides the orchestration layer for auth business logic.
@@ -630,6 +633,7 @@ func (s *Service) SignIn(ctx context.Context, input SignInInput) (*Session, erro
 		Email:  session.User.Email,
 		UserID: session.User.ID,
 	})
+	s.alertNewDeviceSignIn(ctx, user.User.ID)
 	return session, nil
 }
 
@@ -704,6 +708,7 @@ func (s *Service) CompleteMfaSignIn(ctx context.Context, rawPendingToken string,
 		return nil, fmt.Errorf("auth: failed to issue session: %w", err)
 	}
 	s.recordSignInSucceeded(ctx, AuditMetadata{Email: session.User.Email, UserID: session.User.ID})
+	s.alertNewDeviceSignIn(ctx, user.User.ID)
 	return session, nil
 }
 
@@ -1191,6 +1196,39 @@ func (s *Service) ChangePassword(ctx context.Context, rawAccessToken string, cur
 func (s *Service) alertPasswordChanged(ctx context.Context, userID uuid.UUID) {
 	if s.securityAlerter != nil {
 		s.securityAlerter.PasswordChanged(ctx, userID)
+	}
+}
+
+// alertNewDeviceSignIn fires a best-effort "new sign-in" alert when the device
+// (User-Agent) that just signed in is not already among the user's other active
+// sessions. Called after the new session is persisted, so the user's freshly
+// created session is included in the list — a brand-new device is therefore the
+// only active session with that User-Agent. No-op without an alerter, a session
+// store, or a usable User-Agent (an empty UA can't identify a device).
+func (s *Service) alertNewDeviceSignIn(ctx context.Context, userID uuid.UUID) {
+	if s.securityAlerter == nil || s.refreshTokenStore == nil {
+		return
+	}
+	client := authctx.ClientInfoFrom(ctx)
+	if strings.TrimSpace(client.UserAgent) == "" {
+		return
+	}
+
+	sessions, err := s.refreshTokenStore.ListActiveSessions(ctx, userID)
+	if err != nil {
+		slog.ErrorContext(ctx, "new-device sign-in check: failed to list sessions", "error", err)
+		return
+	}
+	matches := 0
+	for _, sess := range sessions {
+		if sess.UserAgent == client.UserAgent {
+			matches++
+		}
+	}
+	// Exactly one match is the session we just created — i.e. a new device. More
+	// than one means a prior active session already used this device.
+	if matches <= 1 {
+		s.securityAlerter.NewSignIn(ctx, userID, client.UserAgent, client.IPAddress)
 	}
 }
 
