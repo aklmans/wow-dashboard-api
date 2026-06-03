@@ -38,3 +38,14 @@ type ListEventsResult struct {
 	// returned the extra probe row).
 	HasMore bool
 }
+
+// ListUserActivityInput scopes the audit log to a single user's own auth events
+// (the "security activity" feed), keyset-paginated newest first.
+type ListUserActivityInput struct {
+	UserID uuid.UUID
+	// Limit is the SQL row limit to fetch (the service adds one probe row).
+	Limit int
+	// CursorCreatedAt / CursorID page strictly past a previous page's last row.
+	CursorCreatedAt *time.Time
+	CursorID        *uuid.UUID
+}

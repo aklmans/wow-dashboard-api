@@ -1408,6 +1408,88 @@
         ],
         "type": "object"
       },
+      "SecurityActivityBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/schemas/SecurityActivityBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "events": {
+            "description": "Your recent security events, newest first",
+            "items": {
+              "$ref": "#/components/schemas/SecurityActivityItem"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "description": "Requested event limit after defaulting",
+            "examples": [
+              20
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "nextCursor": {
+            "description": "Opaque cursor for the next page; absent when there are no more events",
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "SecurityActivityItem": {
+        "additionalProperties": false,
+        "properties": {
+          "createdAt": {
+            "description": "When the event occurred",
+            "format": "date-time",
+            "type": "string"
+          },
+          "eventType": {
+            "description": "Stable auth event type",
+            "examples": [
+              "auth.sign_in.succeeded"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Event identifier",
+            "examples": [
+              "c8a89c0b-8e75-4e61-9fa0-70fb83554e66"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "description": "Safe human-readable message",
+            "examples": [
+              "Auth sign-in succeeded."
+            ],
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {},
+            "description": "Safe metadata: masked email, reason, request id",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "message",
+          "metadata",
+          "createdAt"
+        ],
+        "type": "object"
+      },
       "SessionItem": {
         "additionalProperties": false,
         "properties": {
@@ -2776,6 +2858,84 @@
           }
         },
         "summary": "Reset a password with a token",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/auth/security-activity": {
+      "get": {
+        "description": "Returns the signed-in user's own recent auth events — sign-ins (and failed attempts), password and MFA changes, and session revocations — newest first.",
+        "operationId": "get-auth-security-activity",
+        "parameters": [
+          {
+            "description": "Bearer access token",
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "description": "Bearer access token",
+              "examples": [
+                "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum events per page; defaults to 20 and must not exceed 100",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 20,
+              "description": "Maximum events per page; defaults to 20 and must not exceed 100",
+              "examples": [
+                20
+              ],
+              "format": "int64",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque pagination cursor from a previous response's nextCursor; returns the next page of older events",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque pagination cursor from a previous response's nextCursor; returns the next page of older events",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityActivityBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "403": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "422": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "429": {
+            "$ref": "#/components/responses/APIError"
+          },
+          "500": {
+            "$ref": "#/components/responses/APIError"
+          }
+        },
+        "summary": "List my recent security activity",
         "tags": [
           "Auth"
         ]

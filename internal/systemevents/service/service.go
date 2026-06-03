@@ -34,8 +34,18 @@ type ListEventsInput struct {
 	CursorID        *uuid.UUID
 }
 
+// ListUserActivityInput scopes the activity feed to one user's own auth events.
+type ListUserActivityInput struct {
+	UserID          uuid.UUID
+	Limit           int
+	LimitProvided   bool
+	CursorCreatedAt *time.Time
+	CursorID        *uuid.UUID
+}
+
 type EventStore interface {
 	ListEvents(ctx context.Context, input domain.ListEventsInput) (domain.ListEventsResult, error)
+	ListUserActivity(ctx context.Context, input domain.ListUserActivityInput) (domain.ListEventsResult, error)
 }
 
 type Service struct {
@@ -51,7 +61,7 @@ func (s *Service) ListEvents(ctx context.Context, input ListEventsInput) (domain
 		return domain.ListEventsResult{}, fmt.Errorf("systemevents: store is nil")
 	}
 
-	limit, err := normalizeLimit(input)
+	limit, err := normalizeLimit(input.Limit, input.LimitProvided)
 	if err != nil {
 		return domain.ListEventsResult{}, err
 	}
@@ -85,6 +95,40 @@ func (s *Service) ListEvents(ctx context.Context, input ListEventsInput) (domain
 	return result, nil
 }
 
+// ListUserActivity returns one user's own auth audit events (their "security
+// activity"), keyset-paginated newest first, with the same probe-row HasMore
+// detection as ListEvents.
+func (s *Service) ListUserActivity(ctx context.Context, input ListUserActivityInput) (domain.ListEventsResult, error) {
+	if s.store == nil {
+		return domain.ListEventsResult{}, fmt.Errorf("systemevents: store is nil")
+	}
+
+	limit, err := normalizeLimit(input.Limit, input.LimitProvided)
+	if err != nil {
+		return domain.ListEventsResult{}, err
+	}
+
+	result, err := s.store.ListUserActivity(ctx, domain.ListUserActivityInput{
+		UserID:          input.UserID,
+		Limit:           limit + 1,
+		CursorCreatedAt: input.CursorCreatedAt,
+		CursorID:        input.CursorID,
+	})
+	if err != nil {
+		return domain.ListEventsResult{}, err
+	}
+
+	if len(result.Events) > limit {
+		result.Events = result.Events[:limit]
+		result.HasMore = true
+	}
+	result.Limit = limit
+	if result.Events == nil {
+		result.Events = []domain.Event{}
+	}
+	return result, nil
+}
+
 func normalizeEventType(value string) *string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -93,12 +137,12 @@ func normalizeEventType(value string) *string {
 	return &value
 }
 
-func normalizeLimit(input ListEventsInput) (int, error) {
-	if !input.LimitProvided {
+func normalizeLimit(limit int, provided bool) (int, error) {
+	if !provided {
 		return defaultListLimit, nil
 	}
-	if input.Limit < 1 || input.Limit > maxListLimit {
+	if limit < 1 || limit > maxListLimit {
 		return 0, fmt.Errorf("%w: limit must be between 1 and %d", ErrInvalidInput, maxListLimit)
 	}
-	return input.Limit, nil
+	return limit, nil
 }

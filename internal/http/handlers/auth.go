@@ -463,7 +463,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *sessionsListInput) (*sessionsListResponse, error) {
-		userID, authErr := currentUserID(ctx, authSvc, input.Authorization)
+		userID, authErr := currentUserID(ctx, authSvc, input.Authorization, "Sessions cannot be managed while impersonating a user.")
 		if authErr != nil {
 			return nil, authErr
 		}
@@ -493,7 +493,7 @@ func RegisterAuthWithCookies(api huma.API, authSvc AuthService, refreshCookie Re
 			http.StatusInternalServerError,
 		),
 	}, func(ctx context.Context, input *revokeSessionInput) (*authSuccessResponse, error) {
-		userID, authErr := currentUserID(ctx, authSvc, input.Authorization)
+		userID, authErr := currentUserID(ctx, authSvc, input.Authorization, "Sessions cannot be managed while impersonating a user.")
 		if authErr != nil {
 			return nil, authErr
 		}
@@ -951,8 +951,10 @@ func mapAuthError(ctx context.Context, err error) huma.StatusError {
 }
 
 // currentUserID resolves the signed-in user's id from the bearer access token,
-// for endpoints scoped to the current user.
-func currentUserID(ctx context.Context, authSvc AuthService, authHeader string) (uuid.UUID, huma.StatusError) {
+// for endpoints scoped to the current user. impersonationMessage is the 403 shown
+// when an impersonation session reaches the endpoint — an admin acting as another
+// user must not manage or view that user's personal security state.
+func currentUserID(ctx context.Context, authSvc AuthService, authHeader, impersonationMessage string) (uuid.UUID, huma.StatusError) {
 	rawAccessToken, ok := parseBearerToken(authHeader)
 	if !ok {
 		return uuid.Nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
@@ -964,10 +966,10 @@ func currentUserID(ctx context.Context, authSvc AuthService, authHeader string) 
 	if user == nil {
 		return uuid.Nil, apierror.Unauthorized("Authorization token missing or invalid.").ForContext(ctx)
 	}
-	// An impersonation session resolves to the target user; an admin must not be
-	// able to view or revoke the impersonated user's sessions.
+	// An impersonation session resolves to the target user; block it so the admin
+	// cannot act on the impersonated user's personal security state.
 	if user.ImpersonatorID != "" {
-		return uuid.Nil, apierror.Forbidden("Sessions cannot be managed while impersonating a user.").ForContext(ctx)
+		return uuid.Nil, apierror.Forbidden(impersonationMessage).ForContext(ctx)
 	}
 	id, parseErr := uuid.Parse(user.ID)
 	if parseErr != nil {

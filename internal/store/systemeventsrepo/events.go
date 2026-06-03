@@ -58,6 +58,32 @@ func (s *EventStore) ListEvents(ctx context.Context, input domain.ListEventsInpu
 	return domain.ListEventsResult{Events: events}, nil
 }
 
+func (s *EventStore) ListUserActivity(ctx context.Context, input domain.ListUserActivityInput) (domain.ListEventsResult, error) {
+	if s.queries == nil {
+		return domain.ListEventsResult{}, fmt.Errorf("systemeventsrepo: queries is nil")
+	}
+
+	rows, err := s.queries.ListUserSecurityActivityPage(ctx, query.ListUserSecurityActivityPageParams{
+		UserID:          input.UserID.String(),
+		CursorCreatedAt: pgTimestampPtr(input.CursorCreatedAt),
+		CursorID:        pgUUIDPtr(input.CursorID),
+		RowLimit:        int32(input.Limit),
+	})
+	if err != nil {
+		return domain.ListEventsResult{}, fmt.Errorf("systemeventsrepo: list user activity: %w", err)
+	}
+
+	events := make([]domain.Event, 0, len(rows))
+	for _, row := range rows {
+		event, convErr := eventFromRow(row)
+		if convErr != nil {
+			return domain.ListEventsResult{}, fmt.Errorf("systemeventsrepo: convert event: %w", convErr)
+		}
+		events = append(events, event)
+	}
+	return domain.ListEventsResult{Events: events}, nil
+}
+
 func pgTextPtr(s *string) pgtype.Text {
 	if s == nil {
 		return pgtype.Text{}

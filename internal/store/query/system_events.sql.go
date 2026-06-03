@@ -170,3 +170,58 @@ func (q *Queries) ListSystemEventsPage(ctx context.Context, arg ListSystemEvents
 	}
 	return items, nil
 }
+
+const listUserSecurityActivityPage = `-- name: ListUserSecurityActivityPage :many
+SELECT id, event_type, message, metadata, created_at
+FROM system_events
+WHERE event_type LIKE 'auth.%'
+  AND metadata ->> 'user_id' = $1::text
+  AND (
+    $2::timestamptz IS NULL
+    OR created_at < $2
+    OR (created_at = $2 AND id < $3)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+type ListUserSecurityActivityPageParams struct {
+	UserID          string
+	CursorCreatedAt pgtype.Timestamptz
+	CursorID        pgtype.UUID
+	RowLimit        int32
+}
+
+// Per-user "security activity": the user's own auth audit events (event_type
+// auth.*, scoped by metadata->>'user_id'), keyset-paginated newest first. One
+// extra row is fetched to detect whether a further page exists.
+func (q *Queries) ListUserSecurityActivityPage(ctx context.Context, arg ListUserSecurityActivityPageParams) ([]SystemEvent, error) {
+	rows, err := q.db.Query(ctx, listUserSecurityActivityPage,
+		arg.UserID,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SystemEvent
+	for rows.Next() {
+		var i SystemEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Message,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
