@@ -1427,9 +1427,11 @@ func TestServiceResetPassword(t *testing.T) {
 		store := &unitUserStore{}
 		tokens := &fakeAuthTokenStore{token: validToken()}
 		refreshStore := &unitRefreshTokenStore{}
+		alerter := &fakeSecurityAlerter{}
 		authSvc := service.NewService(store, &fakeTokenManager{},
 			service.WithAuthTokenStore(tokens),
-			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour))
+			service.WithRefreshTokenStore(refreshStore, 14*24*time.Hour),
+			service.WithSecurityAlerter(alerter))
 
 		if err := authSvc.ResetPassword(context.Background(), "raw-token", "new-password-123"); err != nil {
 			t.Fatalf("ResetPassword returned error: %v", err)
@@ -1442,6 +1444,10 @@ func TestServiceResetPassword(t *testing.T) {
 		}
 		if refreshStore.revokedAllForUser != userID {
 			t.Fatalf("revokedAllForUser = %s, want %s", refreshStore.revokedAllForUser, userID)
+		}
+		// A reset is a security-relevant password change → it alerts the user.
+		if len(alerter.passwordChanged) != 1 || alerter.passwordChanged[0] != userID {
+			t.Fatalf("password-changed alert = %v, want one for %s", alerter.passwordChanged, userID)
 		}
 	})
 

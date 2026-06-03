@@ -1330,6 +1330,9 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken string, newPasswor
 		}
 		return err
 	}
+	// A reset-link password change is just as security-relevant as an in-app one,
+	// so it gets the same best-effort alert once the reset is durable.
+	s.alertPasswordChanged(ctx, authToken.UserID)
 	return nil
 }
 
