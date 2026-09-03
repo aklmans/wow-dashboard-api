@@ -22,7 +22,7 @@ The project is an established, production-shaped service. Keep it small and focu
 
 Use this stack unless the user explicitly changes it:
 
-- Language/runtime: current stable Go, initial target `1.26.x`.
+- Language/runtime: current stable Go, target `1.27.x`.
 - HTTP: standard `net/http`, `chi` for routing/middleware, `Huma v2` for typed handlers, validation, and OpenAPI 3.1 generation.
 - Database: PostgreSQL.
 - DB driver/pool: `pgx/v5` and `pgxpool`.
