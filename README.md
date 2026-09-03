@@ -2,7 +2,7 @@
 
 Go API service for the Minimal Starter dashboard projects. Provides stable, typed, documented endpoints that the Next.js and Vite starter frontends can consume.
 
-**Stack:** Go 1.26 · chi · Huma v2 · PostgreSQL · sqlc · goose · JWT auth · Air
+**Stack:** Go 1.27 · chi · Huma v2 · PostgreSQL · sqlc · goose · JWT auth · Air
 
 Further documentation:
 
@@ -13,7 +13,7 @@ Further documentation:
 
 ## Prerequisites
 
-- **Go 1.26.x** – [golang.org/dl](https://go.dev/dl/)
+- **Go 1.27.x** – [golang.org/dl](https://go.dev/dl/)
 - **Air** – live-reload for local development
   ```sh
   go install github.com/air-verse/air@latest
